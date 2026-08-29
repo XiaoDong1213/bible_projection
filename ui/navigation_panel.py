@@ -49,6 +49,7 @@ class NavigationPanel(QWidget):
         grid.addWidget(QLabel("开始节"), 0, 1)
         grid.addWidget(QLabel("结束节"), 0, 2)
         self.chapter_spin = QSpinBox(); self.chapter_spin.setRange(1, 150)
+        self.chapter_spin.valueChanged.connect(self._on_chapter_changed)
         self.start_spin = QSpinBox(); self.start_spin.setRange(1, 176)
         self.end_spin = QSpinBox(); self.end_spin.setRange(1, 176)
         grid.addWidget(self.chapter_spin, 1, 0)
@@ -93,6 +94,16 @@ class NavigationPanel(QWidget):
         self.chapter_spin.setRange(1, max_ch)
         self.chapter_spin.setValue(1)
         max_v = max(1, self.db.get_verse_count(book, 1))
+        self.start_spin.setRange(1, max_v)
+        self.end_spin.setRange(1, max_v)
+        self.start_spin.setValue(1)
+        self.end_spin.setValue(min(5, max_v))
+
+    def _on_chapter_changed(self, chapter):
+        book = getattr(self, "selected_book", None)
+        if not book:
+            return
+        max_v = max(1, self.db.get_verse_count(book, chapter))
         self.start_spin.setRange(1, max_v)
         self.end_spin.setRange(1, max_v)
         self.start_spin.setValue(1)
