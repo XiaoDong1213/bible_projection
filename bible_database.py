@@ -56,6 +56,7 @@ class BibleDatabase:
                     if n.lower() in lower:
                         return lower[n.lower()]
                 return None
+            id_col = bc(["id", "ID", "编号"])
             short_col = bc(["ShortName", "short_name", "简称"])
             long_col = bc(["LongName", "long_name", "Book", "书卷", "书名"])
             count_col = bc(["ChapterCount", "chapter_count", "章节数"])
