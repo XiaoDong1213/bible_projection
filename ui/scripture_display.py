@@ -2,7 +2,7 @@
 # 经文显示核心控件：统一背景、字体、底注、滚动，并支持滚轮位置同步
 import os
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTextEdit, QFrame
-from PyQt6.QtCore import Qt, QTimer, QRect, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, QRect, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QColor, QPixmap, QFontMetrics, QPainter
 
 
@@ -38,6 +38,7 @@ class ScriptureDisplay(QWidget):
         self.footer_font_family = "微软雅黑"
 
         self.scroll_speed = 0
+        self._scroll_anim = None
         self.scroll_timer = QTimer(self)
         self.scroll_timer.timeout.connect(self._auto_scroll)
         self.scroll_timer.setInterval(30)
@@ -51,7 +52,8 @@ class ScriptureDisplay(QWidget):
         layout.setSpacing(0)
 
         self.title_bar = QLabel("")
-        self.title_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title_bar.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.title_bar.setIndent(24)
         self.title_bar.setFixedHeight(64)
         self.title_bar.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         layout.addWidget(self.title_bar)
@@ -69,16 +71,22 @@ class ScriptureDisplay(QWidget):
         self.text_display.verticalScrollBar().valueChanged.connect(self._on_scrollbar_changed)
         layout.addWidget(self.text_display, 1)
 
+        self.footer_label = QLabel(self)
+        self.footer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.footer_label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.footer_label.raise_()
+
     def set_scripture(self, book_name, chapter, start_verse, end_verse, verses):
         self.verses = list(verses or [])
+        unit = "篇" if book_name == "诗篇" else "章"
         if start_verse is None:
-            title_text = f"{book_name} 第 {chapter} 章"
+            title_text = f"{book_name}{chapter}{unit}"
         elif end_verse is None:
-            title_text = f"{book_name} 第 {chapter} 章第 {start_verse}-末 节"
+            title_text = f"{book_name}{chapter}{unit}{start_verse}-末节"
         elif start_verse == end_verse:
-            title_text = f"{book_name} 第 {chapter} 章第 {start_verse} 节"
+            title_text = f"{book_name}{chapter}{unit}{start_verse}节"
         else:
-            title_text = f"{book_name} 第 {chapter} 章第 {start_verse}-{end_verse} 节"
+            title_text = f"{book_name}{chapter}{unit}{start_verse}-{end_verse}节"
 
         self._set_adaptive_title(title_text)
         self._render_scripture()
@@ -140,24 +148,31 @@ class ScriptureDisplay(QWidget):
                 y = (self.height() - scaled.height()) // 2
                 painter.drawPixmap(x, y, scaled)
 
-        if self.footer_text.strip():
-            rect = QRect(0, max(0, self.height() - self.footer_height), self.width(), self.footer_height)
-            painter.setPen(self.footer_color)
-            painter.setFont(QFont(self.footer_font_family, self.footer_size))
-            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self.footer_text)
-
         super().paintEvent(event)
+        self._update_overlay_geometry()
 
     def _on_scrollbar_changed(self, value):
         self.scroll_changed.emit(value)
 
     def set_scroll_position(self, value):
         bar = self.text_display.verticalScrollBar()
-        value = max(bar.minimum(), min(value, bar.maximum()))
+        value = max(bar.minimum(), min(int(value), bar.maximum()))
         if bar.value() != value:
             bar.blockSignals(True)
             bar.setValue(value)
             bar.blockSignals(False)
+
+    def _smooth_to(self, target, duration=120):
+        bar = self.text_display.verticalScrollBar()
+        target = max(bar.minimum(), min(int(target), bar.maximum()))
+        if self._scroll_anim:
+            self._scroll_anim.stop()
+        self._scroll_anim = QPropertyAnimation(bar, b"value", self)
+        self._scroll_anim.setDuration(duration)
+        self._scroll_anim.setStartValue(bar.value())
+        self._scroll_anim.setEndValue(target)
+        self._scroll_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._scroll_anim.start()
 
     def set_scroll_speed(self, speed):
         self.scroll_speed = max(0, min(6, int(speed)))
@@ -176,12 +191,12 @@ class ScriptureDisplay(QWidget):
     def scroll_by(self, delta):
         bar = self.text_display.verticalScrollBar()
         target = max(bar.minimum(), min(bar.maximum(), bar.value() + int(delta)))
-        bar.setValue(target)
+        self._smooth_to(target)
 
     def eventFilter(self, obj, event):
         if obj == self.text_display.viewport() and event.type() == event.Type.Wheel:
             # 无论自动滚动是否开启，鼠标滚轮都直接控制经文
-            delta = -event.angleDelta().y() // 8
+            delta = -event.angleDelta().y() // 6
             self.scroll_by(delta)
             return True
         return super().eventFilter(obj, event)
@@ -212,6 +227,10 @@ class ScriptureDisplay(QWidget):
         self.footer_color = QColor(settings.get("footer_color", self.footer_color))
         self.footer_text = settings.get("footer_text", self.footer_text)
         self.footer_font_family = settings.get("footer_font_family", self.footer_font_family)
+        self.footer_label.setText(self.footer_text)
+        self.footer_label.setFont(QFont(self.footer_font_family, self.footer_size))
+        self.footer_label.setStyleSheet(f"color:{self.footer_color.name()};background:transparent;")
+        self.footer_label.raise_()
 
         if self.verses:
             self._set_adaptive_title(self.title_bar.text())
@@ -219,7 +238,13 @@ class ScriptureDisplay(QWidget):
         self.update()
         self.text_display.viewport().update()
 
+    def _update_overlay_geometry(self):
+        self.footer_label.setGeometry(0, max(0, self.height() - self.footer_height), self.width(), self.footer_height)
+        self.title_bar.raise_()
+        self.footer_label.raise_()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self.title_bar.text():
             self._set_adaptive_title(self.title_bar.text())
+        self._update_overlay_geometry()
