@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTabWidget, QListWidget, QListWidgetItem, QPushButton, QGridLayout, QLabel, QSpinBox, QHBoxLayout
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from .history_item import HistoryItemWidget
 
 
@@ -80,7 +80,8 @@ class NavigationPanel(QWidget):
         return w
 
     def _grid_size(self, columns):
-        return {2: (145, 38), 4: (72, 38)}[columns]
+        width, height = {2: (145, 38), 4: (72, 38)}[columns]
+        return QSize(width, height)
 
     def _on_book_clicked(self, item):
         book = item.data(Qt.ItemDataRole.UserRole)
