@@ -60,16 +60,23 @@ class BibleDatabase:
             long_col = bc(["LongName", "long_name", "Book", "书卷", "书名"])
             count_col = bc(["ChapterCount", "chapter_count", "章节数"])
             select_cols = []
+            if id_col: select_cols.append(self._quote(id_col))
             if short_col: select_cols.append(self._quote(short_col))
             if long_col: select_cols.append(self._quote(long_col))
             if count_col: select_cols.append(self._quote(count_col))
             if select_cols:
                 for row in self.conn.execute(f'SELECT {", ".join(select_cols)} FROM "{self.books_table}"').fetchall():
-                    vals = list(row)
-                    name = str(vals[1] if long_col and short_col else vals[0] if long_col else "")
+                    data = dict(row)
+                    name = str(data.get(long_col, "")).strip() if long_col else ""
                     if name:
-                        self.book_meta[name] = {"short": str(vals[0]) if short_col else name[:1], "chapter_count": None}
-        self.book_names = [b for b in self.book_meta if b in bible_names] or bible_names
+                        self.book_meta[name] = {"id": data.get(id_col) if id_col else None, "short": str(data.get(short_col, name[:1])).strip() if short_col else name[:1], "chapter_count": int(data[count_col]) if count_col and str(data.get(count_col, "")).isdigit() else None}
+        id_to_name = {str(v.get('id')).strip(): k for k, v in self.book_meta.items() if v.get('id') is not None}
+        mapped_names = []
+        for raw in bible_names:
+            name = id_to_name.get(str(raw).strip(), str(raw).strip())
+            if name not in mapped_names:
+                mapped_names.append(name)
+        self.book_names = [name for name in self.book_meta if name in mapped_names] or mapped_names
 
         # 66卷标准拼音码。数字1~66始终按数据库中的书卷顺序对应。
         codes = [
@@ -142,7 +149,8 @@ class BibleDatabase:
         return int(row["n"] or 0)
 
     def get_verses(self, book_name, chapter, start_verse=None, end_verse=None):
-        params = [book_name, chapter]
+        book_value = self.book_meta.get(book_name, {}).get('id', book_name)
+        params = [book_value, chapter]
         sql = f"SELECT {self._quote(self.verse_col)} AS verse, {self._quote(self.text_col)} AS text FROM {self._quote(self.verse_table)} WHERE {self._quote(self.book_col)}=? AND {self._quote(self.chapter_col)}=?"
         if start_verse is not None:
             sql += f" AND {self._quote(self.verse_col)}>=?"
