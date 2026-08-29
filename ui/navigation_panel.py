@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTabWidget, QListWidget, QListWidgetItem, QPushButton, QGridLayout, QLabel, QSpinBox, QHBoxLayout
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTabWidget, QListWidget, QListWidgetItem, QPushButton, QGridLayout, QLabel, QSpinBox, QHBoxLayout, QCheckBox
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from .history_item import HistoryItemWidget
 
@@ -6,6 +6,7 @@ from .history_item import HistoryItemWidget
 class NavigationPanel(QWidget):
     book_selected = pyqtSignal(str, int)
     range_selected = pyqtSignal(str, int, int, int)
+    verse_segmentation_changed = pyqtSignal(bool)
 
     def __init__(self, db, parent=None):
         super().__init__(parent)
@@ -59,6 +60,11 @@ class NavigationPanel(QWidget):
         self.select_btn.clicked.connect(self._select_range)
         grid.addWidget(self.select_btn, 1, 3)
         layout.addWidget(box)
+
+        self.segment_check = QCheckBox("按节分段")
+        self.segment_check.setChecked(False)
+        self.segment_check.toggled.connect(self.verse_segmentation_changed.emit)
+        layout.addWidget(self.segment_check)
 
         self.setLayout(layout)
 
