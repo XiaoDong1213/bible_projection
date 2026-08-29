@@ -51,12 +51,12 @@ class NavigationPanel(QWidget):
         options_layout.addWidget(options_title)
         self.segment_check = QCheckBox("按节分段")
         self.segment_check.setToolTip("关闭：经文连续排版；开启：每一节单独一段")
+        # 默认明确为关闭：不开启按节分段
         self.segment_check.setChecked(False)
         options_layout.addWidget(self.segment_check)
         options_layout.addStretch()
         layout.addWidget(options_box)
 
-        # 左侧直接选择章、起始节、结束节
         box = QWidget()
         grid = QGridLayout(box)
         grid.setContentsMargins(4, 4, 4, 4)
@@ -77,8 +77,14 @@ class NavigationPanel(QWidget):
         layout.addWidget(box)
 
         self.segment_check.toggled.connect(self.verse_segmentation_changed.emit)
-
         self.setLayout(layout)
+
+    def set_verse_segmentation(self, enabled, emit_signal=False):
+        """同步界面开关与当前配置；加载配置时默认不触发保存信号。"""
+        enabled = bool(enabled)
+        old = self.segment_check.blockSignals(True)
+        self.segment_check.setChecked(enabled)
+        self.segment_check.blockSignals(old)
 
     def _create_book_list(self, category, columns, short=False):
         w = QListWidget()
