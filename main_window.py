@@ -39,7 +39,26 @@ class MainWindow(QMainWindow):
         self.nav_panel=NavigationPanel(self.db); self.nav_panel.book_selected.connect(self._on_book_selected); self.nav_panel.range_selected.connect(self._on_range_selected); self.nav_panel.verse_segmentation_changed.connect(self._on_verse_segmentation_changed); splitter.addWidget(self.nav_panel)
         self.scripture_display=ScriptureDisplay(); splitter.addWidget(self.scripture_display); splitter.setStretchFactor(0,0); splitter.setStretchFactor(1,1); splitter.setSizes([330,870]); layout.addWidget(splitter); central.setLayout(layout); self.setCentralWidget(central)
     def _create_shortcuts(self):
-        for key,fn in [(Qt.Key.Key_Return,self._show_search),(Qt.Key.Key_Enter,self._show_search),(Qt.Key.Key_F12,self._toggle_extension),(Qt.Key.Key_Right,self._add_verse_end),(Qt.Key.Key_Left,self._remove_verse_end),("Ctrl+Right",self._add_verse_start),("Ctrl+Left",self._remove_verse_start),(Qt.Key.Key_Up,lambda:self._scroll_manual(-30)),(Qt.Key.Key_Down,lambda:self._scroll_manual(30)),(Qt.Key.Key_Space,self._toggle_scroll_pause)]: QShortcut(QKeySequence(key),self,fn)
+        # 数字 1-6 直接切换自动滚动速度，使用 WindowShortcut，焦点在搜索框/按钮等子控件时也能稳定响应。
+        shortcuts=[
+            (Qt.Key.Key_Return,self._show_search),(Qt.Key.Key_Enter,self._show_search),(Qt.Key.Key_F12,self._toggle_extension),
+            (Qt.Key.Key_Right,self._add_verse_end),(Qt.Key.Key_Left,self._remove_verse_end),
+            ("Ctrl+Right",self._add_verse_start),("Ctrl+Left",self._remove_verse_start),
+            (Qt.Key.Key_Up,lambda:self._scroll_manual(-30)),(Qt.Key.Key_Down,lambda:self._scroll_manual(30)),
+            (Qt.Key.Key_Space,self._toggle_scroll_pause),
+            (Qt.Key.Key_1,lambda:self._set_speed_hotkey(1)),(Qt.Key.Key_2,lambda:self._set_speed_hotkey(2)),
+            (Qt.Key.Key_3,lambda:self._set_speed_hotkey(3)),(Qt.Key.Key_4,lambda:self._set_speed_hotkey(4)),
+            (Qt.Key.Key_5,lambda:self._set_speed_hotkey(5)),(Qt.Key.Key_6,lambda:self._set_speed_hotkey(6)),
+        ]
+        self._shortcuts=[]
+        for key,fn in shortcuts:
+            shortcut=QShortcut(QKeySequence(key),self)
+            shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+            shortcut.activated.connect(fn)
+            self._shortcuts.append(shortcut)
+    def _set_speed_hotkey(self,speed):
+        self.toolbar.scroll_slider.setValue(int(speed))
+        self._on_scroll_speed(int(speed))
     def _create_statusbar(self):
         status=QStatusBar(); self.setStatusBar(status); self.status_label=QLabel("按回车键打开搜索"); status.addWidget(self.status_label)
     def _on_settings_changed(self,settings): self.settings.update(settings); self._apply_settings(settings); self.config.save_display_settings(settings)
