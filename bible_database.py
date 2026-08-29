@@ -199,65 +199,54 @@ class BibleDatabase:
         if not raw:
             return None
 
-        # 统一输入分隔符：
-        # 创世记1:2-12
-        # CSJ 1:2-12
-        # 1.1.2.12（小键盘全程输入）
-        # 1 1 2 12
-        # 创世记 1 2-12
-        # “-”后直接回车/没有数字 => 到本章最后一节
-        normalized = re.sub(r"[：:．。]", ".", raw)
-        normalized = re.sub(r"\s+", ".", normalized)
-        normalized = re.sub(r"\.+", ".", normalized)
-        normalized = normalized.strip(".")
-
-        # 优先识别“数字书卷.章节.起始节.结束节”
-        m = re.fullmatch(r"(\d{1,2})\.(\d+)\.(\d+)(?:\.(\d*))?", normalized)
+        # 1.1.2.12：数字书卷 + 章节 + 起始节 + 结束节
+        # 1.1.2：数字书卷 + 章节 + 单节
+        m = re.fullmatch(r"(\d{1,2})[.\s](\d+)[.\s](\d+)[.\s](\d+)", raw)
         if m:
-            book_code, chapter, start, end = m.groups()
-            if book_code not in self.book_codes or int(book_code) < 1 or int(book_code) > 66:
+            book, ch, start, end = m.groups()
+            if book not in self.book_codes:
                 return None
-            return (
-                self.book_codes[book_code],
-                int(chapter),
-                int(start),
-                int(end) if end else None
-            )
+            return self.book_codes[book], int(ch), int(start), int(end)
 
-        # 中文/拼音书名 + 章节经文，例如 CSJ1.2-12 / 创世记1:2-12
-        m = re.fullmatch(r"(.+?)[.]([0-9]+)[.]([0-9]+)(?:[-.]([0-9]*))?", normalized)
+        m = re.fullmatch(r"(\d{1,2})[.\s](\d+)[.\s](\d+)", raw)
+        if m:
+            book, ch, verse = m.groups()
+            if book not in self.book_codes:
+                return None
+            return self.book_codes[book], int(ch), int(verse), int(verse)
+
+        # 先提取“书卷”，支持：
+        # 创世记1:2-12
+        # CSJ1:2-12
+        # CSJ 1 2-12
+        # 创世记 1.2.12
+        m = re.fullmatch(r"(.+?)[\s]*([0-9]+)(?::|[.\s]+)([0-9]+)(?:\s*[-][\s]*([0-9]*))?", raw)
         if m:
             book_query, chapter, start, end = m.groups()
-            # 最后一段存在时，点号既可能是节范围分隔符，也可能是第四段
-            if end is not None and start == chapter:
-                pass
-            books = self.search_books(book_query)
+            books = self.search_books(book_query.strip())
             if not books:
                 return None
-            return (books[0], int(chapter), int(start), int(end) if end else None)
+            return (
+                books[0],
+                int(chapter),
+                int(start),
+                int(end) if end else (int(start) if "-" not in raw else None)
+            )
 
-        # 传统“书卷 章:节-节”输入；允许书卷与数字之间没有空格
-        m = re.fullmatch(r"(.+?)[.]([0-9]+)(?:[.]([0-9]+)(?:[-.]([0-9]*))?)?", normalized)
-        if not m:
-            # 允许只有书卷+章节
-            m = re.fullmatch(r"(.+?)[.]([0-9]+)", normalized)
-        if not m:
-            return None
+        # 允许“书卷 章节”或“书卷章节”，整章显示
+        m = re.fullmatch(r"(.+?)[\s]*([0-9]+)", raw)
+        if m:
+            book_query, chapter = m.groups()
+            books = self.search_books(book_query.strip())
+            if books:
+                return books[0], int(chapter), None, None
 
-        book_query = m.group(1)
-        chapter = int(m.group(2))
-        start = m.group(3)
-        end = m.group(4) if len(m.groups()) >= 4 else None
+        # 纯书卷名称：默认显示第1章
+        books = self.search_books(raw)
+        if books:
+            return books[0], 1, None, None
 
-        books = self.search_books(book_query)
-        if not books:
-            return None
-
-        start_verse = int(start) if start else None
-        end_verse = int(end) if end else None
-
-        # 例如“创世记1:2-”的末尾空白，统一为 end=None
-        return (books[0], chapter, start_verse, end_verse)
+        return None
 
     def close(self):
         if getattr(self, "conn", None):
