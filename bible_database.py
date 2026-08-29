@@ -27,10 +27,10 @@ class BibleDatabase:
                     return lower[name.lower()]
             return None
 
-        self.book_col = find(["Book", "book", "书卷", "书名"])
-        self.chapter_col = find(["Chapter", "chapter", "章节", "章"])
-        self.verse_col = find(["Verse", "verse", "节号", "节"])
-        self.text_col = find(["Scripture", "scripture", "text", "content", "verse_text", "经文", "经文内容"])
+        self.book_col = find(["Book", "书卷", "书名"])
+        self.chapter_col = find(["Chapter", "章节", "章"])
+        self.verse_col = find(["Verse", "节号", "节"])
+        self.text_col = find(["Scripture", "text", "content", "verse_text", "经文", "经文内容"])
         if not all([self.book_col, self.chapter_col, self.verse_col, self.text_col]):
             raise RuntimeError(f"无法识别和合本.db字段：当前表 {self.verse_table} 字段为：{', '.join(columns)}")
 
@@ -47,8 +47,15 @@ class BibleDatabase:
         ).fetchall()
         self.book_names = [str(r["book"]) for r in rows]
 
+        # 66卷标准拼音码。数字1~66始终按数据库中的书卷顺序对应。
         codes = [
-            "CSJ","CFJ","LWSJ","MSJ","SMJ","YSJ","SSM","LSJ","SWSJ","WSJ","DLSJ","DLZ","NLSJ","SL","NJ","STJ","YB","SJ","PS","PY","CDS","YGG","YSY","JLM","JLA","YZXJ","DNYL","HXS","YEL","AM","ESDY","YL","MH","NH","HB","HGY","MLJ","MJFY","MKFY","LJFY","YHFY","SHXS","LMS","GLLQ","YFS","FLB","GLX","TQ","TXQ","TSL","TSL","TQMS","TMD","TD","FLM","XLYS","YGS","YQ","BDE","BDH","YDS","JDS","JDYS","YD","QL"
+            "CSJ","CFJ","LWSJ","MSJ","SMJ","YSJ","SSM","LSJ","SWSJ","WSJ",
+            "DLSJ","DLZ","NLSJ","SL","NJ","STJ","YB","SJ","PS","PY",
+            "CDS","YGG","YSY","JLM","JLA","YZXJ","DNYL","HXS","YEL","AM",
+            "ESDY","YL","MH","NH","HB","HGY","MLJ","MJFY","MKFY","LJFY",
+            "YHFY","SHXS","LMS","GLLQ","YFS","FLB","GLX","TQ","TXQ","TSL",
+            "TSL2","TQMS","TMD","TD","FLM","XLYS","YGS","YQ","BDE","BDH",
+            "YDS","JDS","JDYS","YD","QL"
         ]
         self.book_codes = {}
         for i, book in enumerate(self.book_names[:66], 1):
@@ -121,6 +128,10 @@ class BibleDatabase:
             params.append(end_verse)
         sql += f" ORDER BY {self._quote(self.verse_col)}"
         return [(int(r["verse"]), str(r["text"])) for r in self.conn.execute(sql, params).fetchall()]
+
+    # 保持旧主窗口接口兼容
+    def get_verse_range(self, book_name, chapter, start_verse=1, end_verse=None):
+        return self.get_verses(book_name, chapter, start_verse, end_verse)
 
     def parse_reference(self, text):
         raw = str(text).strip().replace("：", ":").replace("．", ".").replace("。", ".")
