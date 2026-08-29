@@ -1,0 +1,176 @@
+/* styles/light.qss - 亮色主题样式表
+ * 适合编辑、白天使用场景
+ */
+
+QMainWindow {
+    background: #F5F7FA;
+}
+
+QStatusBar {
+    background: #FFFFFF;
+    color: #888888;
+    border: none;
+}
+
+/* 工具栏 */
+QToolBar {
+    background: #FFFFFF;
+    border-bottom: 1px solid #E5E7EB;
+    padding: 6px 10px;
+    spacing: 8px;
+}
+
+QToolBar QToolButton {
+    background: #F0F2F5;
+    color: #333333;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 5px;
+    font-size: 12px;
+}
+
+QToolBar QToolButton:hover {
+    background: #E5E7EB;
+}
+
+QToolBar QToolButton:pressed {
+    background: #2563EB;
+    color: white;
+}
+
+QLabel {
+    color: #666666;
+    font-size: 12px;
+}
+
+QComboBox, QSpinBox {
+    background: #FFFFFF;
+    color: #333333;
+    border: 1px solid #E5E7EB;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+QSlider::groove:horizontal {
+    height: 6px;
+    background: #E5E7EB;
+    border-radius: 3px;
+}
+
+QSlider::handle:horizontal {
+    width: 14px;
+    height: 14px;
+    margin: -4px 0;
+    background: #2563EB;
+    border-radius: 7px;
+}
+
+/* 标签页 */
+QTabWidget::pane {
+    border: none;
+    background: #FFFFFF;
+}
+
+QTabBar::tab {
+    background: #F0F2F5;
+    color: #888888;
+    padding: 8px 10px;
+    font-size: 12px;
+    border: none;
+    min-width: 45px;
+}
+
+QTabBar::tab:selected {
+    background: #FFFFFF;
+    color: #2563EB;
+    border-bottom: 2px solid #2563EB;
+}
+
+/* 列表 */
+QListWidget {
+    background: #FFFFFF;
+    border: none;
+    color: #333333;
+    font-size: 13px;
+}
+
+QListWidget::item {
+    padding: 9px 16px;
+    border-bottom: 1px solid #F0F2F5;
+}
+
+QListWidget::item:hover {
+    background: #F0F2F5;
+}
+
+QListWidget::item:selected {
+    background: #2563EB;
+    color: white;
+}
+
+/* 搜索框 */
+QLineEdit {
+    padding: 12px 16px;
+    font-size: 15px;
+    border: 2px solid #2563EB;
+    border-radius: 8px;
+    background: white;
+    min-width: 360px;
+}
+
+QLineEdit:focus {
+    border-color: #1D4ED8;
+}
+
+/* 历史清空按钮 */
+#clearHistoryBtn {
+    background: #F0F2F5;
+    color: #666666;
+    border: none;
+    padding: 8px;
+    font-size: 12px;
+    border-top: 1px solid #E5E7EB;
+}
+
+#clearHistoryBtn:hover {
+    background: #E74C3C;
+    color: white;
+}
+
+/* 扩展按钮 */
+#extendBtn {
+    background: #27AE60;
+    color: white;
+    font-weight: bold;
+}
+
+#extendBtn:hover {
+    background: #2ECC71;
+}
+
+/* 置顶按钮 */
+#topmostBtn {
+    background: #F0F2F5;
+    color: #333333;
+}
+
+#topmostBtn:checked {
+    background: #2563EB;
+    color: white;
+}
+
+#topmostBtn:disabled {
+    background: #E5E7EB;
+    color: #AAAAAA;
+}
+
+/* 主题按钮 */
+#themeBtn {
+    background: #8B5CF6;
+    color: white;
+}
+
+#themeBtn:hover {
+    background: #7C3AED;
+}

@@ -1,0 +1,190 @@
+/* styles/dark.qss - 暗色主题样式表
+ * 用于投影场景，深色背景减少反光
+ * 通过选择器精确控制各个控件样式
+ */
+
+/* 主窗口背景 */
+QMainWindow {
+    background: #12121C;
+}
+
+/* 状态栏 */
+QStatusBar {
+    background: #1E1E2E;
+    color: #888888;
+    border: none;
+}
+
+/* ===== 工具栏 ===== */
+QToolBar {
+    background: #1E1E2E;
+    border: none;
+    padding: 6px 10px;
+    spacing: 8px;
+}
+
+QToolBar QToolButton {
+    background: #2A2A3E;
+    color: #DDDDDD;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 5px;
+    font-size: 12px;
+}
+
+QToolBar QToolButton:hover {
+    background: #3A3A5E;
+}
+
+QToolBar QToolButton:pressed {
+    background: #4A90E2;
+}
+
+/* 标签文字 */
+QLabel {
+    color: #999999;
+    font-size: 12px;
+}
+
+/* 下拉框、数字输入框 */
+QComboBox, QSpinBox {
+    background: #2A2A3E;
+    color: #DDDDDD;
+    border: 1px solid #3A3A5E;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+/* 滑块样式 */
+QSlider::groove:horizontal {
+    height: 6px;
+    background: #2A2A3E;
+    border-radius: 3px;
+}
+
+QSlider::handle:horizontal {
+    width: 14px;
+    height: 14px;
+    margin: -4px 0;
+    background: #4A90E2;
+    border-radius: 7px;
+}
+
+/* ===== 标签页（左侧导航） ===== */
+QTabWidget::pane {
+    border: none;
+    background: #1A1A28;
+}
+
+QTabBar::tab {
+    background: #252538;
+    color: #999999;
+    padding: 8px 10px;
+    font-size: 12px;
+    border: none;
+    min-width: 45px;
+}
+
+QTabBar::tab:selected {
+    background: #1A1A28;
+    color: #4A90E2;
+    border-bottom: 2px solid #4A90E2;
+}
+
+/* ===== 列表控件 ===== */
+QListWidget {
+    background: #1A1A28;
+    border: none;
+    color: #DDDDDD;
+    font-size: 13px;
+}
+
+QListWidget::item {
+    padding: 9px 16px;
+    border-bottom: 1px solid #252538;
+}
+
+QListWidget::item:hover {
+    background: #252538;
+}
+
+QListWidget::item:selected {
+    background: #4A90E2;
+    color: white;
+}
+
+/* ===== 搜索框 ===== */
+QLineEdit {
+    padding: 12px 16px;
+    font-size: 15px;
+    border: 2px solid #4A90E2;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.98);
+    min-width: 360px;
+}
+
+QLineEdit:focus {
+    border-color: #2563EB;
+}
+
+/* ===== 历史记录清空按钮 ===== */
+#clearHistoryBtn {
+    background: #2A2A3E;
+    color: #AAAAAA;
+    border: none;
+    padding: 8px;
+    font-size: 12px;
+    border-top: 1px solid #333333;
+}
+
+#clearHistoryBtn:hover {
+    background: #E74C3C;
+    color: white;
+}
+
+/* ===== 扩展显示按钮 ===== */
+#extendBtn {
+    background: #27AE60;
+    color: white;
+    font-weight: bold;
+}
+
+#extendBtn:hover {
+    background: #2ECC71;
+}
+
+#extendBtn:checked {
+    background: #E74C3C;
+}
+
+/* ===== 置顶按钮 ===== */
+#topmostBtn {
+    background: #2A2A3E;
+    color: #DDDDDD;
+}
+
+#topmostBtn:checked {
+    background: #4A90E2;
+    color: white;
+}
+
+#topmostBtn:disabled {
+    background: #1A1A28;
+    color: #666666;
+}
+
+/* ===== 主题切换按钮 ===== */
+#themeBtn {
+    background: #F39C12;
+    color: white;
+}
+
+#themeBtn:hover {
+    background: #F1C40F;
+}
+
+/* 颜色按钮通用悬浮效果 */
+.colorBtn:hover {
+    border: 1px solid white;
+}
