@@ -1,5 +1,4 @@
-# ui/scripture_display.py
-# 经文显示核心控件：统一背景、字体、底注、滚动，并支持滚轮位置同步
+# 经文显示核心控件：统一背景、字体、底注、滚动，并支持标题自适应
 import os
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTextEdit, QFrame
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve
@@ -90,22 +89,31 @@ class ScriptureDisplay(QWidget):
         self.update()
 
     def _set_adaptive_title(self, text):
-        available_width = max(100, self.title_bar.width() - 40)
+        # 标题宽度跟随实际控件宽度；字号越大，越优先缩小字号，确保完整显示。
+        # 预留标题左右安全区，避免贴边和被窗口边缘裁切。
+        available_width = max(100, self.title_bar.contentsRect().width() - 48)
         font_size = max(self.title_min_size, int(self.title_size))
         font = QFont(self.title_font_family, font_size)
         font.setBold(True)
         fm = QFontMetrics(font)
+
+        # 根据当前控件真实宽度动态缩小字号。
         while fm.horizontalAdvance(text) > available_width and font_size > self.title_min_size:
             font_size -= 1
             font = QFont(self.title_font_family, font_size)
             font.setBold(True)
             fm = QFontMetrics(font)
+
+        # 如果已经缩小到最小字号仍然过长，则允许标题自动省略，避免显示区域溢出。
+        elided_text = fm.elidedText(text, Qt.TextElideMode.ElideRight, available_width)
         self.title_bar.setFont(font)
         self.title_bar.setStyleSheet(
             f'color:{self.title_color.name()};font-family:"{self.title_font_family}";'
             f'font-size:{font_size}px;font-weight:bold;background:transparent;'
+            f'padding-left:0px;padding-right:0px;'
         )
-        self.title_bar.setText(text)
+        self.title_bar.setText(elided_text)
+        self.title_bar.setToolTip(text if elided_text != text else "")
 
     def set_verse_segmentation(self, enabled):
         self.verse_segmentation = bool(enabled)
@@ -123,18 +131,10 @@ class ScriptureDisplay(QWidget):
         )
 
     def _render_scripture(self):
-        # QTextEdit 本身的内容边距统一清零，左右边距完全由下面两个独立属性控制。
-        # Qt 富文本对 padding 简写在不同版本上的兼容性不一致，因此这里明确写出
-        # padding-left / padding-right，确保左、右边距都实际作用于经文正文。
-        left = max(0, int(self.margin_left))
-        right = max(0, int(self.margin_right))
-        top = 10
-        bottom = self.footer_height + 20
         html = (
-            "<div style='"
-            f"margin:0; padding-top:{top}px; padding-right:{right}px; "
-            f"padding-bottom:{bottom}px; padding-left:{left}px; "
-            f"line-height:{self.line_spacing}%;'>"
+            f"<div style='padding-top:10px;padding-right:{self.margin_right}px;"
+            f"padding-bottom:{self.footer_height + 20}px;padding-left:{self.margin_left}px;"
+            f"margin:0;line-height:{self.line_spacing}%;'>"
         )
         if self.verse_segmentation:
             for verse_num, verse_text in self.verses:
@@ -238,7 +238,7 @@ class ScriptureDisplay(QWidget):
         self.footer_label.raise_()
         self.set_verse_segmentation(bool(settings.get("verse_segmentation", False)))
         if self.verses:
-            self._set_adaptive_title(self.title_bar.text())
+            self._set_adaptive_title(self.title_bar.toolTip() or self.title_bar.text())
             self._render_scripture()
         self.update()
         self.text_display.viewport().update()
@@ -251,5 +251,5 @@ class ScriptureDisplay(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if self.title_bar.text():
-            self._set_adaptive_title(self.title_bar.text())
+            self._set_adaptive_title(self.title_bar.toolTip() or self.title_bar.text())
         self._update_overlay_geometry()
