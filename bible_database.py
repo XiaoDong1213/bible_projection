@@ -132,18 +132,58 @@ class BibleDatabase:
                 return short
         return book[:1]
 
+    def _normalize_code(self, value):
+        return str(value).strip().lower().replace(" ", "")
+
     def search_books(self, query):
-        query = str(query).strip().lower()
+        """书卷模糊匹配：支持中文、简称、拼音码、数字编号。"""
+        query = str(query).strip()
         if not query:
             return []
 
-        if query in self.book_codes:
-            return [self.book_codes[query]]
+        q = self._normalize_code(query)
 
-        if query in self.short_names and self.short_names[query] in self.book_names:
-            return [self.short_names[query]]
+        # 数字编号：1~66
+        if q in self.book_codes:
+            return [self.book_codes[q]]
 
-        return [book for book in self.book_names if query in book.lower()]
+        # 简称/拼音码精确命中
+        if q in self.book_codes:
+            return [self.book_codes[q]]
+
+        # 中文书名、简称、拼音码模糊匹配
+        results = []
+        seen = set()
+
+        for book in self.book_names:
+            book_low = book.lower()
+            short = self._short_name(book).lower()
+
+            codes = [
+                code for code, target in self.book_codes.items()
+                if target == book
+            ]
+
+            if q in book_low or q in short or any(q in code.lower() for code in codes):
+                if book not in seen:
+                    results.append(book)
+                    seen.add(book)
+
+        return results
+
+    def find_book(self, query):
+        """返回最佳匹配书卷；完全匹配优先，否则使用模糊匹配。"""
+        query = str(query).strip()
+        if not query:
+            return None
+
+        q = self._normalize_code(query)
+
+        if q in self.book_codes:
+            return self.book_codes[q]
+
+        results = self.search_books(query)
+        return results[0] if results else None
 
     def get_chapter_count(self, book_name):
         row = self.conn.execute(
@@ -199,52 +239,53 @@ class BibleDatabase:
         if not raw:
             return None
 
-        # 1.1.2.12：数字书卷 + 章节 + 起始节 + 结束节
-        # 1.1.2：数字书卷 + 章节 + 单节
-        m = re.fullmatch(r"(\d{1,2})[.\s](\d+)[.\s](\d+)[.\s](\d+)", raw)
+        # 小键盘友好格式：
+        # 1.1.2.12 -> 创世记1:2-12
+        # 19.23.1.6 -> 诗篇23:1-6
+        m = re.fullmatch(r"(\d{1,2})[.\s]+(\d+)[.\s]+(\d+)[.\s]+(\d+)", raw)
         if m:
             book, ch, start, end = m.groups()
-            if book not in self.book_codes:
-                return None
-            return self.book_codes[book], int(ch), int(start), int(end)
+            book_name = self.find_book(book)
+            if book_name:
+                return book_name, int(ch), int(start), int(end)
 
-        m = re.fullmatch(r"(\d{1,2})[.\s](\d+)[.\s](\d+)", raw)
+        # 1.1.2 -> 单节
+        m = re.fullmatch(r"(\d{1,2})[.\s]+(\d+)[.\s]+(\d+)", raw)
         if m:
             book, ch, verse = m.groups()
-            if book not in self.book_codes:
-                return None
-            return self.book_codes[book], int(ch), int(verse), int(verse)
+            book_name = self.find_book(book)
+            if book_name:
+                return book_name, int(ch), int(verse), int(verse)
 
-        # 先提取“书卷”，支持：
-        # 创世记1:2-12
-        # CSJ1:2-12
-        # CSJ 1 2-12
-        # 创世记 1.2.12
-        m = re.fullmatch(r"(.+?)[\s]*([0-9]+)(?::|[.\s]+)([0-9]+)(?:\s*[-][\s]*([0-9]*))?", raw)
+        # 中文/拼音/简称 + 章节节号
+        # 支持：创世记1:2-12 / CSJ1:2-12 / CSJ 1.2-12
+        m = re.fullmatch(
+            r"(.+?)[\s]*([0-9]+)(?::|[.\s]+)([0-9]+)"
+            r"(?:\s*-\s*([0-9]*))?", raw
+        )
         if m:
             book_query, chapter, start, end = m.groups()
-            books = self.search_books(book_query.strip())
-            if not books:
-                return None
-            return (
-                books[0],
-                int(chapter),
-                int(start),
-                int(end) if end else (int(start) if "-" not in raw else None)
-            )
+            book_name = self.find_book(book_query)
+            if book_name:
+                return (
+                    book_name,
+                    int(chapter),
+                    int(start),
+                    int(end) if end else (None if "-" in raw else int(start))
+                )
 
-        # 允许“书卷 章节”或“书卷章节”，整章显示
+        # 书卷 + 章节
         m = re.fullmatch(r"(.+?)[\s]*([0-9]+)", raw)
         if m:
             book_query, chapter = m.groups()
-            books = self.search_books(book_query.strip())
-            if books:
-                return books[0], int(chapter), None, None
+            book_name = self.find_book(book_query)
+            if book_name:
+                return book_name, int(chapter), None, None
 
-        # 纯书卷名称：默认显示第1章
-        books = self.search_books(raw)
-        if books:
-            return books[0], 1, None, None
+        # 单独输入书卷，默认第1章
+        book_name = self.find_book(raw)
+        if book_name:
+            return book_name, 1, None, None
 
         return None
 
