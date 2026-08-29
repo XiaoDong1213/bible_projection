@@ -43,7 +43,7 @@ class BibleDatabase:
         self.book_col = self._pick_column(("book", "book_name", "书卷", "卷", "bookname"))
         self.chapter_col = self._pick_column(("chapter", "chapter_num", "章", "chap"))
         self.verse_col = self._pick_column(("verse", "verse_num", "节", "verse_number"))
-        self.text_col = self._pick_column(("text", "content", "verse_text", "经文", "经文内容", "content_text"))
+        self.text_col = self._pick_column(("text", "content", "verse_text", "scripture", "Scripture", "经文", "经文内容", "content_text"))
 
         missing = [name for name, col in (
             ("书卷", self.book_col), ("章节", self.chapter_col),
