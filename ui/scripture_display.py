@@ -44,6 +44,7 @@ class ScriptureDisplay(QWidget):
         self.scroll_timer.setInterval(30)
 
         self.verses = []
+        self.verse_segmentation = False
         self._init_ui()
 
     def _init_ui(self):
@@ -117,22 +118,34 @@ class ScriptureDisplay(QWidget):
         )
         self.title_bar.setText(text)
 
+    def set_verse_segmentation(self, enabled):
+        self.verse_segmentation = bool(enabled)
+        if self.verses:
+            self._render_scripture()
+
     def _render_scripture(self):
         # QTextEdit 自带文档背景透明；标题、经文、底注均由同一个父控件承载背景
         html = (
             f"<div style='padding:10px {self.margin_right}px {self.footer_height + 20}px "
             f"{self.margin_left}px; margin:0; line-height:{self.line_spacing}%;'>"
         )
-        for verse_num, verse_text in self.verses:
-            safe_text = str(verse_text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            html += (
-                "<p style='margin:0 0 8px 0;padding:0;'>"
-                f'<span style="color:{self.verse_num_color.name()};font-size:{self.verse_num_size}px;' 
-                f'font-family:&quot;{self.verse_num_font_family}&quot;;font-weight:bold;vertical-align:super;">'
-                f"{verse_num}</span>&nbsp;"
-                f'<span style="color:{self.font_color.name()};font-size:{self.font_size}px;' 
-                f'font-family:&quot;{self.font_family}&quot;;">{safe_text}</span></p>'
-            )
+        if self.verse_segmentation:
+            for verse_num, verse_text in self.verses:
+                safe_text = str(verse_text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                html += (
+                    "<p style='margin:0 0 8px 0;padding:0;'>"
+                    f'<span style="color:{self.verse_num_color.name()};font-size:{self.verse_num_size}px;font-family:&quot;{self.verse_num_font_family}&quot;;font-weight:bold;vertical-align:super;">{verse_num}</span>&nbsp;'
+                    f'<span style="color:{self.font_color.name()};font-size:{self.font_size}px;font-family:&quot;{self.font_family}&quot;;">{safe_text}</span></p>'
+                )
+        else:
+            for verse_num, verse_text in self.verses:
+                safe_text = str(verse_text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                html += (
+                    "<p style='margin:0 0 8px 0;padding:0;'>"
+                    f'<span style="color:{self.verse_num_color.name()};font-size:{self.verse_num_size}px;font-family:&quot;{self.verse_num_font_family}&quot;;font-weight:bold;vertical-align:super;">{verse_num}</span>&nbsp;'
+                    f'<span style="color:{self.font_color.name()};font-size:{self.font_size}px;font-family:&quot;{self.font_family}&quot;;">{safe_text}</span>'
+                    "</p>"
+                )
         html += "</div>"
         self.text_display.setHtml(html)
 
