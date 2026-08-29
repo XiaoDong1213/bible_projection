@@ -2,7 +2,7 @@
 # 经文显示核心控件：统一背景、字体、底注、滚动，并支持滚轮位置同步
 import os
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTextEdit, QFrame
-from PyQt6.QtCore import Qt, QTimer, QRect, pyqtSignal, QPropertyAnimation, QEasingCurve
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QColor, QPixmap, QFontMetrics, QPainter
 
 
@@ -14,35 +14,28 @@ class ScriptureDisplay(QWidget):
         self.font_family = "微软雅黑"
         self.font_size = 24
         self.font_color = QColor("#FFFFFF")
-
         self.bg_color = QColor("#000000")
         self.bg_image = None
-
         self.line_spacing = 160
         self.margin_left = 60
         self.margin_right = 60
-
         self.title_font_family = "微软雅黑"
         self.title_color = QColor("#87CEEB")
         self.title_size = 36
         self.title_min_size = 12
-
         self.verse_num_color = QColor("#FFD700")
         self.verse_num_size = 24
         self.verse_num_font_family = "微软雅黑"
-
         self.footer_text = ""
         self.footer_height = 45
         self.footer_size = 14
         self.footer_color = QColor("#AAAAAA")
         self.footer_font_family = "微软雅黑"
-
         self.scroll_speed = 0
         self._scroll_anim = None
         self.scroll_timer = QTimer(self)
         self.scroll_timer.timeout.connect(self._auto_scroll)
         self.scroll_timer.setInterval(30)
-
         self.verses = []
         self.verse_segmentation = False
         self._init_ui()
@@ -51,14 +44,12 @@ class ScriptureDisplay(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-
         self.title_bar = QLabel("")
         self.title_bar.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.title_bar.setIndent(24)
         self.title_bar.setFixedHeight(64)
         self.title_bar.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         layout.addWidget(self.title_bar)
-
         self.text_display = QTextEdit()
         self.text_display.setReadOnly(True)
         self.text_display.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -73,7 +64,6 @@ class ScriptureDisplay(QWidget):
         self.text_display.verticalScrollBar().valueChanged.connect(self._on_scrollbar_changed)
         layout.addWidget(self.text_display, 1)
         self.title_bar.raise_()
-
         self.footer_label = QLabel(self)
         self.footer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.footer_label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -93,7 +83,6 @@ class ScriptureDisplay(QWidget):
             title_text = f"{book_name}{chapter}{unit}{start_verse}节"
         else:
             title_text = f"{book_name}{chapter}{unit}{start_verse}-{end_verse}节"
-
         self._set_adaptive_title(title_text)
         self._render_scripture()
         self.text_display.verticalScrollBar().setValue(0)
@@ -110,7 +99,6 @@ class ScriptureDisplay(QWidget):
             font = QFont(self.title_font_family, font_size)
             font.setBold(True)
             fm = QFontMetrics(font)
-
         self.title_bar.setFont(font)
         self.title_bar.setStyleSheet(
             f'color:{self.title_color.name()};font-family:"{self.title_font_family}";'
@@ -123,29 +111,30 @@ class ScriptureDisplay(QWidget):
         if self.verses:
             self._render_scripture()
 
+    def _verse_html(self, verse_num, verse_text):
+        safe_text = str(verse_text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return (
+            f'<span style="color:{self.verse_num_color.name()};font-size:{self.verse_num_size}px;'
+            f'font-family:&quot;{self.verse_num_font_family}&quot;;font-weight:bold;vertical-align:super;">'
+            f'{verse_num}</span>&nbsp;'
+            f'<span style="color:{self.font_color.name()};font-size:{self.font_size}px;'
+            f'font-family:&quot;{self.font_family}&quot;;">{safe_text}</span>'
+        )
+
     def _render_scripture(self):
-        # QTextEdit 自带文档背景透明；标题、经文、底注均由同一个父控件承载背景
+        # 开启：每节独立一段；关闭：所有节连续排版，只在自然换行时换行。
         html = (
             f"<div style='padding:10px {self.margin_right}px {self.footer_height + 20}px "
             f"{self.margin_left}px; margin:0; line-height:{self.line_spacing}%;'>"
         )
         if self.verse_segmentation:
             for verse_num, verse_text in self.verses:
-                safe_text = str(verse_text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                html += (
-                    "<p style='margin:0 0 8px 0;padding:0;'>"
-                    f'<span style="color:{self.verse_num_color.name()};font-size:{self.verse_num_size}px;font-family:&quot;{self.verse_num_font_family}&quot;;font-weight:bold;vertical-align:super;">{verse_num}</span>&nbsp;'
-                    f'<span style="color:{self.font_color.name()};font-size:{self.font_size}px;font-family:&quot;{self.font_family}&quot;;">{safe_text}</span></p>'
-                )
+                html += f"<p style='margin:0 0 8px 0;padding:0;'>{self._verse_html(verse_num, verse_text)}</p>"
         else:
+            html += "<p style='margin:0;padding:0;'>"
             for verse_num, verse_text in self.verses:
-                safe_text = str(verse_text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                html += (
-                    "<p style='margin:0 0 8px 0;padding:0;'>"
-                    f'<span style="color:{self.verse_num_color.name()};font-size:{self.verse_num_size}px;font-family:&quot;{self.verse_num_font_family}&quot;;font-weight:bold;vertical-align:super;">{verse_num}</span>&nbsp;'
-                    f'<span style="color:{self.font_color.name()};font-size:{self.font_size}px;font-family:&quot;{self.font_family}&quot;;">{safe_text}</span>'
-                    "</p>"
-                )
+                html += self._verse_html(verse_num, verse_text) + " "
+            html += "</p>"
         html += "</div>"
         self.text_display.setHtml(html)
 
@@ -153,19 +142,13 @@ class ScriptureDisplay(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         painter.fillRect(self.rect(), self.bg_color)
-
         if self.bg_image and os.path.exists(self.bg_image):
             pixmap = QPixmap(self.bg_image)
             if not pixmap.isNull():
-                scaled = pixmap.scaled(
-                    self.size(),
-                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                    Qt.TransformationMode.SmoothTransformation
-                )
+                scaled = pixmap.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
                 x = (self.width() - scaled.width()) // 2
                 y = (self.height() - scaled.height()) // 2
                 painter.drawPixmap(x, y, scaled)
-
         super().paintEvent(event)
         self._update_overlay_geometry()
 
@@ -213,7 +196,6 @@ class ScriptureDisplay(QWidget):
 
     def eventFilter(self, obj, event):
         if obj == self.text_display.viewport() and event.type() == event.Type.Wheel:
-            # 无论自动滚动是否开启，鼠标滚轮都直接控制经文
             delta = -event.angleDelta().y() // 6
             self.scroll_by(delta)
             return True
@@ -223,23 +205,18 @@ class ScriptureDisplay(QWidget):
         self.font_family = settings.get("font_family", self.font_family)
         self.font_size = int(settings.get("font_size", self.font_size))
         self.font_color = QColor(settings.get("font_color", self.font_color))
-
         self.verse_num_color = QColor(settings.get("verse_num_color", self.verse_num_color))
         self.verse_num_size = int(settings.get("verse_num_size", self.verse_num_size))
         self.verse_num_font_family = settings.get("verse_num_font_family", self.verse_num_font_family)
-
         self.title_color = QColor(settings.get("title_color", self.title_color))
         self.title_size = int(settings.get("title_size", self.title_size))
         self.title_font_family = settings.get("title_font_family", self.title_font_family)
-
         self.bg_color = QColor(settings.get("bg_color", self.bg_color))
         self.bg_image = settings.get("bg_image", self.bg_image) or None
         self.line_spacing = int(settings.get("line_spacing", self.line_spacing))
-
         margin = settings.get("margin")
         if margin is not None:
             self.margin_left = self.margin_right = int(margin)
-
         self.footer_height = int(settings.get("footer_height", self.footer_height))
         self.footer_size = int(settings.get("footer_size", self.footer_size))
         self.footer_color = QColor(settings.get("footer_color", self.footer_color))
@@ -250,7 +227,8 @@ class ScriptureDisplay(QWidget):
         self.footer_label.setStyleSheet(f"color:{self.footer_color.name()};background:rgba(0,0,0,0);")
         self.text_display.setViewportMargins(0, 0, 0, self.footer_height)
         self.footer_label.raise_()
-
+        # 配置中的分段状态也必须作用于显示控件；缺省值明确为 False。
+        self.set_verse_segmentation(bool(settings.get("verse_segmentation", False)))
         if self.verses:
             self._set_adaptive_title(self.title_bar.text())
             self._render_scripture()
