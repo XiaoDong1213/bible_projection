@@ -71,8 +71,36 @@ class SearchWidget(QWidget):
                 return book
         return None
 
+    def _validate_parsed(self, parsed):
+        """经文地址必须符合数据库实际章节/节号范围，不能让SQL只返回一部分而误显示。"""
+        if not parsed or len(parsed) != 4:
+            return None
+        book, chapter, start, end = parsed
+        validator = getattr(self.db, "validate_reference", None)
+        if validator is not None:
+            try:
+                if not validator(book, chapter, start, end):
+                    return None
+            except (TypeError, ValueError):
+                return None
+        else:
+            # 兼容旧数据库类：在搜索层自行按实际数据库范围校验。
+            try:
+                if not book or int(chapter) < 1 or int(chapter) > self.db.get_chapter_count(book):
+                    return None
+                max_verse = self.db.get_verse_count(book, int(chapter))
+                if start is not None and not 1 <= int(start) <= max_verse:
+                    return None
+                if end is not None and not 1 <= int(end) <= max_verse:
+                    return None
+                if start is not None and end is not None and int(end) < int(start):
+                    return None
+            except (TypeError, ValueError, AttributeError):
+                return None
+        return parsed
+
     def _parse_reference(self, text):
-        """先处理 Books.Pinyin，再交给数据库处理其它格式。"""
+        """先处理 Books.Pinyin，再交给数据库处理其它格式，并严格限制实际范围。"""
         raw = str(text).strip().replace("：", ":").replace("．", ".").replace("。", ".")
         if not raw:
             return None
@@ -83,19 +111,20 @@ class SearchWidget(QWidget):
             code, chapter, start, end = m.groups()
             book = self._find_by_pinyin(code)
             if book:
-                return (
+                parsed = (
                     book,
                     int(chapter),
                     int(start),
                     int(end) if end else (None if "-" in raw else int(start)),
                 )
+                return self._validate_parsed(parsed)
 
         # 仅输入简拼，直接定位到该书卷
         book = self._find_by_pinyin(raw)
         if book:
             return book, 1, None, None
 
-        return self.db.parse_reference(raw)
+        return self._validate_parsed(self.db.parse_reference(raw))
 
     def _on_text_changed(self, text):
         self.result_list.clear()
@@ -120,7 +149,6 @@ class SearchWidget(QWidget):
 
         books = self.db.search_books(book_query)
         for book in books[:12]:
-            # 结果只显示文字，不显示数字编号。
             item = QListWidgetItem(f"  {book}  ·  {self.db._short_name(book)}")
             item.setData(Qt.ItemDataRole.UserRole, (book, 1, None, None))
             self.result_list.addItem(item)
@@ -129,7 +157,6 @@ class SearchWidget(QWidget):
 
     @staticmethod
     def _extract_book_query(text):
-        # 纯数字小键盘格式由数据库解析，不显示数字候选。
         if re.fullmatch(r"\d{1,2}[.\s]+\d+[.\s]+\d+(?:[.\s]+\d+)?", text):
             return ""
         m = re.match(r"^([^0-9:：.\-]+?)(?=\d|$)", text)
@@ -163,7 +190,7 @@ class SearchWidget(QWidget):
                 self.close_requested.emit()
                 return
 
-        self.hint_label.setText("未找到匹配的书卷或经文格式，请检查输入")
+        self.hint_label.setText("超出实际章节或节号范围，请检查输入")
 
     def _on_item_clicked(self, item):
         data = item.data(Qt.ItemDataRole.UserRole)
