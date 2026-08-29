@@ -87,7 +87,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.scripture_display)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([210, 990])
+        splitter.setSizes([330, 870])
         main_layout.addWidget(splitter)
         central.setLayout(main_layout)
         self.setCentralWidget(central)
@@ -172,9 +172,7 @@ class MainWindow(QMainWindow):
 
         self.verses = verses
         self.scripture_display.set_scripture(
-            book_name, chapter, start_verse,
-            self.current_end if end_verse is None else end_verse,
-            verses
+            book_name, chapter, self.current_start, self.current_end, verses
         )
 
         if self.extension_window and self.extension_window.isVisible():
