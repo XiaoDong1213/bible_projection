@@ -48,10 +48,12 @@ class MainWindow(QMainWindow):
         text = str(text or "")
         self.settings["footer_text"] = text
         self.scripture_display.footer_text = text
-        self.scripture_display.footer_label.setText(text)
+        if hasattr(self.scripture_display, "footer_label"):
+            self.scripture_display.footer_label.setText(text)
         if self.extension_window:
             self.extension_window.scripture_display.footer_text = text
-            self.extension_window.scripture_display.footer_label.setText(text)
+            if hasattr(self.extension_window.scripture_display, "footer_label"):
+                self.extension_window.scripture_display.footer_label.setText(text)
         self.config.save_display_settings({"footer_text": text})
 
     def _load_theme_style(self):
@@ -272,3 +274,35 @@ class MainWindow(QMainWindow):
             self.verses.pop()
             self.current_end -= 1
             self._refresh_display()
+
+    def _add_verse_start(self):
+        if not self.verses or self.current_start <= 1:
+            return
+        new_start = self.current_start - 1
+        new_verse = self.db.get_verse_range(self.current_book, self.current_chapter, new_start, new_start)
+        self.verses = new_verse + self.verses
+        self.current_start = new_start
+        self._refresh_display()
+
+    def _remove_verse_start(self):
+        if len(self.verses) > 1:
+            self.verses.pop(0)
+            self.current_start += 1
+            self._refresh_display()
+
+    def _refresh_display(self):
+        self.scripture_display.set_scripture(self.current_book, self.current_chapter, self.current_start, self.current_end, self.verses)
+        if self.extension_window and self.extension_window.isVisible():
+            self.extension_window.update_scripture(self.current_book, self.current_chapter, self.current_start, self.current_end, self.verses)
+        self._update_status()
+
+    def _sync_extension_scroll(self, value):
+        if self.extension_window and self.extension_window.isVisible():
+            self.extension_window.set_scroll_position(value)
+
+    def keyPressEvent(self, event):
+        if hasattr(self, "search_widget") and self.search_widget.isVisible():
+            if event.key() == Qt.Key.Key_Escape:
+                self._close_search()
+            return
+        super().keyPressEvent(event)
