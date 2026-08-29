@@ -82,6 +82,7 @@ class MainWindow(QMainWindow):
         self.nav_panel = NavigationPanel(self.db)
         self.nav_panel.book_selected.connect(self._on_book_selected)
         self.nav_panel.range_selected.connect(self._on_range_selected)
+        self.nav_panel.verse_segmentation_changed.connect(self._on_verse_segmentation_changed)
         splitter.addWidget(self.nav_panel)
         self.scripture_display = ScriptureDisplay()
         splitter.addWidget(self.scripture_display)
@@ -117,8 +118,10 @@ class MainWindow(QMainWindow):
 
     def _apply_settings(self, settings):
         self.scripture_display.apply_settings(settings)
+        self.scripture_display.set_verse_segmentation(bool(settings.get('verse_segmentation', False)))
         if self.extension_window:
             self.extension_window.apply_settings(settings)
+            self.extension_window.scripture_display.set_verse_segmentation(bool(settings.get('verse_segmentation', False)))
 
     def _on_theme_changed(self, theme):
         self.theme = theme
@@ -150,6 +153,13 @@ class MainWindow(QMainWindow):
 
     def _on_book_selected(self, book_name, chapter):
         self._load_scripture(book_name, chapter, None, None)
+
+    def _on_verse_segmentation_changed(self, enabled):
+        self.settings['verse_segmentation'] = bool(enabled)
+        self.scripture_display.set_verse_segmentation(enabled)
+        if self.extension_window:
+            self.extension_window.scripture_display.set_verse_segmentation(enabled)
+        self.config.save_display_settings({'verse_segmentation': bool(enabled)})
 
     def _on_range_selected(self, book_name, chapter, start_verse, end_verse):
         self._load_scripture(book_name, chapter, start_verse, end_verse)
