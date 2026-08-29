@@ -26,6 +26,7 @@ class ScriptureDisplay(QWidget):
         self.text_display.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff); self.text_display.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.text_display.setFrameShape(QFrame.Shape.NoFrame); self.text_display.setStyleSheet("background:transparent;border:none;padding:0px;margin:0px;")
         self.text_display.viewport().setStyleSheet("background:transparent;"); self.text_display.setContentsMargins(0,0,0,0)
+        self.text_display.setViewportMargins(0,0,0,self.footer_height)
         self.text_display.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground); self.text_display.document().setDocumentMargin(0)
         self.text_display.viewport().installEventFilter(self); self.text_display.verticalScrollBar().valueChanged.connect(self._on_scrollbar_changed)
         layout.addWidget(self.text_display,1)
@@ -51,8 +52,8 @@ class ScriptureDisplay(QWidget):
             for stretch in range(95,39,-5):
                 test=QFont(font); test.setStretch(stretch)
                 if QFontMetrics(test).horizontalAdvance(self._title_text)<=available_width: font=test; break
-        # 标题栏高度随最终字号动态变化，避免上下裁切。
-        title_height=max(52,QFontMetrics(font).height()+18)
+        # 标题栏只保留少量上下安全空间，避免出现大块空白。
+        title_height=max(42,QFontMetrics(font).height()+6)
         self.title_bar.setMinimumHeight(title_height); self.title_bar.setMaximumHeight(title_height)
         self.title_bar.setFont(font)
         self.title_bar.setStyleSheet(f'color:{self.title_color.name()};font-family:"{self.title_font_family}";font-size:{font_size}px;font-weight:bold;background:transparent;padding-left:24px;padding-right:24px;')
@@ -67,8 +68,7 @@ class ScriptureDisplay(QWidget):
         return f'<span style="color:{self.verse_num_color.name()};font-size:{self.verse_num_size}px;font-family:&quot;{self.verse_num_font_family}&quot;;font-weight:bold;vertical-align:super;">{verse_num}</span>&nbsp;<span style="color:{self.font_color.name()};font-size:{self.font_size}px;font-family:&quot;{self.font_family}&quot;;">{safe}</span>'
 
     def _render_scripture(self):
-        # 顶部留白至少覆盖经文字号的高度，底部给底注和下边缘留出安全区，避免上下被裁切。
-        top_pad=max(14,int(self.font_size*0.65)); bottom_pad=self.footer_height+max(24,int(self.font_size*0.8))
+        top_pad=max(10,int(self.font_size*0.35)); bottom_pad=self.footer_height+max(12,int(self.font_size*0.45))
         html=f"<div style='padding-top:{top_pad}px;padding-right:{self.margin_right}px;padding-bottom:{bottom_pad}px;padding-left:{self.margin_left}px;margin:0;line-height:{self.line_spacing}%;'>"
         if self.verse_segmentation:
             for verse_num,verse_text in self.verses: html+=f"<p style='margin:0 0 8px 0;padding:0;'>{self._verse_html(verse_num,verse_text)}</p>"
@@ -118,7 +118,8 @@ class ScriptureDisplay(QWidget):
         if margin is not None: self.margin_left=self.margin_right=int(margin)
         self.footer_height=int(settings.get("footer_height",self.footer_height)); self.footer_size=int(settings.get("footer_size",self.footer_size)); self.footer_color=QColor(settings.get("footer_color",self.footer_color)); self.footer_text=settings.get("footer_text",self.footer_text); self.footer_font_family=settings.get("footer_font_family",self.footer_font_family)
         self.footer_label.setText(self.footer_text); self.footer_label.setFont(QFont(self.footer_font_family,self.footer_size)); self.footer_label.setStyleSheet(f"color:{self.footer_color.name()};background:rgba(0,0,0,0);")
-        self.set_verse_segmentation(bool(settings.get("verse_segmentation",False)))
+        self.text_display.setViewportMargins(0,0,0,self.footer_height)
+        self.footer_label.raise_(); self.set_verse_segmentation(bool(settings.get("verse_segmentation",False)))
         if self.verses: self._set_adaptive_title(self._title_text); self._render_scripture()
         self.update(); self.text_display.viewport().update()
 
