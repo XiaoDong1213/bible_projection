@@ -81,6 +81,7 @@ class MainWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.nav_panel = NavigationPanel(self.db)
         self.nav_panel.book_selected.connect(self._on_book_selected)
+        self.nav_panel.range_selected.connect(self._on_range_selected)
         splitter.addWidget(self.nav_panel)
         self.scripture_display = ScriptureDisplay()
         splitter.addWidget(self.scripture_display)
@@ -149,6 +150,10 @@ class MainWindow(QMainWindow):
 
     def _on_book_selected(self, book_name, chapter):
         self._load_scripture(book_name, chapter, None, None)
+
+    def _on_range_selected(self, book_name, chapter, start_verse, end_verse):
+        self._load_scripture(book_name, chapter, start_verse, end_verse)
+        self.nav_panel.add_to_history(book_name, chapter, start_verse, end_verse)
 
     def _load_scripture(self, book_name, chapter, start_verse, end_verse):
         self.current_book = book_name
