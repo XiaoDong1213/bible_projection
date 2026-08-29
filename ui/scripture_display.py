@@ -55,8 +55,9 @@ class ScriptureDisplay(QWidget):
         self.text_display.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.text_display.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.text_display.setFrameShape(QFrame.Shape.NoFrame)
-        self.text_display.setStyleSheet("background: transparent; border: none;")
+        self.text_display.setStyleSheet("background: transparent; border: none; padding: 0px; margin: 0px;")
         self.text_display.viewport().setStyleSheet("background: transparent;")
+        self.text_display.setContentsMargins(0, 0, 0, 0)
         self.text_display.setViewportMargins(0, 0, 0, self.footer_height)
         self.text_display.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.text_display.document().setDocumentMargin(0)
@@ -122,10 +123,18 @@ class ScriptureDisplay(QWidget):
         )
 
     def _render_scripture(self):
-        # 开启：每节独立一段；关闭：所有节连续排版，只在自然换行时换行。
+        # QTextEdit 本身的内容边距统一清零，左右边距完全由下面两个独立属性控制。
+        # Qt 富文本对 padding 简写在不同版本上的兼容性不一致，因此这里明确写出
+        # padding-left / padding-right，确保左、右边距都实际作用于经文正文。
+        left = max(0, int(self.margin_left))
+        right = max(0, int(self.margin_right))
+        top = 10
+        bottom = self.footer_height + 20
         html = (
-            f"<div style='padding:10px {self.margin_right}px {self.footer_height + 20}px "
-            f"{self.margin_left}px; margin:0; line-height:{self.line_spacing}%;'>"
+            "<div style='"
+            f"margin:0; padding-top:{top}px; padding-right:{right}px; "
+            f"padding-bottom:{bottom}px; padding-left:{left}px; "
+            f"line-height:{self.line_spacing}%;'>"
         )
         if self.verse_segmentation:
             for verse_num, verse_text in self.verses:
@@ -227,7 +236,6 @@ class ScriptureDisplay(QWidget):
         self.footer_label.setStyleSheet(f"color:{self.footer_color.name()};background:rgba(0,0,0,0);")
         self.text_display.setViewportMargins(0, 0, 0, self.footer_height)
         self.footer_label.raise_()
-        # 配置中的分段状态也必须作用于显示控件；缺省值明确为 False。
         self.set_verse_segmentation(bool(settings.get("verse_segmentation", False)))
         if self.verses:
             self._set_adaptive_title(self.title_bar.text())
