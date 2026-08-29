@@ -4,7 +4,8 @@ from .history_item import HistoryItemWidget
 
 
 class NavigationPanel(QWidget):
-    book_selected = pyqtSignal(str, int)\n    range_selected = pyqtSignal(str, int, int, int)
+    book_selected = pyqtSignal(str, int)
+    range_selected = pyqtSignal(str, int, int, int)
 
     def __init__(self, db, parent=None):
         super().__init__(parent)
@@ -111,8 +112,7 @@ class NavigationPanel(QWidget):
             start, end = end, start
         self.start_spin.setValue(start)
         self.end_spin.setValue(end)
-        self.book_selected.emit(book, chapter)
-        # 主窗口目前按书卷点击信号加载整章；范围按钮由主窗口后续接管时可扩展
+        self.range_selected.emit(book, chapter, start, end)
 
     def load_history(self, history_list):
         self.history = history_list
