@@ -4,7 +4,7 @@ from .history_item import HistoryItemWidget
 
 
 class NavigationPanel(QWidget):
-    book_selected = pyqtSignal(str, int)
+    book_selected = pyqtSignal(str, int)\n    range_selected = pyqtSignal(str, int, int, int)
 
     def __init__(self, db, parent=None):
         super().__init__(parent)
