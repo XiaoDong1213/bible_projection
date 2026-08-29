@@ -24,13 +24,13 @@ class SearchWidget(QWidget):
 
         # 搜索输入框
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("输入: 约 3:16 或 创 1 或 诗篇 23:1-")
+        self.search_input.setPlaceholderText("输入：创世记1:2-12 / CSJ1.2.12 / 1.1.2.12")
         self.search_input.textChanged.connect(self._on_text_changed)
         self.search_input.returnPressed.connect(self._on_confirm)
         layout.addWidget(self.search_input)
 
         # 格式提示
-        self.hint_label = QLabel("格式: 书卷 章:节  |  空格/冒号/点号 均可分隔")
+        self.hint_label = QLabel("支持模糊匹配：书名 / 简称 / 拼音码 / 1~66；1.1.2.12；“-”后回车=本章末；ESC退出")
         self.hint_label.setStyleSheet("color: #888; font-size: 11px; padding: 2px 4px;")
         layout.addWidget(self.hint_label)
 
@@ -117,6 +117,13 @@ class SearchWidget(QWidget):
         data = item.data(Qt.ItemDataRole.UserRole)
         self.search_triggered.emit(data)
         self.close_requested.emit()
+
+    def eventFilter(self, obj, event):
+        if obj is self.search_input and event.type() == event.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Escape:
+                self.close_requested.emit()
+                return True
+        return super().eventFilter(obj, event)
 
     def keyPressEvent(self, event):
         """键盘控制：上下键选结果，ESC关闭"""
