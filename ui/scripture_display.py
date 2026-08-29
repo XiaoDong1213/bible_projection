@@ -65,6 +65,7 @@ class ScriptureDisplay(QWidget):
         self.text_display.setFrameShape(QFrame.Shape.NoFrame)
         self.text_display.setStyleSheet("background: transparent; border: none;")
         self.text_display.viewport().setStyleSheet("background: transparent;")
+        self.text_display.setViewportMargins(0, 0, 0, self.footer_height)
         self.text_display.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.text_display.document().setDocumentMargin(0)
         self.text_display.viewport().installEventFilter(self)
@@ -75,6 +76,9 @@ class ScriptureDisplay(QWidget):
         self.footer_label = QLabel(self)
         self.footer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.footer_label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.footer_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.footer_label.setText("")
+        self.footer_label.show()
         self.footer_label.raise_()
 
     def set_scripture(self, book_name, chapter, start_verse, end_verse, verses):
@@ -230,7 +234,8 @@ class ScriptureDisplay(QWidget):
         self.footer_font_family = settings.get("footer_font_family", self.footer_font_family)
         self.footer_label.setText(self.footer_text)
         self.footer_label.setFont(QFont(self.footer_font_family, self.footer_size))
-        self.footer_label.setStyleSheet(f"color:{self.footer_color.name()};background:transparent;")
+        self.footer_label.setStyleSheet(f"color:{self.footer_color.name()};background:rgba(0,0,0,0);")
+        self.text_display.setViewportMargins(0, 0, 0, self.footer_height)
         self.footer_label.raise_()
 
         if self.verses:
