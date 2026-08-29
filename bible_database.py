@@ -58,11 +58,13 @@ class BibleDatabase:
                 return None
             id_col = bc(["id", "ID", "编号"])
             short_col = bc(["ShortName", "short_name", "简称"])
+            pinyin_col = bc(["Pinyin", "pinyin", "拼音", "拼音码", "简拼"])
             long_col = bc(["LongName", "long_name", "Book", "书卷", "书名"])
             count_col = bc(["ChapterCount", "chapter_count", "章节数"])
             select_cols = []
             if id_col: select_cols.append(self._quote(id_col))
             if short_col: select_cols.append(self._quote(short_col))
+            if pinyin_col: select_cols.append(self._quote(pinyin_col))
             if long_col: select_cols.append(self._quote(long_col))
             if count_col: select_cols.append(self._quote(count_col))
             if select_cols:
@@ -70,7 +72,7 @@ class BibleDatabase:
                     data = dict(row)
                     name = str(data.get(long_col, "")).strip() if long_col else ""
                     if name:
-                        self.book_meta[name] = {"id": data.get(id_col) if id_col else None, "short": str(data.get(short_col, name[:1])).strip() if short_col else name[:1], "chapter_count": int(data[count_col]) if count_col and str(data.get(count_col, "")).isdigit() else None}
+                        self.book_meta[name] = {"id": data.get(id_col) if id_col else None, "short": str(data.get(short_col, name[:1])).strip() if short_col else name[:1], "pinyin": str(data.get(pinyin_col, "")).strip() if pinyin_col else "", "chapter_count": int(data[count_col]) if count_col and str(data.get(count_col, "")).isdigit() else None}
         id_to_name = {str(v.get('id')).strip(): k for k, v in self.book_meta.items() if v.get('id') is not None}
         mapped_names = []
         for raw in bible_names:
@@ -79,21 +81,13 @@ class BibleDatabase:
                 mapped_names.append(name)
         self.book_names = [name for name in self.book_meta if name in mapped_names] or mapped_names
 
-        # 66卷标准拼音码。数字1~66始终按数据库中的书卷顺序对应。
-        codes = [
-            "CSJ","CFJ","LWSJ","MSJ","SMJ","YSJ","SSM","LSJ","SWSJ","WSJ",
-            "DLSJ","DLZ","NLSJ","SL","NJ","STJ","YB","SJ","PS","PY",
-            "CDS","YGG","YSY","JLM","JLA","YZXJ","DNYL","HXS","YEL","AM",
-            "ESDY","YL","MH","NH","HB","HGY","MLJ","MJFY","MKFY","LJFY",
-            "YHFY","SHXS","LMS","GLLQ","YFS","FLB","GLX","TQ","TXQ","TSL",
-            "TSL2","TQMS","TMD","TD","FLM","XLYS","YGS","YQ","BDE","BDH",
-            "YDS","JDS","JDYS","YD","QL"
-        ]
+        # 简拼完全读取 Books.Pinyin，不再在 Python 中硬编码。
         self.book_codes = {}
         for i, book in enumerate(self.book_names[:66], 1):
             self.book_codes[str(i)] = book
-            if i <= len(codes):
-                self.book_codes[codes[i - 1].lower()] = book
+            pinyin = self.book_meta.get(book, {}).get("pinyin", "")
+            if pinyin:
+                self.book_codes[self._normalize_code(pinyin)] = book
 
         self.short_names = {
             "创":"创世记","出":"出埃及记","利":"利未记","民":"民数记","申":"申命记","书":"约书亚记","士":"士师记","得":"路得记","撒上":"撒母耳记上","撒下":"撒母耳记下","王上":"列王纪上","王下":"列王纪下","代上":"历代志上","代下":"历代志下","拉":"以斯拉记","尼":"尼希米记","斯":"以斯帖记","伯":"约伯记","诗":"诗篇","箴":"箴言","传":"传道书","歌":"雅歌","赛":"以赛亚书","耶":"耶利米书","哀":"耶利米哀歌","结":"以西结书","但":"但以理书","何":"何西阿书","珥":"约珥书","摩":"阿摩司书","俄":"俄巴底亚书","拿":"约拿书","弥":"弥迦书","鸿":"那鸿书","哈":"哈巴谷书","番":"西番雅书","该":"哈该书","亚":"撒迦利亚书","玛":"玛拉基书","太":"马太福音","可":"马可福音","路":"路加福音","约":"约翰福音","徒":"使徒行传","罗":"罗马书","林前":"哥林多前书","林后":"哥林多后书","加":"加拉太书","弗":"以弗所书","腓":"腓立比书","西":"歌罗西书","帖前":"帖撒罗尼迦前书","帖后":"帖撒罗尼迦后书","提前":"提摩太前书","提后":"提摩太后书","多":"提多书","门":"腓利门书","来":"希伯来书","雅":"雅各书","彼前":"彼得前书","彼后":"彼得后书","约一":"约翰一书","约二":"约翰二书","约三":"约翰三书","犹":"犹大书","启":"启示录"
@@ -120,7 +114,8 @@ class BibleDatabase:
         results = []
         for book in self.book_names:
             codes = [code for code, target in self.book_codes.items() if target == book]
-            if q in book.lower() or q in self._short_name(book).lower() or any(q in code for code in codes):
+            pinyin = self.book_meta.get(book, {}).get("pinyin", "")
+            if q in book.lower() or q in self._short_name(book).lower() or (pinyin and q in self._normalize_code(pinyin)) or any(q in code for code in codes):
                 if book not in results:
                     results.append(book)
         return results
