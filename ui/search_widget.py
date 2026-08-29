@@ -1,141 +1,168 @@
 # ui/search_widget.py
-# 搜索弹窗控件
-# 功能：回车呼出，简拼搜索，实时提示，回车确认
+# 经文快速搜索：支持中文书名、简称、拼音码、1~66、小键盘格式、模糊匹配
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLineEdit, QLabel, QListWidget, QListWidgetItem
+import re
+
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QLineEdit, QLabel, QListWidget, QListWidgetItem
+)
 from PyQt6.QtCore import Qt, pyqtSignal
 
 
 class SearchWidget(QWidget):
-    # 信号：确认搜索、请求关闭
-    search_triggered = pyqtSignal(tuple)   # 参数：(书卷, 章, 起始节, 结束节)
+    search_triggered = pyqtSignal(tuple)   # (书卷, 章, 起始节, 结束节)
     close_requested = pyqtSignal()
 
     def __init__(self, db, parent=None):
         super().__init__(parent)
         self.db = db
-
-        # 无边框弹窗样式
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Popup)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        layout = QVBoxLayout()
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(4)
 
-        # 搜索输入框
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("输入：创世记1:2-12 / CSJ1.2.12 / 1.1.2.12")
+        self.search_input.setPlaceholderText(
+            "创世记1:2-12  /  CSJ1.2-12  /  1.1.2.12"
+        )
         self.search_input.textChanged.connect(self._on_text_changed)
         self.search_input.returnPressed.connect(self._on_confirm)
         layout.addWidget(self.search_input)
 
-        # 格式提示
-        self.hint_label = QLabel("支持模糊匹配：书名 / 简称 / 拼音码 / 1~66；1.1.2.12；“-”后回车=本章末；ESC退出")
-        self.hint_label.setStyleSheet("color: #888; font-size: 11px; padding: 2px 4px;")
+        self.hint_label = QLabel(
+            "模糊匹配：书名 / 简称 / 拼音码 / 1~66　｜　空格、:、. 可作分隔　｜　- 后回车=本章末　｜　ESC退出"
+        )
+        self.hint_label.setStyleSheet("color:#888;font-size:11px;padding:2px 4px;")
         layout.addWidget(self.hint_label)
 
-        # 结果列表
         self.result_list = QListWidget()
         self.result_list.setStyleSheet("""
-            QListWidget {
-                border: 1px solid #DDD;
-                border-radius: 6px;
-                background: rgba(255,255,255,0.98);
-                max-height: 200px;
-            }
-            QListWidget::item {
-                padding: 7px 12px;
-                font-size: 13px;
-            }
-            QListWidget::item:selected {
-                background: #4A90E2;
-                color: white;
-            }
+            QListWidget { border:1px solid #DDD; border-radius:6px;
+                background:rgba(255,255,255,0.98); max-height:240px; }
+            QListWidget::item { padding:7px 12px; font-size:13px; }
+            QListWidget::item:selected { background:#4A90E2; color:white; }
         """)
         self.result_list.itemClicked.connect(self._on_item_clicked)
         layout.addWidget(self.result_list)
 
-        self.setLayout(layout)
+        self.search_input.installEventFilter(self)
+        self.result_list.installEventFilter(self)
+        self.setFocusProxy(self.search_input)
+
+    def showEvent(self, event):
+        super().showEvent(event)
         self.search_input.setFocus()
+        self.search_input.selectAll()
+        self._on_text_changed(self.search_input.text())
 
     def _on_text_changed(self, text):
-        """输入变化时实时更新搜索建议"""
         self.result_list.clear()
-        if not text.strip():
+        text = text.strip()
+        if not text:
             return
 
-        # 1. 完整解析结果（最优先）
+        # 完整经文格式优先
         parsed = self.db.parse_reference(text)
         if parsed:
             book, chapter, start, end = parsed
-            display = self._format_display(book, chapter, start, end)
-            item = QListWidgetItem(f"▶ {display}")
+            item = QListWidgetItem("▶ " + self._format_display(book, chapter, start, end))
             item.setData(Qt.ItemDataRole.UserRole, parsed)
             self.result_list.addItem(item)
+            self.result_list.setCurrentRow(0)
+            return
 
-        # 2. 书卷匹配建议
-        parts = text.split()
-        if parts:
-            books = self.db.search_books(parts[0])
-            for book in books[:8]:
-                item = QListWidgetItem(f"  {book}")
-                item.setData(Qt.ItemDataRole.UserRole, (book, 1, None, None))
-                self.result_list.addItem(item)
+        # 没有完整格式时，对书卷部分进行模糊匹配。
+        book_query = self._extract_book_query(text)
+        if not book_query:
+            return
+
+        books = self.db.search_books(book_query)
+        for book in books[:12]:
+            item = QListWidgetItem(f"  {book}  ·  {self.db._short_name(book)}")
+            item.setData(Qt.ItemDataRole.UserRole, (book, 1, None, None))
+            self.result_list.addItem(item)
+        if self.result_list.count():
+            self.result_list.setCurrentRow(0)
+
+    @staticmethod
+    def _extract_book_query(text):
+        # 1.1.2.12 属于纯数字快速输入，不展示书卷候选
+        if re.fullmatch(r"\d{1,2}[.\s]+\d+[.\s]+\d+(?:[.\s]+\d+)?", text):
+            return ""
+        # 去掉开头数字、章节符号后的内容；中文/拼音书名保留
+        m = re.match(r"^([^0-9:：.\-]+?)(?=\d|$)", text)
+        if m:
+            return m.group(1).strip()
+        return re.split(r"[0-9:：.\-\s]+", text, maxsplit=1)[0].strip()
 
     def _format_display(self, book, chapter, start, end):
-        """格式化显示文本"""
         if start is None:
             return f"{book} {chapter}章（整章）"
-        elif end is None:
+        if end is None:
             return f"{book} {chapter}:{start}-末"
-        elif start == end:
+        if start == end:
             return f"{book} {chapter}:{start}"
-        else:
-            return f"{book} {chapter}:{start}-{end}"
+        return f"{book} {chapter}:{start}-{end}"
 
     def _on_confirm(self):
-        """回车确认搜索"""
-        if self.result_list.count() > 0:
-            current = self.result_list.currentItem()
-            if current:
-                data = current.data(Qt.ItemDataRole.UserRole)
-                self.search_triggered.emit(data)
-            else:
-                # 没有选中项就解析输入文本
-                parsed = self.db.parse_reference(self.search_input.text())
-                if parsed:
-                    self.search_triggered.emit(parsed)
-        else:
-            parsed = self.db.parse_reference(self.search_input.text())
-            if parsed:
-                self.search_triggered.emit(parsed)
+        text = self.search_input.text().strip()
+        parsed = self.db.parse_reference(text)
 
-        self.close_requested.emit()
+        if parsed:
+            self.search_triggered.emit(parsed)
+            self.close_requested.emit()
+            return
+
+        # 模糊匹配时，回车选择当前书卷；默认第1章
+        current = self.result_list.currentItem()
+        if current:
+            data = current.data(Qt.ItemDataRole.UserRole)
+            if data:
+                self.search_triggered.emit(data)
+                self.close_requested.emit()
+                return
+
+        self.hint_label.setText("未找到匹配的书卷或经文格式，请检查输入")
 
     def _on_item_clicked(self, item):
-        """点击结果项"""
         data = item.data(Qt.ItemDataRole.UserRole)
-        self.search_triggered.emit(data)
-        self.close_requested.emit()
+        if data:
+            self.search_triggered.emit(data)
+            self.close_requested.emit()
 
     def eventFilter(self, obj, event):
-        if obj is self.search_input and event.type() == event.Type.KeyPress:
-            if event.key() == Qt.Key.Key_Escape:
+        if event.type() == event.Type.KeyPress:
+            key = event.key()
+            if key == Qt.Key.Key_Escape:
                 self.close_requested.emit()
                 return True
+            if obj in (self.search_input, self.result_list):
+                if key == Qt.Key.Key_Down:
+                    self._move_selection(1)
+                    return True
+                if key == Qt.Key.Key_Up:
+                    self._move_selection(-1)
+                    return True
+                if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    self._on_confirm()
+                    return True
         return super().eventFilter(obj, event)
 
+    def _move_selection(self, delta):
+        count = self.result_list.count()
+        if count == 0:
+            return
+        row = self.result_list.currentRow()
+        if row < 0:
+            row = 0
+        else:
+            row = max(0, min(count - 1, row + delta))
+        self.result_list.setCurrentRow(row)
+
     def keyPressEvent(self, event):
-        """键盘控制：上下键选结果，ESC关闭"""
         if event.key() == Qt.Key.Key_Escape:
             self.close_requested.emit()
-        elif event.key() == Qt.Key.Key_Down:
-            if self.result_list.count() > 0:
-                current = self.result_list.currentRow()
-                self.result_list.setCurrentRow(min(current + 1, self.result_list.count() - 1))
-        elif event.key() == Qt.Key.Key_Up:
-            current = self.result_list.currentRow()
-            if current > 0:
-                self.result_list.setCurrentRow(current - 1)
-        else:
-            super().keyPressEvent(event)
+            return
+        super().keyPressEvent(event)
