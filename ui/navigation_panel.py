@@ -43,6 +43,7 @@ class NavigationPanel(QWidget):
         self.tab_widget.addTab(history_widget, "历史")
         layout.addWidget(self.tab_widget, 1)
 
+        # 独立、醒目的“按节分段”按钮：只控制显示排版，不改变当前经文范围。
         options_box = QWidget()
         options_box.setObjectName("displayOptionsBox")
         options_layout = QHBoxLayout(options_box)
@@ -52,13 +53,13 @@ class NavigationPanel(QWidget):
         options_title.setStyleSheet("font-weight: bold;")
         options_layout.addWidget(options_title)
 
-        # 明确命名为“按节分段”，默认关闭。该控件只负责切换显示方式，不修改经文范围。
-        self.segment_check = QCheckBox("按节分段")
-        self.segment_check.setChecked(False)
-        self.segment_check.setToolTip("关闭：经文连续显示（默认）；开启：每节单独一段显示")
-        self.segment_check.setStyleSheet("QCheckBox { spacing: 6px; } QCheckBox::indicator { width: 16px; height: 16px; }")
-        options_layout.addWidget(self.segment_check)
-        options_layout.addStretch()
+        self.segment_btn = QPushButton("按节分段：关")
+        self.segment_btn.setCheckable(True)
+        self.segment_btn.setChecked(False)
+        self.segment_btn.setMinimumHeight(30)
+        self.segment_btn.setToolTip("关闭：经文连续显示；开启：每节单独一段显示")
+        self.segment_btn.clicked.connect(self._on_segment_clicked)
+        options_layout.addWidget(self.segment_btn, 1)
         layout.addWidget(options_box)
 
         box = QWidget()
@@ -80,17 +81,25 @@ class NavigationPanel(QWidget):
         grid.addWidget(self.select_btn, 1, 3)
         layout.addWidget(box)
 
-        self.segment_check.toggled.connect(self._on_segment_toggled)
         self.setLayout(layout)
+        self._update_segment_button(False)
 
-    def _on_segment_toggled(self, enabled):
-        self.verse_segmentation_changed.emit(bool(enabled))
+    def _on_segment_clicked(self, checked):
+        checked = bool(checked)
+        self._update_segment_button(checked)
+        self.verse_segmentation_changed.emit(checked)
+
+    def _update_segment_button(self, enabled):
+        self.segment_btn.setChecked(bool(enabled))
+        self.segment_btn.setText("按节分段：开" if enabled else "按节分段：关")
 
     def set_verse_segmentation(self, enabled, emit_signal=False):
         enabled = bool(enabled)
-        old = self.segment_check.blockSignals(True)
-        self.segment_check.setChecked(enabled)
-        self.segment_check.blockSignals(old)
+        old = self.segment_btn.blockSignals(True)
+        self._update_segment_button(enabled)
+        self.segment_btn.blockSignals(old)
+        if emit_signal:
+            self.verse_segmentation_changed.emit(enabled)
 
     def _create_book_list(self, category, columns, short=False):
         w = QListWidget()
