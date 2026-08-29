@@ -70,6 +70,7 @@ class ScriptureDisplay(QWidget):
         self.text_display.viewport().installEventFilter(self)
         self.text_display.verticalScrollBar().valueChanged.connect(self._on_scrollbar_changed)
         layout.addWidget(self.text_display, 1)
+        self.title_bar.raise_()
 
         self.footer_label = QLabel(self)
         self.footer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
