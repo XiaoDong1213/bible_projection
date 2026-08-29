@@ -1,5 +1,5 @@
 # ui/search_widget.py
-# 经文快速搜索：支持中文书名、简称、拼音码、1~66、小键盘格式、模糊匹配
+# 经文快速搜索：支持中文书名、简称、拼音码、数字快捷输入、小键盘格式、模糊匹配
 
 import re
 
@@ -10,7 +10,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 
 class SearchWidget(QWidget):
-    search_triggered = pyqtSignal(tuple)   # (书卷, 章, 起始节, 结束节)
+    search_triggered = pyqtSignal(tuple)
     close_requested = pyqtSignal()
 
     def __init__(self, db, parent=None):
@@ -24,15 +24,14 @@ class SearchWidget(QWidget):
         layout.setSpacing(4)
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText(
-            "创世记1:2-12  /  CSJ1.2-12  /  1.1.2.12"
-        )
+        # 界面上只展示文字示例；数字快捷格式仍可直接输入使用。
+        self.search_input.setPlaceholderText("例如：创世记1:2-12  或  CSJ 1:2-12")
         self.search_input.textChanged.connect(self._on_text_changed)
         self.search_input.returnPressed.connect(self._on_confirm)
         layout.addWidget(self.search_input)
 
         self.hint_label = QLabel(
-            "模糊匹配：书名 / 简称 / 拼音码 / 1~66　｜　空格、:、. 可作分隔　｜　- 后回车=本章末　｜　ESC退出"
+            "支持模糊匹配：书名 / 简称 / 拼音码　｜　空格、:、. 可作分隔　｜　- 后回车=本章末　｜　ESC退出"
         )
         self.hint_label.setStyleSheet("color:#888;font-size:11px;padding:2px 4px;")
         layout.addWidget(self.hint_label)
@@ -73,13 +72,14 @@ class SearchWidget(QWidget):
             self.result_list.setCurrentRow(0)
             return
 
-        # 没有完整格式时，对书卷部分进行模糊匹配。
+        # 未形成完整经文地址时，显示书卷文字模糊匹配结果。
         book_query = self._extract_book_query(text)
         if not book_query:
             return
 
         books = self.db.search_books(book_query)
         for book in books[:12]:
+            # 结果只显示文字，不显示数字编号。
             item = QListWidgetItem(f"  {book}  ·  {self.db._short_name(book)}")
             item.setData(Qt.ItemDataRole.UserRole, (book, 1, None, None))
             self.result_list.addItem(item)
@@ -88,10 +88,9 @@ class SearchWidget(QWidget):
 
     @staticmethod
     def _extract_book_query(text):
-        # 1.1.2.12 属于纯数字快速输入，不展示书卷候选
+        # 纯数字小键盘格式由 parse_reference 处理，不显示数字候选。
         if re.fullmatch(r"\d{1,2}[.\s]+\d+[.\s]+\d+(?:[.\s]+\d+)?", text):
             return ""
-        # 去掉开头数字、章节符号后的内容；中文/拼音书名保留
         m = re.match(r"^([^0-9:：.\-]+?)(?=\d|$)", text)
         if m:
             return m.group(1).strip()
@@ -115,7 +114,6 @@ class SearchWidget(QWidget):
             self.close_requested.emit()
             return
 
-        # 模糊匹配时，回车选择当前书卷；默认第1章
         current = self.result_list.currentItem()
         if current:
             data = current.data(Qt.ItemDataRole.UserRole)
