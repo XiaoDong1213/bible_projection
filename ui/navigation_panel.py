@@ -13,6 +13,7 @@ class NavigationPanel(QWidget):
         super().__init__(parent)
         self.db = db
         self.history = []
+        self.selected_book = None
         self.setMinimumWidth(300)
         self.setMaximumWidth(360)
         self.setFixedWidth(330)
@@ -50,10 +51,12 @@ class NavigationPanel(QWidget):
         options_title = QLabel("显示选项")
         options_title.setStyleSheet("font-weight: bold;")
         options_layout.addWidget(options_title)
-        # 用户可直接控制是否将经文按节拆开显示，默认关闭。
-        self.segment_check = QCheckBox("分解显示")
-        self.segment_check.setToolTip("开启：按节分段显示；关闭：经文连续显示（默认）")
+
+        # 明确命名为“按节分段”，默认关闭。该控件只负责切换显示方式，不修改经文范围。
+        self.segment_check = QCheckBox("按节分段")
         self.segment_check.setChecked(False)
+        self.segment_check.setToolTip("关闭：经文连续显示（默认）；开启：每节单独一段显示")
+        self.segment_check.setStyleSheet("QCheckBox { spacing: 6px; } QCheckBox::indicator { width: 16px; height: 16px; }")
         options_layout.addWidget(self.segment_check)
         options_layout.addStretch()
         layout.addWidget(options_box)
@@ -77,8 +80,11 @@ class NavigationPanel(QWidget):
         grid.addWidget(self.select_btn, 1, 3)
         layout.addWidget(box)
 
-        self.segment_check.toggled.connect(self.verse_segmentation_changed.emit)
+        self.segment_check.toggled.connect(self._on_segment_toggled)
         self.setLayout(layout)
+
+    def _on_segment_toggled(self, enabled):
+        self.verse_segmentation_changed.emit(bool(enabled))
 
     def set_verse_segmentation(self, enabled, emit_signal=False):
         enabled = bool(enabled)
@@ -111,7 +117,6 @@ class NavigationPanel(QWidget):
         book = item.data(Qt.ItemDataRole.UserRole)
         self._set_selected_book(book)
         self.book_selected.emit(book, self.chapter_spin.value())
-        self.add_to_history(book, self.chapter_spin.value(), 1, self.db.get_verse_count(book, self.chapter_spin.value()))
 
     def _set_selected_book(self, book):
         self.selected_book = book
@@ -152,7 +157,6 @@ class NavigationPanel(QWidget):
         self.add_to_history(book, chapter, start, end)
 
     def load_history(self, history_list):
-        # 兼容旧配置中的 JSON 数组，并清理异常条目。
         cleaned = []
         for entry in history_list or []:
             try:
