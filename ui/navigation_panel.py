@@ -7,6 +7,7 @@ class NavigationPanel(QWidget):
     book_selected = pyqtSignal(str, int)
     range_selected = pyqtSignal(str, int, int, int)
     verse_segmentation_changed = pyqtSignal(bool)
+    history_changed = pyqtSignal(list)
 
     def __init__(self, db, parent=None):
         super().__init__(parent)
@@ -49,9 +50,9 @@ class NavigationPanel(QWidget):
         options_title = QLabel("显示选项")
         options_title.setStyleSheet("font-weight: bold;")
         options_layout.addWidget(options_title)
-        self.segment_check = QCheckBox("按节分段")
-        self.segment_check.setToolTip("关闭：经文连续排版；开启：每一节单独一段")
-        # 默认明确为关闭：不开启按节分段
+        # 用户可直接控制是否将经文按节拆开显示，默认关闭。
+        self.segment_check = QCheckBox("分解显示")
+        self.segment_check.setToolTip("开启：按节分段显示；关闭：经文连续显示（默认）")
         self.segment_check.setChecked(False)
         options_layout.addWidget(self.segment_check)
         options_layout.addStretch()
@@ -80,7 +81,6 @@ class NavigationPanel(QWidget):
         self.setLayout(layout)
 
     def set_verse_segmentation(self, enabled, emit_signal=False):
-        """同步界面开关与当前配置；加载配置时默认不触发保存信号。"""
         enabled = bool(enabled)
         old = self.segment_check.blockSignals(True)
         self.segment_check.setChecked(enabled)
@@ -111,7 +111,7 @@ class NavigationPanel(QWidget):
         book = item.data(Qt.ItemDataRole.UserRole)
         self._set_selected_book(book)
         self.book_selected.emit(book, self.chapter_spin.value())
-        self.add_to_history(book, self.chapter_spin.value(), self.start_spin.value(), self.end_spin.value())
+        self.add_to_history(book, self.chapter_spin.value(), 1, self.db.get_verse_count(book, self.chapter_spin.value()))
 
     def _set_selected_book(self, book):
         self.selected_book = book
@@ -149,18 +149,28 @@ class NavigationPanel(QWidget):
         self.start_spin.setValue(start)
         self.end_spin.setValue(end)
         self.range_selected.emit(book, chapter, start, end)
+        self.add_to_history(book, chapter, start, end)
 
     def load_history(self, history_list):
-        self.history = history_list
+        # 兼容旧配置中的 JSON 数组，并清理异常条目。
+        cleaned = []
+        for entry in history_list or []:
+            try:
+                if len(entry) == 4:
+                    cleaned.append((entry[0], int(entry[1]), entry[2], entry[3]))
+            except (TypeError, ValueError):
+                continue
+        self.history = cleaned[:30]
         self._update_history_list()
 
     def add_to_history(self, book, chapter, start, end):
-        entry = (book, chapter, start, end)
+        entry = (book, int(chapter), start, end)
         if entry in self.history:
             self.history.remove(entry)
         self.history.insert(0, entry)
         self.history = self.history[:30]
         self._update_history_list()
+        self.history_changed.emit(self.history)
 
     def _update_history_list(self):
         self.history_list.clear()
@@ -182,20 +192,32 @@ class NavigationPanel(QWidget):
             self.history_list.setItemWidget(item, widget)
 
     def _on_history_clicked(self, index):
+        if not (0 <= index < len(self.history)):
+            return
         book, chapter, start, end = self.history[index]
         self.selected_book = book
-        self.book_selected.emit(book, chapter)
+        self.chapter_spin.setRange(1, max(1, self.db.get_chapter_count(book)))
+        self.chapter_spin.setValue(chapter)
+        max_v = max(1, self.db.get_verse_count(book, chapter))
+        self.start_spin.setRange(1, max_v)
+        self.end_spin.setRange(1, max_v)
+        self.start_spin.setValue(max(1, min(start or 1, max_v)))
+        self.end_spin.setValue(max(1, min(end or max_v, max_v)))
+        self.range_selected.emit(book, chapter, start or 1, end or max_v)
         self.history.insert(0, self.history.pop(index))
         self._update_history_list()
+        self.history_changed.emit(self.history)
 
     def _delete_history(self, index):
         if 0 <= index < len(self.history):
             del self.history[index]
             self._update_history_list()
+            self.history_changed.emit(self.history)
 
     def _clear_history(self):
         self.history.clear()
         self._update_history_list()
+        self.history_changed.emit(self.history)
 
     def get_history(self):
         return self.history
