@@ -97,6 +97,8 @@ class MainWindow(QMainWindow):
         self.toolbar.topmost_toggled.connect(self._toggle_extension_topmost)
         self.toolbar.scroll_up.connect(lambda: self._scroll_manual(-40))
         self.toolbar.scroll_down.connect(lambda: self._scroll_manual(40))
+        # 鼠标滚轮/自动滚动时由主屏滚动位置驱动扩展屏，避免两个滚动条各自运行
+        self.scripture_display.scroll_changed.connect(self._sync_extension_scroll)
 
     # ============== 中心区域 ==============
     def _create_central_widget(self):
@@ -395,6 +397,11 @@ class MainWindow(QMainWindow):
                 self.current_start, self.current_end, self.verses
             )
         self._update_status()
+
+    def _sync_extension_scroll(self, value):
+        """主屏经文滚动位置同步到扩展屏；value 是主屏滚动条绝对位置"""
+        if self.extension_window and self.extension_window.isVisible():
+            self.extension_window.set_scroll_position(value)
 
     # ============== 底注 ==============
     def _set_footer_text(self):
