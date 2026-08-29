@@ -41,6 +41,21 @@ class NavigationPanel(QWidget):
         self.tab_widget.addTab(history_widget, "历史")
         layout.addWidget(self.tab_widget, 1)
 
+        options_box = QWidget()
+        options_box.setObjectName("displayOptionsBox")
+        options_layout = QHBoxLayout(options_box)
+        options_layout.setContentsMargins(8, 5, 8, 5)
+        options_layout.setSpacing(8)
+        options_title = QLabel("显示选项")
+        options_title.setStyleSheet("font-weight: bold;")
+        options_layout.addWidget(options_title)
+        self.segment_check = QCheckBox("按节分段")
+        self.segment_check.setToolTip("关闭：经文连续排版；开启：每一节单独一段")
+        self.segment_check.setChecked(False)
+        options_layout.addWidget(self.segment_check)
+        options_layout.addStretch()
+        layout.addWidget(options_box)
+
         # 左侧直接选择章、起始节、结束节
         box = QWidget()
         grid = QGridLayout(box)
@@ -61,10 +76,7 @@ class NavigationPanel(QWidget):
         grid.addWidget(self.select_btn, 1, 3)
         layout.addWidget(box)
 
-        self.segment_check = QCheckBox("按节分段")
-        self.segment_check.setChecked(False)
         self.segment_check.toggled.connect(self.verse_segmentation_changed.emit)
-        layout.addWidget(self.segment_check)
 
         self.setLayout(layout)
 
