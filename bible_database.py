@@ -73,10 +73,27 @@ class BibleDatabase:
             f"SELECT DISTINCT {self._quote(self.book_col)} AS book "
             f"FROM {self._quote(self.verse_table)} "
             f"WHERE {self._quote(self.book_col)} IS NOT NULL "
-            f"ORDER BY rowid"
+            f"ORDER BY MIN(rowid)"
         ).fetchall()
 
         self.book_names = [str(r["book"]) for r in rows]
+
+        # 66卷标准简称/拼音码/数字编号
+        codes = [
+            "CSJ","CFJ","LWSJ","MSJ","SMJ","YSJ","SSM","LSJ","SWSJ","WSJ",
+            "DLSJ","DLZ","NLSJ","SL","NJ","STJ","YB","SJ","PS","PY","CDS","YGG",
+            "YSY","JLM","JLA","YZXJ","DNYL","HXS","YEL","AM","ESDY","YL","MH","NH",
+            "HB","HGY","MLJ","MJFY","MKFY","LJFY","YHFY","SHXS","LMS","GLLQ","YFS",
+            "FLB","GLX","TQ","TXQ","TSL","TSL","TQMS","TMD","TD","FLM","XLYS","YGS",
+            "YQ","BDE","BDH","YDS","JDS","JDYS","YD","QL"
+        ]
+        # 常用简拼/数字别名；数字 1~66 直接对应书卷
+        self.book_codes = {}
+        for i, book in enumerate(self.book_names[:66], 1):
+            self.book_codes[str(i)] = book
+            if i <= len(codes):
+                self.book_codes[codes[i - 1].lower()] = book
+
         self.short_names = {
             "创": "创世记", "出": "出埃及记", "利": "利未记", "民": "民数记", "申": "申命记",
             "书": "约书亚记", "士": "士师记", "得": "路得记", "撒上": "撒母耳记上", "撒下": "撒母耳记下",
@@ -94,6 +111,13 @@ class BibleDatabase:
             "约一": "约翰一书", "约二": "约翰二书", "约三": "约翰三书", "犹": "犹大书", "启": "启示录"
         }
 
+        # 中文书名本身也可作为输入；数字和拼音码优先
+        for code, book in list(self.book_codes.items()):
+            self.book_codes[code.lower()] = book
+        for short, full in self.short_names.items():
+            if full in self.book_names:
+                self.book_codes[short.lower()] = full
+
     def get_books(self, category="all"):
         old_count = 39
         if category == "old":
@@ -109,19 +133,17 @@ class BibleDatabase:
         return book[:1]
 
     def search_books(self, query):
-        query = str(query).lower().strip()
+        query = str(query).strip().lower()
         if not query:
             return []
 
-        # 先处理简称，再做书名模糊匹配
+        if query in self.book_codes:
+            return [self.book_codes[query]]
+
         if query in self.short_names and self.short_names[query] in self.book_names:
             return [self.short_names[query]]
 
-        results = []
-        for book in self.book_names:
-            if query in book.lower():
-                results.append(book)
-        return results
+        return [book for book in self.book_names if query in book.lower()]
 
     def get_chapter_count(self, book_name):
         row = self.conn.execute(
@@ -171,63 +193,71 @@ class BibleDatabase:
         return [(int(r["verse"]), str(r["text"])) for r in rows]
 
     def parse_reference(self, text):
-        text = str(text).strip().replace("：", ":").replace("．", ".").replace("。", ".")
-        if not text:
+        import re
+
+        raw = str(text).strip().replace("：", ":").replace("．", ".").replace("。", ".")
+        if not raw:
             return None
 
-        parts = text.split()
-        if not parts:
+        # 统一输入分隔符：
+        # 创世记1:2-12
+        # CSJ 1:2-12
+        # 1.1.2.12（小键盘全程输入）
+        # 1 1 2 12
+        # 创世记 1 2-12
+        # “-”后直接回车/没有数字 => 到本章最后一节
+        normalized = re.sub(r"[：:．。]", ".", raw)
+        normalized = re.sub(r"\s+", ".", normalized)
+        normalized = re.sub(r"\.+", ".", normalized)
+        normalized = normalized.strip(".")
+
+        # 优先识别“数字书卷.章节.起始节.结束节”
+        m = re.fullmatch(r"(\d{1,2})\.(\d+)\.(\d+)(?:\.(\d*))?", normalized)
+        if m:
+            book_code, chapter, start, end = m.groups()
+            if book_code not in self.book_codes or int(book_code) < 1 or int(book_code) > 66:
+                return None
+            return (
+                self.book_codes[book_code],
+                int(chapter),
+                int(start),
+                int(end) if end else None
+            )
+
+        # 中文/拼音书名 + 章节经文，例如 CSJ1.2-12 / 创世记1:2-12
+        m = re.fullmatch(r"(.+?)[.]([0-9]+)[.]([0-9]+)(?:[-.]([0-9]*))?", normalized)
+        if m:
+            book_query, chapter, start, end = m.groups()
+            # 最后一段存在时，点号既可能是节范围分隔符，也可能是第四段
+            if end is not None and start == chapter:
+                pass
+            books = self.search_books(book_query)
+            if not books:
+                return None
+            return (books[0], int(chapter), int(start), int(end) if end else None)
+
+        # 传统“书卷 章:节-节”输入；允许书卷与数字之间没有空格
+        m = re.fullmatch(r"(.+?)[.]([0-9]+)(?:[.]([0-9]+)(?:[-.]([0-9]*))?)?", normalized)
+        if not m:
+            # 允许只有书卷+章节
+            m = re.fullmatch(r"(.+?)[.]([0-9]+)", normalized)
+        if not m:
             return None
 
-        # 支持“约3:16”“约 3:16”两种输入
-        if len(parts) == 1:
-            import re
-            m = re.match(r"^(.+?)(d+)(?::|\.)(.+)$", parts[0])
-            if m:
-                parts = [m.group(1), m.group(2) + ":" + m.group(3)]
-            else:
-                m = re.match(r"^(.+?)(d+)$", parts[0])
-                if m:
-                    parts = [m.group(1), m.group(2)]
+        book_query = m.group(1)
+        chapter = int(m.group(2))
+        start = m.group(3)
+        end = m.group(4) if len(m.groups()) >= 4 else None
 
-        books = self.search_books(parts[0])
+        books = self.search_books(book_query)
         if not books:
             return None
-        book_name = books[0]
 
-        if len(parts) == 1:
-            return (book_name, 1, None, None)
+        start_verse = int(start) if start else None
+        end_verse = int(end) if end else None
 
-        chapter_part = parts[1]
-        if ":" in chapter_part:
-            ch, ver = chapter_part.split(":", 1)
-        elif "." in chapter_part:
-            ch, ver = chapter_part.split(".", 1)
-        else:
-            ch, ver = chapter_part, None
-
-        try:
-            chapter = int(ch)
-        except ValueError:
-            return None
-
-        start_verse, end_verse = None, None
-        if ver:
-            if "-" in ver:
-                s, e = ver.split("-", 1)
-                try:
-                    start_verse = int(s) if s else 1
-                    end_verse = int(e) if e else None
-                except ValueError:
-                    return None
-            else:
-                try:
-                    start_verse = int(ver)
-                    end_verse = start_verse
-                except ValueError:
-                    return None
-
-        return (book_name, chapter, start_verse, end_verse)
+        # 例如“创世记1:2-”的末尾空白，统一为 end=None
+        return (books[0], chapter, start_verse, end_verse)
 
     def close(self):
         if getattr(self, "conn", None):
