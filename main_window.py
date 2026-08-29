@@ -96,6 +96,23 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key.Key_Down), self, lambda: self._scroll_manual(30))
         QShortcut(QKeySequence(Qt.Key.Key_Space), self, self._toggle_scroll_pause)
 
+        # 1~6：直接设置自动滚动速度。
+        # 使用独立 QShortcut，而不是依赖当前焦点控件的 keyPressEvent，确保在
+        # 主窗口、导航区、经文显示区等位置都可以使用。0 保持原来的暂停逻辑。
+        self.speed_shortcuts = []
+        for speed in range(1, 7):
+            shortcut = QShortcut(QKeySequence(str(speed)), self)
+            shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+            shortcut.activated.connect(lambda s=speed: self._set_scroll_speed_by_hotkey(s))
+            self.speed_shortcuts.append(shortcut)
+
+    def _set_scroll_speed_by_hotkey(self, speed):
+        """快捷键 1~6 设置速度，并立即同步主屏、扩展屏和滑块。"""
+        speed = max(1, min(6, int(speed)))
+        self.toolbar.scroll_slider.setValue(speed)
+        self._on_scroll_speed(speed)
+        self.status_label.setText(f"滚动速度：{speed}")
+
     def _create_statusbar(self):
         status = QStatusBar()
         self.setStatusBar(status)
@@ -258,51 +275,3 @@ class MainWindow(QMainWindow):
         if len(self.verses) > 1:
             self.verses.pop()
             self.current_end -= 1
-            self._refresh_display()
-
-    def _add_verse_start(self):
-        if not self.verses or self.current_start <= 1:
-            return
-        new_start = self.current_start - 1
-        new_verse = self.db.get_verse_range(self.current_book, self.current_chapter, new_start, new_start)
-        self.verses = new_verse + self.verses
-        self.current_start = new_start
-        self._refresh_display()
-
-    def _remove_verse_start(self):
-        if len(self.verses) > 1:
-            self.verses.pop(0)
-            self.current_start += 1
-            self._refresh_display()
-
-    def _refresh_display(self):
-        self.scripture_display.set_scripture(self.current_book, self.current_chapter, self.current_start, self.current_end, self.verses)
-        if self.extension_window and self.extension_window.isVisible():
-            self.extension_window.update_scripture(self.current_book, self.current_chapter, self.current_start, self.current_end, self.verses)
-        self._update_status()
-
-    def _sync_extension_scroll(self, value):
-        if self.extension_window and self.extension_window.isVisible():
-            self.extension_window.set_scroll_position(value)
-
-    def _set_footer_text(self):
-        text, ok = QInputDialog.getText(self, "底注设置", "请输入底注文字（留空则不显示文字）：", text=self.scripture_display.footer_text)
-        if ok:
-            self.settings["footer_text"] = text
-            self._apply_settings(self.settings)
-            self.config.save_display_settings({"footer_text": text})
-
-    def keyPressEvent(self, event):
-        if hasattr(self, "search_widget") and self.search_widget.isVisible():
-            if event.key() == Qt.Key.Key_Escape:
-                self._close_search()
-            return
-        super().keyPressEvent(event)
-
-    def closeEvent(self, event):
-        self.config.save_window_state(self.saveGeometry())
-        self.config.save_history(self.nav_panel.get_history())
-        if self.extension_window:
-            self.extension_window.close()
-        self.db.close()
-        event.accept()
