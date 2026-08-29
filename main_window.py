@@ -44,6 +44,16 @@ class MainWindow(QMainWindow):
     def _save_history(self, history):
         self.config.save_history(history)
 
+    def _set_footer_text(self, text):
+        text = str(text or "")
+        self.settings["footer_text"] = text
+        self.scripture_display.footer_text = text
+        self.scripture_display.footer_label.setText(text)
+        if self.extension_window:
+            self.extension_window.scripture_display.footer_text = text
+            self.extension_window.scripture_display.footer_label.setText(text)
+        self.config.save_display_settings({"footer_text": text})
+
     def _load_theme_style(self):
         style_path = os.path.join("styles", f"{self.theme}.qss")
         if os.path.exists(style_path):
@@ -149,6 +159,7 @@ class MainWindow(QMainWindow):
 
     def _on_book_selected(self, book_name, chapter):
         self._load_scripture(book_name, chapter, None, None)
+        self.nav_panel.add_to_history(book_name, chapter, 1, self.db.get_verse_count(book_name, chapter))
 
     def _on_verse_segmentation_changed(self, enabled):
         enabled = bool(enabled)
@@ -260,3 +271,4 @@ class MainWindow(QMainWindow):
         if len(self.verses) > 1:
             self.verses.pop()
             self.current_end -= 1
+            self._refresh_display()
