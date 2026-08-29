@@ -3,19 +3,13 @@
 # 功能：协调各UI组件，处理快捷键、双屏同步、事件响应
 
 import os
-from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QHBoxLayout, QSplitter, QStatusBar,
-    QLabel, QInputDialog, QApplication
-)
+from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QSplitter, QStatusBar, QLabel, QInputDialog, QApplication
 from PyQt6.QtCore import Qt, QPoint
 from PyQt6.QtGui import QKeySequence, QShortcut
 
 from config import AppConfig
 from bible_database import BibleDatabase
-from ui import (
-    ScriptureDisplay, SearchWidget, NavigationPanel,
-    ToolBarWidget, ExtensionWindow
-)
+from ui import ScriptureDisplay, SearchWidget, NavigationPanel, ToolBarWidget, ExtensionWindow
 
 
 class MainWindow(QMainWindow):
@@ -39,13 +33,10 @@ class MainWindow(QMainWindow):
         else:
             self.resize(1200, 800)
         self._load_theme_style()
-
-        # 先创建中心区域，再创建工具栏；工具栏需要连接 scripture_display
         self._create_central_widget()
         self._create_toolbar()
         self._create_shortcuts()
         self._create_statusbar()
-
         history = config.load_history()
         self.nav_panel.load_history(history)
         self._apply_settings(self.settings)
@@ -117,11 +108,14 @@ class MainWindow(QMainWindow):
         self.config.save_display_settings(settings)
 
     def _apply_settings(self, settings):
+        self.settings.update(settings)
         self.scripture_display.apply_settings(settings)
-        self.scripture_display.set_verse_segmentation(bool(settings.get('verse_segmentation', False)))
+        # 配置加载时同步左侧开关，但不重复触发保存。
+        self.nav_panel.set_verse_segmentation(bool(settings.get("verse_segmentation", False)))
+        self.scripture_display.set_verse_segmentation(bool(settings.get("verse_segmentation", False)))
         if self.extension_window:
             self.extension_window.apply_settings(settings)
-            self.extension_window.scripture_display.set_verse_segmentation(bool(settings.get('verse_segmentation', False)))
+            self.extension_window.scripture_display.set_verse_segmentation(bool(settings.get("verse_segmentation", False)))
 
     def _on_theme_changed(self, theme):
         self.theme = theme
@@ -155,11 +149,12 @@ class MainWindow(QMainWindow):
         self._load_scripture(book_name, chapter, None, None)
 
     def _on_verse_segmentation_changed(self, enabled):
-        self.settings['verse_segmentation'] = bool(enabled)
+        enabled = bool(enabled)
+        self.settings['verse_segmentation'] = enabled
         self.scripture_display.set_verse_segmentation(enabled)
         if self.extension_window:
             self.extension_window.scripture_display.set_verse_segmentation(enabled)
-        self.config.save_display_settings({'verse_segmentation': bool(enabled)})
+        self.config.save_display_settings({'verse_segmentation': enabled})
 
     def _on_range_selected(self, book_name, chapter, start_verse, end_verse):
         self._load_scripture(book_name, chapter, start_verse, end_verse)
@@ -170,7 +165,6 @@ class MainWindow(QMainWindow):
         self.current_chapter = chapter
         self.current_start = start_verse
         self.current_end = end_verse
-
         if start_verse is None:
             verses = self.db.get_verse_range(book_name, chapter, 1)
             self.current_start = 1
@@ -179,18 +173,10 @@ class MainWindow(QMainWindow):
             verses = self.db.get_verse_range(book_name, chapter, start_verse, end_verse)
             if end_verse is None:
                 self.current_end = verses[-1][0] if verses else start_verse
-
         self.verses = verses
-        self.scripture_display.set_scripture(
-            book_name, chapter, self.current_start, self.current_end, verses
-        )
-
+        self.scripture_display.set_scripture(book_name, chapter, self.current_start, self.current_end, verses)
         if self.extension_window and self.extension_window.isVisible():
-            self.extension_window.update_scripture(
-                book_name, chapter, start_verse,
-                self.current_end if end_verse is None else end_verse,
-                verses
-            )
+            self.extension_window.update_scripture(book_name, chapter, start_verse, self.current_end if end_verse is None else end_verse, verses)
         self._update_status()
 
     def _update_status(self):
@@ -227,10 +213,7 @@ class MainWindow(QMainWindow):
         self.extension_window.setGeometry(geom)
         self.extension_window.showFullScreen()
         if self.verses:
-            self.extension_window.update_scripture(
-                self.current_book, self.current_chapter,
-                self.current_start, self.current_end, self.verses
-            )
+            self.extension_window.update_scripture(self.current_book, self.current_chapter, self.current_start, self.current_end, self.verses)
         self.extension_window.set_scroll_speed(self.toolbar.scroll_slider.value())
         self.toolbar.set_extend_active(True)
         self.status_label.setText(f"扩展显示: 屏幕2 ({geom.width()}x{geom.height()})")
@@ -293,15 +276,9 @@ class MainWindow(QMainWindow):
             self._refresh_display()
 
     def _refresh_display(self):
-        self.scripture_display.set_scripture(
-            self.current_book, self.current_chapter,
-            self.current_start, self.current_end, self.verses
-        )
+        self.scripture_display.set_scripture(self.current_book, self.current_chapter, self.current_start, self.current_end, self.verses)
         if self.extension_window and self.extension_window.isVisible():
-            self.extension_window.update_scripture(
-                self.current_book, self.current_chapter,
-                self.current_start, self.current_end, self.verses
-            )
+            self.extension_window.update_scripture(self.current_book, self.current_chapter, self.current_start, self.current_end, self.verses)
         self._update_status()
 
     def _sync_extension_scroll(self, value):
@@ -309,10 +286,7 @@ class MainWindow(QMainWindow):
             self.extension_window.set_scroll_position(value)
 
     def _set_footer_text(self):
-        text, ok = QInputDialog.getText(
-            self, "底注设置", "请输入底注文字（留空则不显示文字）:",
-            text=self.scripture_display.footer_text
-        )
+        text, ok = QInputDialog.getText(self, "底注设置", "请输入底注文字（留空则不显示文字）：", text=self.scripture_display.footer_text)
         if ok:
             self.settings["footer_text"] = text
             self._apply_settings(self.settings)
