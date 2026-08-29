@@ -17,7 +17,8 @@ class BibleDatabase:
         tables = self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         if not tables:
             raise RuntimeError("和合本.db中没有可用数据表")
-        self.verse_table = "Titles" if any(r[0] == "Titles" for r in tables) else tables[0][0]
+        self.verse_table = "Bible" if any(r[0] == "Bible" for r in tables) else tables[0][0]
+        self.books_table = "Books" if any(r[0] == "Books" for r in tables) else None
         columns = [r[1] for r in self.conn.execute(f'PRAGMA table_info("{self.verse_table}")').fetchall()]
 
         def find(names):
@@ -45,7 +46,30 @@ class BibleDatabase:
             f"GROUP BY {self._quote(self.book_col)} "
             f"ORDER BY first_row"
         ).fetchall()
-        self.book_names = [str(r["book"]) for r in rows]
+        bible_names = [str(r["book"]) for r in rows]
+        self.book_meta = {}
+        if self.books_table:
+            cols = [r[1] for r in self.conn.execute(f'PRAGMA table_info("{self.books_table}")').fetchall()]
+            lower = {x.lower(): x for x in cols}
+            def bc(names):
+                for n in names:
+                    if n.lower() in lower:
+                        return lower[n.lower()]
+                return None
+            short_col = bc(["ShortName", "short_name", "简称"])
+            long_col = bc(["LongName", "long_name", "Book", "书卷", "书名"])
+            count_col = bc(["ChapterCount", "chapter_count", "章节数"])
+            select_cols = []
+            if short_col: select_cols.append(self._quote(short_col))
+            if long_col: select_cols.append(self._quote(long_col))
+            if count_col: select_cols.append(self._quote(count_col))
+            if select_cols:
+                for row in self.conn.execute(f'SELECT {", ".join(select_cols)} FROM "{self.books_table}"').fetchall():
+                    vals = list(row)
+                    name = str(vals[1] if long_col and short_col else vals[0] if long_col else "")
+                    if name:
+                        self.book_meta[name] = {"short": str(vals[0]) if short_col else name[:1], "chapter_count": None}
+        self.book_names = [b for b in self.book_meta if b in bible_names] or bible_names
 
         # 66卷标准拼音码。数字1~66始终按数据库中的书卷顺序对应。
         codes = [
@@ -77,7 +101,7 @@ class BibleDatabase:
         for short, full in self.short_names.items():
             if full == book:
                 return short
-        return book[:1]
+        return self.book_meta.get(book, {}).get("short", book[:1])
 
     def search_books(self, query):
         q = self._normalize_code(query)
