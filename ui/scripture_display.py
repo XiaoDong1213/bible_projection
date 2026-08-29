@@ -115,10 +115,10 @@ class ScriptureDisplay(QWidget):
             html += (
                 "<p style='margin:0 0 8px 0;padding:0;'>"
                 f'<span style="color:{self.verse_num_color.name()};font-size:{self.verse_num_size}px;' 
-                f'font-family:&quot;{self.verse_num_font_family}&quot;;font-weight:bold;vertical-align:super;>'
+                f'font-family:&quot;{self.verse_num_font_family}&quot;;font-weight:bold;vertical-align:super;">'
                 f"{verse_num}</span>&nbsp;"
                 f'<span style="color:{self.font_color.name()};font-size:{self.font_size}px;' 
-                f'font-family:&quot;{self.font_family}&quot;;'>{safe_text}</span></p>'
+                f'font-family:&quot;{self.font_family}&quot;;">{safe_text}</span></p>'
             )
         html += "</div>"
         self.text_display.setHtml(html)
