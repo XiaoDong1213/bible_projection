@@ -141,11 +141,11 @@ class BibleDatabase:
         return [(b, self._short_name(b)) for b in books]
 
     def get_chapter_count(self, book_name):
-        row = self.conn.execute(f"SELECT MAX({self._quote(self.chapter_col)}) AS n FROM {self._quote(self.verse_table)} WHERE {self._quote(self.book_col)}=?", (book_name,)).fetchone()
+        row = self.conn.execute(f"SELECT MAX({self._quote(self.chapter_col)}) AS n FROM {self._quote(self.verse_table)} WHERE {self._quote(self.book_col)}=?", (self.book_meta.get(book_name, {}).get('id', book_name),)).fetchone()
         return int(row["n"] or 0)
 
     def get_verse_count(self, book_name, chapter):
-        row = self.conn.execute(f"SELECT MAX({self._quote(self.verse_col)}) AS n FROM {self._quote(self.verse_table)} WHERE {self._quote(self.book_col)}=? AND {self._quote(self.chapter_col)}=?", (book_name, chapter)).fetchone()
+        row = self.conn.execute(f"SELECT MAX({self._quote(self.verse_col)}) AS n FROM {self._quote(self.verse_table)} WHERE {self._quote(self.book_col)}=? AND {self._quote(self.chapter_col)}=?", (self.book_meta.get(book_name, {}).get('id', book_name), chapter)).fetchone()
         return int(row["n"] or 0)
 
     def get_verses(self, book_name, chapter, start_verse=None, end_verse=None):
