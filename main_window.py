@@ -1,9 +1,8 @@
-# main_window.py
 # 主窗口 - 业务逻辑层
 # 功能：协调各UI组件，处理快捷键、双屏同步、事件响应
 
 import os
-from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QSplitter, QStatusBar, QLabel, QInputDialog, QApplication
+from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QSplitter, QStatusBar, QLabel, QApplication
 from PyQt6.QtCore import Qt, QPoint
 from PyQt6.QtGui import QKeySequence, QShortcut
 
@@ -39,7 +38,11 @@ class MainWindow(QMainWindow):
         self._create_statusbar()
         history = config.load_history()
         self.nav_panel.load_history(history)
+        self.nav_panel.history_changed.connect(self._save_history)
         self._apply_settings(self.settings)
+
+    def _save_history(self, history):
+        self.config.save_history(history)
 
     def _load_theme_style(self):
         style_path = os.path.join("styles", f"{self.theme}.qss")
@@ -96,23 +99,6 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key.Key_Down), self, lambda: self._scroll_manual(30))
         QShortcut(QKeySequence(Qt.Key.Key_Space), self, self._toggle_scroll_pause)
 
-        # 1~6：直接设置自动滚动速度。
-        # 使用独立 QShortcut，而不是依赖当前焦点控件的 keyPressEvent，确保在
-        # 主窗口、导航区、经文显示区等位置都可以使用。0 保持原来的暂停逻辑。
-        self.speed_shortcuts = []
-        for speed in range(1, 7):
-            shortcut = QShortcut(QKeySequence(str(speed)), self)
-            shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
-            shortcut.activated.connect(lambda s=speed: self._set_scroll_speed_by_hotkey(s))
-            self.speed_shortcuts.append(shortcut)
-
-    def _set_scroll_speed_by_hotkey(self, speed):
-        """快捷键 1~6 设置速度，并立即同步主屏、扩展屏和滑块。"""
-        speed = max(1, min(6, int(speed)))
-        self.toolbar.scroll_slider.setValue(speed)
-        self._on_scroll_speed(speed)
-        self.status_label.setText(f"滚动速度：{speed}")
-
     def _create_statusbar(self):
         status = QStatusBar()
         self.setStatusBar(status)
@@ -127,7 +113,6 @@ class MainWindow(QMainWindow):
     def _apply_settings(self, settings):
         self.settings.update(settings)
         self.scripture_display.apply_settings(settings)
-        # 配置加载时同步左侧开关，但不重复触发保存。
         self.nav_panel.set_verse_segmentation(bool(settings.get("verse_segmentation", False)))
         self.scripture_display.set_verse_segmentation(bool(settings.get("verse_segmentation", False)))
         if self.extension_window:
