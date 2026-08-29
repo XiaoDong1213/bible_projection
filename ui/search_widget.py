@@ -1,5 +1,5 @@
 # ui/search_widget.py
-# 经文快速搜索：支持中文书名、简称、拼音码、数字快捷输入、小键盘格式、模糊匹配
+# 经文快速搜索：支持中文书名、简称、Books.Pinyin简拼、数字快捷输入、小键盘格式、模糊匹配
 
 import re
 
@@ -24,14 +24,13 @@ class SearchWidget(QWidget):
         layout.setSpacing(4)
 
         self.search_input = QLineEdit()
-        # 界面上只展示文字示例；数字快捷格式仍可直接输入使用。
         self.search_input.setPlaceholderText("例如：创世记1:2-12  或  CSJ 1:2-12")
         self.search_input.textChanged.connect(self._on_text_changed)
         self.search_input.returnPressed.connect(self._on_confirm)
         layout.addWidget(self.search_input)
 
         self.hint_label = QLabel(
-            "支持模糊匹配：书名 / 简称 / 拼音码　｜　空格、:、. 可作分隔　｜　- 后回车=本章末　｜　ESC退出"
+            "支持：书名 / 简称 / Books.Pinyin简拼　｜　空格、:、. 可作分隔　｜　- 后回车=本章末　｜　ESC退出"
         )
         self.hint_label.setStyleSheet("color:#888;font-size:11px;padding:2px 4px;")
         layout.addWidget(self.hint_label)
@@ -56,14 +55,56 @@ class SearchWidget(QWidget):
         self.search_input.selectAll()
         self._on_text_changed(self.search_input.text())
 
+    @staticmethod
+    def _normalize(value):
+        """统一简拼输入：忽略大小写、空格及常见分隔符。"""
+        return re.sub(r"[\s._-]+", "", str(value or "").strip().lower())
+
+    def _find_by_pinyin(self, query):
+        """直接从 Books.Pinyin 建立的 book_meta 中查找，确保简拼不依赖硬编码。"""
+        q = self._normalize(query)
+        if not q:
+            return None
+        for book, meta in getattr(self.db, "book_meta", {}).items():
+            pinyin = self._normalize(meta.get("pinyin", ""))
+            if pinyin and pinyin == q:
+                return book
+        return None
+
+    def _parse_reference(self, text):
+        """先处理 Books.Pinyin，再交给数据库处理其它格式。"""
+        raw = str(text).strip().replace("：", ":").replace("．", ".").replace("。", ".")
+        if not raw:
+            return None
+
+        # 简拼 + 章节，例如 CSJ1:2、CSJ 1:2、CSJ 1.2、CSJ 1 2-12
+        m = re.fullmatch(r"([A-Za-z]+)[\s]*(\d+)(?::|[.\s]+)(\d+)(?:\s*-\s*(\d*))?", raw)
+        if m:
+            code, chapter, start, end = m.groups()
+            book = self._find_by_pinyin(code)
+            if book:
+                return (
+                    book,
+                    int(chapter),
+                    int(start),
+                    int(end) if end else (None if "-" in raw else int(start)),
+                )
+
+        # 仅输入简拼，直接定位到该书卷
+        book = self._find_by_pinyin(raw)
+        if book:
+            return book, 1, None, None
+
+        return self.db.parse_reference(raw)
+
     def _on_text_changed(self, text):
         self.result_list.clear()
         text = text.strip()
         if not text:
             return
 
-        # 完整经文格式优先
-        parsed = self.db.parse_reference(text)
+        # 完整经文格式优先；简拼直接从 Books.Pinyin 读取
+        parsed = self._parse_reference(text)
         if parsed:
             book, chapter, start, end = parsed
             item = QListWidgetItem("▶ " + self._format_display(book, chapter, start, end))
@@ -88,7 +129,7 @@ class SearchWidget(QWidget):
 
     @staticmethod
     def _extract_book_query(text):
-        # 纯数字小键盘格式由 parse_reference 处理，不显示数字候选。
+        # 纯数字小键盘格式由数据库解析，不显示数字候选。
         if re.fullmatch(r"\d{1,2}[.\s]+\d+[.\s]+\d+(?:[.\s]+\d+)?", text):
             return ""
         m = re.match(r"^([^0-9:：.\-]+?)(?=\d|$)", text)
@@ -107,7 +148,7 @@ class SearchWidget(QWidget):
 
     def _on_confirm(self):
         text = self.search_input.text().strip()
-        parsed = self.db.parse_reference(text)
+        parsed = self._parse_reference(text)
 
         if parsed:
             self.search_triggered.emit(parsed)
