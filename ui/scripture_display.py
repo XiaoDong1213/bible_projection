@@ -34,11 +34,21 @@ class ScriptureDisplay(QWidget):
         self._update_viewport_margins()
 
     def _update_viewport_margins(self):
-        # 左右边距直接作用于 QTextEdit 的实际内容视口，避免 Qt 富文本 padding/root margin 相互覆盖。
+        # 这里只负责缩小实际显示视口，左右距离不再写入 HTML。
         self.text_display.setViewportMargins(
             max(0,int(self.margin_left)), 0,
             max(0,int(self.margin_right)), max(0,int(self.footer_height))
         )
+        self._fit_document_width()
+
+    def _fit_document_width(self):
+        """让富文本宽度始终等于当前可用视口宽度，避免出现右侧异常大空白。"""
+        if not hasattr(self, "text_display"):
+            return
+        viewport_width=max(1,self.text_display.viewport().width())
+        document=self.text_display.document()
+        if document:
+            document.setTextWidth(viewport_width)
 
     def set_scripture(self, book_name, chapter, start_verse, end_verse, verses):
         self.verses=list(verses or []); unit="篇" if book_name=="诗篇" else "章"
@@ -74,8 +84,8 @@ class ScriptureDisplay(QWidget):
 
     def _render_scripture(self):
         top_pad=max(10,int(self.font_size*0.35)); bottom_pad=self.footer_height+max(12,int(self.font_size*0.45))
-        # 左右边距不再写入 HTML，完全由 _update_viewport_margins 控制。
-        html=f"<div style='padding-top:{top_pad}px;margin:0;line-height:{self.line_spacing}%;'>"
+        # 左右边距完全由 viewport margins 控制；这里不再设置左右 padding。
+        html=f"<div style='padding-top:{top_pad}px;padding-bottom:{bottom_pad}px;margin:0;line-height:{self.line_spacing}%;'>"
         if self.verse_segmentation:
             for verse_num,verse_text in self.verses: html+=f"<p style='margin:0 0 8px 0;padding:0;'>{self._verse_html(verse_num,verse_text)}</p>"
         else:
@@ -83,8 +93,9 @@ class ScriptureDisplay(QWidget):
             for verse_num,verse_text in self.verses: html+=self._verse_html(verse_num,verse_text)+" "
             html+="</p>"
         html+="</div>"; self.text_display.setHtml(html)
-        self._update_viewport_margins()
-        document=self.text_display.document(); document.setDocumentMargin(0); document.adjustSize(); self.text_display.viewport().update()
+        self.text_display.document().setDocumentMargin(0)
+        self._fit_document_width()
+        self.text_display.viewport().update()
 
     def paintEvent(self,event):
         painter=QPainter(self); painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform,True); painter.fillRect(self.rect(),self.bg_color)
@@ -98,7 +109,7 @@ class ScriptureDisplay(QWidget):
     def _on_scrollbar_changed(self,value):self.scroll_changed.emit(value)
     def set_scroll_position(self,value):
         bar=self.text_display.verticalScrollBar(); value=max(bar.minimum(),min(int(value),bar.maximum()))
-        if bar.value()!=value:bar.blockSignals(True); bar.setValue(value); bar.blockSignals(False)
+        if bar.value()!=value:bar.blockSignals(True);bar.setValue(value);bar.blockSignals(False)
     def _smooth_to(self,target,duration=120):
         bar=self.text_display.verticalScrollBar(); target=max(bar.minimum(),min(int(target),bar.maximum()))
         if self._scroll_anim:self._scroll_anim.stop()
@@ -135,4 +146,6 @@ class ScriptureDisplay(QWidget):
     def resizeEvent(self,event):
         super().resizeEvent(event)
         if self._title_text:self._set_adaptive_title(self._title_text)
-        self._update_viewport_margins(); self._update_overlay_geometry()
+        self._update_viewport_margins()
+        self._fit_document_width()
+        self._update_overlay_geometry()
