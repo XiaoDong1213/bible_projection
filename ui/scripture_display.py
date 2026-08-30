@@ -1,8 +1,8 @@
-# 经文显示核心控件：主屏滚动，扩展屏同步
+# 经文显示核心控件：主屏滚动，扩展屏按经文锚点同步
 import os
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTextEdit, QFrame
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QFont, QColor, QPixmap, QFontMetrics, QPainter
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve, QPoint
+from PyQt6.QtGui import QFont, QColor, QPixmap, QFontMetrics, QPainter, QTextCursor
 
 class ScriptureDisplay(QWidget):
     scroll_changed = pyqtSignal(int)
@@ -16,8 +16,7 @@ class ScriptureDisplay(QWidget):
         layout=QVBoxLayout(self); layout.setContentsMargins(0,0,0,0); layout.setSpacing(0); self.title_bar=QLabel(""); self.title_bar.setAlignment(Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter); self.title_bar.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground); layout.addWidget(self.title_bar)
         self.text_display=QTextEdit(); self.text_display.setReadOnly(True); self.text_display.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff); self.text_display.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff); self.text_display.setFrameShape(QFrame.Shape.NoFrame); self.text_display.setStyleSheet("background:transparent;border:none;padding:0;margin:0;"); self.text_display.viewport().setStyleSheet("background:transparent;"); self.text_display.setContentsMargins(0,0,0,0); self.text_display.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground); self.text_display.document().setDocumentMargin(0); self.text_display.viewport().installEventFilter(self); self.text_display.verticalScrollBar().valueChanged.connect(self._on_scrollbar_changed); layout.addWidget(self.text_display,1)
         self.footer_label=QLabel(self); self.footer_label.setAlignment(Qt.AlignmentFlag.AlignCenter); self.footer_label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground); self.footer_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents); self.footer_label.show(); self.footer_label.raise_(); self._update_viewport_margins()
-    def _update_viewport_margins(self):
-        self.text_display.setViewportMargins(max(0,int(self.margin_left)),0,max(0,int(self.margin_right)),max(0,int(self.footer_height))); self._fit_document_width()
+    def _update_viewport_margins(self): self.text_display.setViewportMargins(max(0,int(self.margin_left)),0,max(0,int(self.margin_right)),max(0,int(self.footer_height))); self._fit_document_width()
     def _fit_document_width(self):
         if hasattr(self,"text_display"): self.text_display.document().setTextWidth(max(1,self.text_display.viewport().width()))
     def set_scripture(self,book_name,chapter,start_verse,end_verse,verses):
@@ -32,10 +31,8 @@ class ScriptureDisplay(QWidget):
     def _verse_html(self,n,t):
         safe=str(t).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;"); return f'<span style="color:{self.verse_num_color.name()};font-size:{self.verse_num_size}px;font-family:&quot;{self.verse_num_font_family}&quot;;font-weight:bold;vertical-align:super;">{n}</span>&nbsp;<span style="color:{self.font_color.name()};font-size:{self.font_size}px;font-family:&quot;{self.font_family}&quot;;">{safe}</span>'
     def _render_scripture(self):
-        top_pad=max(10,int(self.font_size*.35)); bottom_pad=self.footer_height+max(12,int(self.font_size*.45)); html=f"<div style='padding-top:{top_pad}px;padding-bottom:{bottom_pad}px;margin:0;line-height:{self.line_spacing}%;'>"
-        if self.verse_segmentation:
-            for n,t in self.verses: html+=f"<p style='margin:0 0 8px 0;padding:0;'>{self._verse_html(n,t)}</p>"
-        else: html+="<p style='margin:0;padding:0;'>"+" ".join(self._verse_html(n,t) for n,t in self.verses)+"</p>"
+        top_pad=max(10,int(self.font_size*.35)); bottom_pad=self.footer_height+max(12,int(self.font_size*.45)); gap=8 if self.verse_segmentation else 0; html=f"<div style='padding-top:{top_pad}px;padding-bottom:{bottom_pad}px;margin:0;line-height:{self.line_spacing}%;'>"
+        for n,t in self.verses: html+=f"<p style='margin:0 0 {gap}px 0;padding:0;'>{self._verse_html(n,t)}</p>"
         self.text_display.setHtml(html+"</div>"); self.text_display.document().setDocumentMargin(0); self._fit_document_width(); self.text_display.viewport().update()
     def paintEvent(self,event):
         painter=QPainter(self); painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform,True); painter.fillRect(self.rect(),self.bg_color)
@@ -47,15 +44,32 @@ class ScriptureDisplay(QWidget):
     def scroll_fraction(self):
         bar=self.text_display.verticalScrollBar(); maximum=bar.maximum(); return 0.0 if maximum<=0 else float(bar.value())/float(maximum)
     def set_scroll_fraction(self,fraction):
-        bar=self.text_display.verticalScrollBar(); fraction=max(0.0,min(1.0,float(fraction))); self.set_scroll_position(round(fraction*bar.maximum()))
+        bar=self.text_display.verticalScrollBar(); self.set_scroll_position(round(max(0.0,min(1.0,float(fraction)))*bar.maximum()))
     def set_scroll_position(self,value):
         bar=self.text_display.verticalScrollBar(); value=max(bar.minimum(),min(int(value),bar.maximum())); bar.blockSignals(True); bar.setValue(value); bar.blockSignals(False)
+    def get_scroll_anchor(self):
+        """返回主屏当前顶部对应的经文索引及该节内部偏移。"""
+        bar=self.text_display.verticalScrollBar(); doc=self.text_display.document()
+        if not self.verses or not doc:return (0,0.0)
+        p=self.text_display.cursorForPosition(QPoint(8,5)); block=p.block(); number=block.blockNumber()-1
+        number=max(0,min(number,len(self.verses)-1)); block_rect=self.text_display.cursorRect(QTextCursor(block)); frac=0.0
+        if block_rect.height()>0: frac=max(0.0,min(1.0,(5.0-block_rect.top())/float(max(1,block_rect.height()))))
+        return (number,frac)
+    def set_scroll_anchor(self,anchor):
+        try:number,frac=anchor; number=int(number); frac=float(frac)
+        except Exception:return
+        doc=self.text_display.document(); blocks=[]; b=doc.begin()
+        while b.isValid(): blocks.append(b); b=b.next()
+        if len(blocks)<2:return
+        number=max(0,min(number,len(self.verses)-1)); block=blocks[number+1]
+        cursor=QTextCursor(block); self.text_display.setTextCursor(cursor); self.text_display.ensureCursorVisible()
+        if frac>0:
+            bar=self.text_display.verticalScrollBar(); target=bar.value()+int(max(0,block.length()-1)*frac); bar.setValue(min(bar.maximum(),target))
     def _smooth_to(self,target,duration=120):
         bar=self.text_display.verticalScrollBar(); target=max(bar.minimum(),min(int(target),bar.maximum()));
         if self._scroll_anim:self._scroll_anim.stop()
         self._scroll_anim=QPropertyAnimation(bar,b"value",self); self._scroll_anim.setDuration(duration); self._scroll_anim.setStartValue(bar.value()); self._scroll_anim.setEndValue(target); self._scroll_anim.setEasingCurve(QEasingCurve.Type.OutCubic); self._scroll_anim.start()
-    def set_scroll_speed(self,speed):
-        self.scroll_speed=max(0,min(6,int(speed))); self.scroll_timer.stop() if self.scroll_speed==0 else self.scroll_timer.start()
+    def set_scroll_speed(self,speed): self.scroll_speed=max(0,min(6,int(speed))); self.scroll_timer.stop() if self.scroll_speed==0 else self.scroll_timer.start()
     def _auto_scroll(self):
         bar=self.text_display.verticalScrollBar()
         if bar.value()<bar.maximum(): bar.setValue(min(bar.maximum(),bar.value()+self.scroll_speed))
