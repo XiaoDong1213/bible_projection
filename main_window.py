@@ -19,7 +19,7 @@ class MainWindow(QMainWindow):
     def _create_toolbar(self):
         self.toolbar=ToolBarWidget(); self.addToolBar(self.toolbar); self.toolbar.theme=self.theme; self.toolbar.load_settings(self.settings); self.toolbar.scroll_speed_changed.connect(self._on_scroll_speed); self.toolbar.extend_toggled.connect(self._toggle_extension); self.toolbar.settings_changed.connect(self._on_settings_changed); self.toolbar.theme_changed.connect(self._on_theme_changed); self.toolbar.topmost_toggled.connect(self._toggle_extension_topmost); self.toolbar.scroll_up.connect(lambda:self._scroll_manual(-40)); self.toolbar.scroll_down.connect(lambda:self._scroll_manual(40)); self.scripture_display.scroll_changed.connect(self._sync_extension_scroll)
     def _create_central_widget(self):
-        central=QWidget(); layout=QHBoxLayout(); layout.setContentsMargins(0,0,0,0); layout.setSpacing(0); splitter=QSplitter(Qt.Orientation.Horizontal); self.nav_panel=NavigationPanel(self.db); self.nav_panel.book_selected.connect(self._on_book_selected); self.nav_panel.range_selected.connect(self._on_range_selected); self.nav_panel.verse_segmentation_changed.connect(self._on_verse_segmentation_changed); splitter.addWidget(self.nav_panel); self.scripture_display=ScriptureDisplay(); splitter.addWidget(self.scripture_display); splitter.setSizes([330,870]); layout.addWidget(splitter); central.setLayout(layout); self.setCentralWidget(central)
+        central=QWidget(); layout=QHBoxLayout(); layout.setContentsMargins(0,0,0,0); layout.setSpacing(0); splitter=QSplitter(Qt.Orientation.Horizontal); self.nav_panel=NavigationPanel(self.db); self.nav_panel.book_selected.connect(self._on_book_selected); self.nav_panel.range_selected.connect(self._on_range_selected); self.nav_panel.verse_segmentation_changed.connect(self._on_verse_segmentation_changed); splitter.addWidget(self.nav_panel); splitter.addWidget(ScriptureDisplay()); self.scripture_display=splitter.widget(1); splitter.setSizes([330,870]); layout.addWidget(splitter); central.setLayout(layout); self.setCentralWidget(central)
     def _create_shortcuts(self):
         shortcuts=[(Qt.Key.Key_Return,self._show_search),(Qt.Key.Key_Enter,self._show_search),(Qt.Key.Key_F12,self._toggle_extension),(Qt.Key.Key_Right,self._add_verse_end),(Qt.Key.Key_Left,self._remove_verse_end),("Ctrl+Right",self._add_verse_start),("Ctrl+Left",self._remove_verse_start),(Qt.Key.Key_Up,lambda:self._scroll_manual(-30)),(Qt.Key.Key_Down,lambda:self._scroll_manual(30)),(Qt.Key.Key_Space,self._toggle_scroll_pause)]+[(getattr(Qt.Key,f"Key_{i}"),lambda i=i:self._set_speed_hotkey(i)) for i in range(1,7)]
         self._shortcuts=[]
@@ -30,7 +30,7 @@ class MainWindow(QMainWindow):
     def _on_settings_changed(self,s): self.settings.update(s); self._apply_settings(s); self.config.save_display_settings(s)
     def _apply_settings(self,s):
         enabled=bool(s.get("verse_segmentation",False)); self.scripture_display.apply_settings(s); self.nav_panel.set_verse_segmentation(enabled)
-        if self.extension_window: self.extension_window.apply_settings(s); QApplication.processEvents(); self._sync_extension_scroll()
+        if self.extension_window:self.extension_window.apply_settings(s); QApplication.processEvents(); self._sync_extension_scroll()
     def _on_theme_changed(self,t): self.theme=t; self.settings["theme"]=t; self._load_theme_style(); self.config.save_display_settings({"theme":t})
     def _show_search(self):
         if hasattr(self,"search_widget") and self.search_widget.isVisible(): self.search_widget.close(); return
@@ -81,5 +81,6 @@ class MainWindow(QMainWindow):
         if self._syncing_scroll or not self.extension_window or not self.extension_window.isVisible(): return
         self._syncing_scroll=True
         try:
-            fraction=self.scripture_display.scroll_fraction(); self.extension_window.set_scroll_fraction(fraction)
+            # 不再同步两个滚动条的百分比；主屏当前“第几节”作为唯一锚点。
+            anchor=self.scripture_display.get_scroll_anchor(); self.extension_window.scripture_display.set_scroll_anchor(anchor)
         finally:self._syncing_scroll=False
