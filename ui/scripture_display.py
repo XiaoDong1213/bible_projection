@@ -55,9 +55,7 @@ class ScriptureDisplay(QWidget):
         bar=self.text_display.verticalScrollBar()
         try:value=int(value)
         except (TypeError,ValueError):return
-        value=max(bar.minimum(),min(value,bar.maximum()))
-        bar.blockSignals(True); bar.setValue(value); bar.blockSignals(False)
-        self.text_display.viewport().update(); self.text_display.update(); self.update()
+        value=max(bar.minimum(),min(value,bar.maximum())); bar.blockSignals(True); bar.setValue(value); bar.blockSignals(False); self.text_display.viewport().update(); self.text_display.update(); self.update()
     def get_scroll_anchor(self):
         if self.text_display.document().isEmpty():return 0
         viewport=self.text_display.viewport(); cursor=self.text_display.cursorForPosition(QPoint(max(2,viewport.width()//2),8)); return max(0,cursor.position())
@@ -76,7 +74,11 @@ class ScriptureDisplay(QWidget):
         else:self.scroll_timer.stop()
     def scroll_by(self,delta):self._smooth_to(self.text_display.verticalScrollBar().value()+int(delta))
     def eventFilter(self,obj,event):
-        if obj==self.text_display.viewport() and event.type()==event.Type.Wheel:self.scroll_by(-event.angleDelta().y()//6); return True
+        if obj==self.text_display.viewport() and event.type()==event.Type.Wheel:
+            # 鼠标滚轮使用约 4 档的滚动手感：一次滚轮按标准 120° 计算，平滑移动约 120 像素。
+            steps=event.angleDelta().y()/120.0
+            self._smooth_to(self.text_display.verticalScrollBar().value()-int(steps*120),90)
+            return True
         return super().eventFilter(obj,event)
     def apply_settings(self,settings):
         for a,k,c in [("font_family","font_family",str),("font_size","font_size",int),("line_spacing","line_spacing",int),("title_size","title_size",int),("verse_num_size","verse_num_size",int),("footer_height","footer_height",int),("footer_size","footer_size",int)]:
