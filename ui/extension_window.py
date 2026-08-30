@@ -15,7 +15,6 @@ class ExtensionWindow(QWidget):
             Qt.WindowType.WindowStaysOnTopHint |
             Qt.WindowType.Tool
         )
-
         self.scripture_display = ScriptureDisplay()
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
@@ -24,7 +23,6 @@ class ExtensionWindow(QWidget):
         self.current_data = None
 
     def update_scripture(self, book_name, chapter, start, end, verses):
-        """更新经文内容，并从顶部开始显示。"""
         self.current_data = (book_name, chapter, start, end, verses)
         self.scripture_display.set_scripture(book_name, chapter, start, end, verses)
 
@@ -32,17 +30,11 @@ class ExtensionWindow(QWidget):
         self.scripture_display.apply_settings(settings)
 
     def set_scroll_speed(self, speed):
-        """扩展屏不独立计时滚动，统一由主屏滚动后同步位置。"""
+        # 扩展屏不单独滚动，避免与主屏产生速度和位置偏差。
         self.scripture_display.set_scroll_speed(0)
 
     def set_scroll_position(self, value):
-        """设置扩展屏滚动条位置，兼容主窗口同步调用。"""
         self.scripture_display.set_scroll_position(value)
 
-    def set_scroll_fraction(self, fraction):
-        """按滚动比例同步，避免两块屏幕可滚动范围不同造成错位。"""
-        self.scripture_display.set_scroll_fraction(fraction)
-
     def scroll_by(self, delta):
-        """保留手动滚动接口。"""
         self.scripture_display.scroll_by(delta)
