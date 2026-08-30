@@ -16,6 +16,7 @@ class SearchWidget(QWidget):
     def __init__(self, db, parent=None):
         super().__init__(parent)
         self.db = db
+        self._formatting_text = False
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Popup)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
@@ -30,7 +31,7 @@ class SearchWidget(QWidget):
         layout.addWidget(self.search_input)
 
         self.hint_label = QLabel(
-            "支持：书名 / 简称 / Books.Pinyin简拼　｜　空格、:、. 可作分隔　｜　- 后回车=本章末　｜　ESC退出"
+            "支持：书名 / 简称 / Books.Pinyin简拼　｜　自动补全空格、:、-　｜　例如 CSJ12 → CSJ 1:2　｜　ESC退出"
         )
         self.hint_label.setStyleSheet("color:#888;font-size:11px;padding:2px 4px;")
         layout.addWidget(self.hint_label)
@@ -84,7 +85,6 @@ class SearchWidget(QWidget):
             except (TypeError, ValueError):
                 return None
         else:
-            # 兼容旧数据库类：在搜索层自行按实际数据库范围校验。
             try:
                 if not book or int(chapter) < 1 or int(chapter) > self.db.get_chapter_count(book):
                     return None
@@ -99,13 +99,86 @@ class SearchWidget(QWidget):
                 return None
         return parsed
 
+    def _auto_format_reference(self, text):
+        """搜索框输入时自动补充分隔符。
+
+        支持：
+        CSJ12       -> CSJ 1:2
+        CSJ 12      -> CSJ 1:2
+        CSJ1234     -> CSJ 12:34
+        CSJ 1 2     -> CSJ 1:2
+        CSJ 1 2 12  -> CSJ 1:2-12
+        CSJ 1:2-12  -> 保持原样
+        """
+        raw = str(text or "").strip()
+        if not raw:
+            return raw
+
+        # 已经包含中文书名时，只把连续的章节/节号数字补成标准格式。
+        # 中文书名后面的数字允许没有空格，例如“创世记12”。
+        m = re.fullmatch(r"(.+?)[\s]*([0-9]+)(?:[\s:：.]+([0-9]+))?(?:[\s-]+([0-9]+))?", raw)
+        if m and not re.fullmatch(r"[A-Za-z]+.*", raw):
+            book_part, n1, n2, n3 = m.groups()
+            if n2:
+                result = f"{book_part.strip()} {int(n1)}:{int(n2)}"
+                if n3:
+                    result += f"-{int(n3)}"
+                return result
+            if len(n1) >= 3:
+                # 中文书名 + 连续数字：优先按“章节 + 节”拆分。
+                # 例如 创世记12 -> 1:2，创世记123 -> 12:3。
+                return f"{book_part.strip()} {int(n1[:-1])}:{int(n1[-1])}"
+            return raw
+
+        # 简拼 + 数字。先确定书卷，避免把普通英文输入误格式化。
+        m = re.fullmatch(r"([A-Za-z]+)[\s]*([0-9]+)(?:[\s:：.]+([0-9]+))?(?:[\s-]+([0-9]+))?", raw)
+        if not m:
+            return raw
+        code, n1, n2, n3 = m.groups()
+        if not self._find_by_pinyin(code):
+            return raw
+
+        if n2:
+            result = f"{code.upper()} {int(n1)}:{int(n2)}"
+            if n3:
+                result += f"-{int(n3)}"
+            return result
+
+        # 连续数字自动按“章节 + 节”拆分。
+        if len(n1) >= 3:
+            chapter = n1[:-1]
+            verse = n1[-1]
+            return f"{code.upper()} {int(chapter)}:{int(verse)}"
+
+        # 两位数字无法可靠判断 1:2 还是第12章，因此保持输入，避免误导。
+        return raw
+
+    def _set_formatted_text(self, text):
+        if text == self.search_input.text():
+            return
+        self._formatting_text = True
+        try:
+            cursor_pos = self.search_input.cursorPosition()
+            old = self.search_input.text()
+            self.search_input.setText(text)
+            # 尽量保持光标位于输入末尾，适合键盘连续输入。
+            self.search_input.setCursorPosition(min(len(text), max(cursor_pos, len(text))))
+        finally:
+            self._formatting_text = False
+
+    def _validate_and_parse_formatted(self, text):
+        """解析前统一使用自动补全后的标准格式。"""
+        formatted = self._auto_format_reference(text)
+        if formatted != text:
+            self._set_formatted_text(formatted)
+        return self._parse_reference(formatted)
+
     def _parse_reference(self, text):
         """先处理 Books.Pinyin，再交给数据库处理其它格式，并严格限制实际范围。"""
         raw = str(text).strip().replace("：", ":").replace("．", ".").replace("。", ".")
         if not raw:
             return None
 
-        # 简拼 + 章节，例如 CSJ1:2、CSJ 1:2、CSJ 1.2、CSJ 1 2-12
         m = re.fullmatch(r"([A-Za-z]+)[\s]*(\d+)(?::|[.\s]+)(\d+)(?:\s*-\s*(\d*))?", raw)
         if m:
             code, chapter, start, end = m.groups()
@@ -119,7 +192,6 @@ class SearchWidget(QWidget):
                 )
                 return self._validate_parsed(parsed)
 
-        # 仅输入简拼，直接定位到该书卷
         book = self._find_by_pinyin(raw)
         if book:
             return book, 1, None, None
@@ -127,13 +199,14 @@ class SearchWidget(QWidget):
         return self._validate_parsed(self.db.parse_reference(raw))
 
     def _on_text_changed(self, text):
+        if self._formatting_text:
+            return
         self.result_list.clear()
         text = text.strip()
         if not text:
             return
 
-        # 完整经文格式优先；简拼直接从 Books.Pinyin 读取
-        parsed = self._parse_reference(text)
+        parsed = self._validate_and_parse_formatted(text)
         if parsed:
             book, chapter, start, end = parsed
             item = QListWidgetItem("▶ " + self._format_display(book, chapter, start, end))
@@ -142,14 +215,14 @@ class SearchWidget(QWidget):
             self.result_list.setCurrentRow(0)
             return
 
-        # 未形成完整经文地址时，显示书卷文字模糊匹配结果。
         book_query = self._extract_book_query(text)
         if not book_query:
             return
 
         books = self.db.search_books(book_query)
-        for book in books[:12]:
-            item = QListWidgetItem(f"  {book}  ·  {self.db._short_name(book)}")
+        for index, book in enumerate(books[:12], 1):
+            # 候选项自动添加序号分隔符，便于直接按 1/2/3 选择。
+            item = QListWidgetItem(f"{index}. {self.db._short_name(book)} {book}")
             item.setData(Qt.ItemDataRole.UserRole, (book, 1, None, None))
             self.result_list.addItem(item)
         if self.result_list.count():
@@ -175,7 +248,7 @@ class SearchWidget(QWidget):
 
     def _on_confirm(self):
         text = self.search_input.text().strip()
-        parsed = self._parse_reference(text)
+        parsed = self._validate_and_parse_formatted(text)
 
         if parsed:
             self.search_triggered.emit(parsed)
