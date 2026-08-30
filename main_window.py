@@ -56,7 +56,7 @@ class MainWindow(QMainWindow):
         if not self.extension_window:self.extension_window=ExtensionWindow(); self.extension_window.apply_settings(self.settings)
         geom=screens[1].geometry(); self.scripture_display.set_reference_size(geom.width(),geom.height()); self.extension_window.scripture_display.set_reference_size(geom.width(),geom.height()); self.extension_window.setGeometry(geom); self.extension_window.showFullScreen()
         if self.verses:self.extension_window.update_scripture(self.current_book,self.current_chapter,self.current_start,self.current_end,self.verses)
-        self.extension_window.set_scroll_speed(0); QApplication.processEvents(); self._sync_extension_scroll(); self._extension_sync_timer.start(); self.toolbar.set_extend_active(True); self.status_label.setText(f"扩展显示: 屏幕2 ({geom.width()}x{geom.height()})，已启用位置同步")
+        self.extension_window.set_scroll_speed(0); QApplication.processEvents(); self._sync_extension_scroll(); self._extension_sync_timer.start(); self.toolbar.set_extend_active(True); self.status_label.setText(f"扩展显示: 屏幕2 ({geom.width()}x{geom.height()})，已启用强制滚动同步")
     def _toggle_extension_topmost(self,on):
         if self.extension_window and self.extension_window.isVisible(): self.extension_window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint,on); self.extension_window.show()
         self.config.save_display_settings({"extension_topmost":on})
