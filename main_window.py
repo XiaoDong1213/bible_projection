@@ -1,16 +1,16 @@
 # 主窗口 - 业务逻辑层
 import os
+from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QSplitter, QStatusBar, QLabel, QApplication,
     QAbstractSpinBox, QLineEdit, QAbstractItemView, QTextEdit,
 )
 from PyQt6.QtCore import Qt, QPoint, QTimer
-from PyQt6.QtGui import QKeySequence, QShortcut, QIcon
+from PyQt6.QtGui import QKeySequence, QShortcut
 
 from config import AppConfig
 from bible_database import BibleDatabase
-from app_paths import resource_dir
 from ui import SearchWidget, NavigationPanel, ToolBarWidget, ExtensionWindow, PreviewHost
 from ui.themes import THEMES
 
@@ -32,9 +32,6 @@ class MainWindow(QMainWindow):
         self._last_speed = 3
         self.setWindowTitle("圣经投影系统")
         self.setMinimumSize(800, 600)
-        icon_path = resource_dir() / "icon.ico"
-        if icon_path.exists():
-            self.setWindowIcon(QIcon(str(icon_path)))
 
         geometry = config.load_window_state()
         if geometry:
@@ -59,8 +56,8 @@ class MainWindow(QMainWindow):
         self.config.save_history(h)
 
     def _load_theme_style(self):
-        # 按资源目录定位 QSS（源码 / 打包均可用）
-        p = resource_dir() / "styles" / f"{self.theme}.qss"
+        # 按源码目录定位 QSS，不依赖启动时的 cwd
+        p = Path(__file__).resolve().parent / "styles" / f"{self.theme}.qss"
         app = QApplication.instance()
         if p.exists():
             with open(p, "r", encoding="utf-8") as f:

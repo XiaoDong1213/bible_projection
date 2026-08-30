@@ -10,12 +10,9 @@ from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QMessageBox
 
 
-from app_paths import app_dir
-
-
 class AppConfig:
     def __init__(self):
-        self.app_root = app_dir()
+        self.app_root = Path(__file__).parent.resolve()
         self.mark_file = self.app_root / "install.mark"
         self.is_install_version = self.mark_file.exists()
         # 安装版写入用户可写目录，避免 Program Files 无权限
