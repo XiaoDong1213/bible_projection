@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+
+# 本地配置与运行产物
+config.ini
+
+# PyInstaller / Inno 产物（体积大，勿提交）
+build/
+dist/
+dist_installer/
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+Desktop.ini
