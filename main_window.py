@@ -16,8 +16,7 @@ class MainWindow(QMainWindow):
         p=os.path.join("styles",f"{self.theme}.qss")
         if os.path.exists(p):
             with open(p,"r",encoding="utf-8") as f: QApplication.instance().setStyleSheet(f.read())
-    def _create_toolbar(self):
-        self.toolbar=ToolBarWidget(); self.addToolBar(self.toolbar); self.toolbar.theme=self.theme; self.toolbar.load_settings(self.settings); self.toolbar.scroll_speed_changed.connect(self._on_scroll_speed); self.toolbar.extend_toggled.connect(self._toggle_extension); self.toolbar.settings_changed.connect(self._on_settings_changed); self.toolbar.theme_changed.connect(self._on_theme_changed); self.toolbar.topmost_toggled.connect(self._toggle_extension_topmost); self.toolbar.scroll_up.connect(lambda:self._scroll_manual(-40)); self.toolbar.scroll_down.connect(lambda:self._scroll_manual(40)); self.scripture_display.scroll_changed.connect(self._sync_extension_scroll)
+    def _create_toolbar(self): self.toolbar=ToolBarWidget(); self.addToolBar(self.toolbar); self.toolbar.theme=self.theme; self.toolbar.load_settings(self.settings); self.toolbar.scroll_speed_changed.connect(self._on_scroll_speed); self.toolbar.extend_toggled.connect(self._toggle_extension); self.toolbar.settings_changed.connect(self._on_settings_changed); self.toolbar.theme_changed.connect(self._on_theme_changed); self.toolbar.topmost_toggled.connect(self._toggle_extension_topmost); self.toolbar.scroll_up.connect(lambda:self._scroll_manual(-40)); self.toolbar.scroll_down.connect(lambda:self._scroll_manual(40)); self.scripture_display.scroll_changed.connect(self._sync_extension_scroll)
     def _create_central_widget(self):
         central=QWidget(); layout=QHBoxLayout(); layout.setContentsMargins(0,0,0,0); layout.setSpacing(0); splitter=QSplitter(Qt.Orientation.Horizontal); self.nav_panel=NavigationPanel(self.db); self.nav_panel.book_selected.connect(self._on_book_selected); self.nav_panel.range_selected.connect(self._on_range_selected); self.nav_panel.verse_segmentation_changed.connect(self._on_verse_segmentation_changed); splitter.addWidget(self.nav_panel); splitter.addWidget(ScriptureDisplay()); self.scripture_display=splitter.widget(1); splitter.setSizes([330,870]); layout.addWidget(splitter); central.setLayout(layout); self.setCentralWidget(central)
     def _create_shortcuts(self):
@@ -81,6 +80,6 @@ class MainWindow(QMainWindow):
         if self._syncing_scroll or not self.extension_window or not self.extension_window.isVisible(): return
         self._syncing_scroll=True
         try:
-            # 不再同步两个滚动条的百分比；主屏当前“第几节”作为唯一锚点。
-            anchor=self.scripture_display.get_scroll_anchor(); self.extension_window.scripture_display.set_scroll_anchor(anchor)
+            # 主屏滚动条是唯一滚动源，扩展屏按自己的滚动范围映射同一滚动比例。
+            self.extension_window.set_scroll_fraction(self.scripture_display.scroll_fraction())
         finally:self._syncing_scroll=False
