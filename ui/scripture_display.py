@@ -7,11 +7,38 @@ from PyQt6.QtGui import QFont,QColor,QPixmap,QFontMetrics,QPainter,QTextCursor
 class ScriptureDisplay(QWidget):
     scroll_changed=pyqtSignal(int)
     def __init__(self,parent=None):
-        super().__init__(parent); self.font_family="微软雅黑"; self.font_size=24; self.font_color=QColor("#FFFFFF"); self.bg_color=QColor("#000000"); self.bg_image=None; self.line_spacing=160; self.margin_left=60; self.margin_right=60; self.title_font_family="微软雅黑"; self.title_color=QColor("#87CEEB"); self.title_size=36; self.title_min_size=12; self.verse_num_color=QColor("#FFD700"); self.verse_num_size=24; self.verse_num_font_family="微软雅黑"; self.footer_text=""; self.footer_height=45; self.footer_size=14; self.footer_color=QColor("#AAAAAA"); self.footer_font_family="微软雅黑"; self.scroll_speed=0; self._scroll_anim=None; self._title_text=""; self.verses=[]; self.verse_segmentation=False; self.scroll_timer=QTimer(self); self.scroll_timer.timeout.connect(self._auto_scroll); self.scroll_timer.setInterval(30); self._init_ui()
+        super().__init__(parent); self.font_family="微软雅黑"; self.font_size=24; self.font_color=QColor("#FFFFFF"); self.bg_color=QColor("#000000"); self.bg_image=None; self.line_spacing=160; self.margin_left=60; self.margin_right=60; self.title_font_family="微软雅黑"; self.title_color=QColor("#87CEEB"); self.title_size=36; self.title_min_size=12; self.verse_num_color=QColor("#FFD700"); self.verse_num_size=24; self.verse_num_font_family="微软雅黑"; self.footer_text=""; self.footer_height=45; self.footer_size=14; self.footer_color=QColor("#AAAAAA"); self.footer_font_family="微软雅黑"; self.scroll_speed=0; self._scroll_anim=None; self._title_text=""; self.verses=[]; self.verse_segmentation=False; self._reference_size=None; self.scroll_timer=QTimer(self); self.scroll_timer.timeout.connect(self._auto_scroll); self.scroll_timer.setInterval(30); self._init_ui()
     def _init_ui(self):
         layout=QVBoxLayout(self); layout.setContentsMargins(0,0,0,0); layout.setSpacing(0); self.title_bar=QLabel(""); self.title_bar.setAlignment(Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter); layout.addWidget(self.title_bar); self.text_display=QTextEdit(); self.text_display.setReadOnly(True); self.text_display.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff); self.text_display.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff); self.text_display.setFrameShape(QFrame.Shape.NoFrame); self.text_display.setStyleSheet("background:transparent;border:none;padding:0;margin:0;"); self.text_display.viewport().setStyleSheet("background:transparent;"); self.text_display.document().setDocumentMargin(0); self.text_display.viewport().installEventFilter(self); self.text_display.verticalScrollBar().valueChanged.connect(self._on_scrollbar_changed); layout.addWidget(self.text_display,1); self.footer_label=QLabel(self); self.footer_label.setAlignment(Qt.AlignmentFlag.AlignCenter); self.footer_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents); self.footer_label.show(); self._update_viewport_margins()
+    def set_reference_size(self,width,height):
+        """扩展模式下固定经文排版基准为扩展屏的实际分辨率。
+        主屏窗口本身不改变大小，只让经文换行/高度计算使用同一套逻辑尺寸。
+        """
+        try:
+            w=max(1,int(width)); h=max(1,int(height))
+            self._reference_size=(w,h)
+        except (TypeError,ValueError):
+            self._reference_size=None
+        self._fit_document_width()
+        self.update()
+    def clear_reference_size(self):
+        self._reference_size=None
+        self._fit_document_width()
+        self.update()
     def _update_viewport_margins(self): self.text_display.setViewportMargins(max(0,int(self.margin_left)),0,max(0,int(self.margin_right)),max(0,int(self.footer_height))); self._fit_document_width()
-    def _fit_document_width(self): self.text_display.document().setTextWidth(max(1,self.text_display.viewport().width()))
+    def _fit_document_width(self):
+        actual_width=max(1,self.text_display.viewport().width())
+        if self._reference_size:
+            # 保留左右边距比例，使主屏和扩展屏的有效排版宽度一致。
+            actual_widget_width=max(1,self.width())
+            left_ratio=self.margin_left/max(1,actual_widget_width)
+            right_ratio=self.margin_right/max(1,actual_widget_width)
+            ref_width=max(1,self._reference_size[0])
+            virtual_margin=max(0,int(ref_width*(left_ratio+right_ratio)))
+            content_width=max(1,ref_width-virtual_margin)
+            self.text_display.document().setTextWidth(content_width)
+        else:
+            self.text_display.document().setTextWidth(actual_width)
     def set_scripture(self,book_name,chapter,start_verse,end_verse,verses):
         self.verses=list(verses or []); unit="篇" if book_name=="诗篇" else "章"; title=f"{book_name}{chapter}{unit}" if start_verse is None else (f"{book_name}{chapter}{unit}{start_verse}-末节" if end_verse is None else (f"{book_name}{chapter}{unit}{start_verse}节" if start_verse==end_verse else f"{book_name}{chapter}{unit}{start_verse}-{end_verse}节")); self._set_adaptive_title(title); self._render_scripture(); self.set_scroll_position(0); self.update()
     def _set_adaptive_title(self,text):
@@ -46,7 +73,6 @@ class ScriptureDisplay(QWidget):
     def set_scroll_position(self,value):
         bar=self.text_display.verticalScrollBar(); value=max(bar.minimum(),min(int(value),bar.maximum())); bar.blockSignals(True); bar.setValue(value); bar.blockSignals(False)
     def get_scroll_anchor(self):
-        # 返回当前视口顶部附近对应的文档字符位置，用于不同尺寸屏幕之间精确同步。
         if self.text_display.document().isEmpty(): return 0
         viewport=self.text_display.viewport(); cursor=self.text_display.cursorForPosition(QPoint(max(2,viewport.width()//2),6))
         return max(0,cursor.position())
