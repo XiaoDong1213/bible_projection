@@ -9,7 +9,7 @@ from ui import ScriptureDisplay,SearchWidget,NavigationPanel,ToolBarWidget,Exten
 
 class MainWindow(QMainWindow):
     def __init__(self,db:BibleDatabase,config:AppConfig):
-        super().__init__(); self.db=db; self.config=config; self.extension_window=None; self._syncing_scroll=False; self.current_book=None; self.current_chapter=None; self.current_start=None; self.current_end=None; self.verses=[]; self.settings=config.load_display_settings(); self.theme=self.settings.get("theme","dark"); self.setWindowTitle("圣经投影系统"); self.setMinimumSize(800,600)
+        super().__init__(); self.db=db; self.config=config; self.extension_window=None; self._syncing_scroll=False; self.current_book=None; self.current_chapter=None; self.current_start=None; self.current_end=None; self.verses=[]; self.settings=config.load_display_settings(); self.theme=self.settings.get("theme","dark"); self._last_speed=3; self.setWindowTitle("圣经投影系统"); self.setMinimumSize(800,600)
         geometry=config.load_window_state(); self.restoreGeometry(geometry) if geometry else self.resize(1200,800); self._load_theme_style(); self._create_central_widget(); self._create_toolbar(); self._create_shortcuts(); self._create_statusbar(); self.nav_panel.load_history(config.load_history()); self.nav_panel.history_changed.connect(self._save_history); self._apply_settings(self.settings)
         self._extension_sync_timer=QTimer(self); self._extension_sync_timer.setInterval(16); self._extension_sync_timer.timeout.connect(self._sync_extension_scroll)
     def _save_history(self,h): self.config.save_history(h)
@@ -17,16 +17,16 @@ class MainWindow(QMainWindow):
         p=os.path.join("styles",f"{self.theme}.qss")
         if os.path.exists(p):
             with open(p,"r",encoding="utf-8") as f: QApplication.instance().setStyleSheet(f.read())
-    def _create_toolbar(self): self.toolbar=ToolBarWidget(); self.addToolBar(self.toolbar); self.toolbar.theme=self.theme; self.toolbar.load_settings(self.settings); self.toolbar.scroll_speed_changed.connect(self._on_scroll_speed); self.toolbar.extend_toggled.connect(self._toggle_extension); self.toolbar.settings_changed.connect(self._on_settings_changed); self.toolbar.theme_changed.connect(self._on_theme_changed); self.toolbar.topmost_toggled.connect(self._toggle_extension_topmost); self.toolbar.scroll_up.connect(lambda:self._scroll_manual(-40)); self.toolbar.scroll_down.connect(lambda:self._scroll_manual(40)); self.scripture_display.scroll_changed.connect(self._sync_extension_scroll)
+    def _create_toolbar(self):
+        self.toolbar=ToolBarWidget(); self.addToolBar(self.toolbar); self.toolbar.theme=self.theme; self.toolbar.load_settings(self.settings); self.toolbar.scroll_speed_changed.connect(self._on_scroll_speed); self.toolbar.extend_toggled.connect(self._toggle_extension); self.toolbar.settings_changed.connect(self._on_settings_changed); self.toolbar.theme_changed.connect(self._on_theme_changed); self.toolbar.topmost_toggled.connect(self._toggle_extension_topmost); self.toolbar.scroll_up.connect(lambda:self._scroll_manual(-40)); self.toolbar.scroll_down.connect(lambda:self._scroll_manual(40)); self.scripture_display.scroll_changed.connect(self._sync_extension_scroll)
     def _create_central_widget(self):
         central=QWidget(); layout=QHBoxLayout(); layout.setContentsMargins(0,0,0,0); layout.setSpacing(0); splitter=QSplitter(Qt.Orientation.Horizontal); self.nav_panel=NavigationPanel(self.db); self.nav_panel.book_selected.connect(self._on_book_selected); self.nav_panel.range_selected.connect(self._on_range_selected); self.nav_panel.verse_segmentation_changed.connect(self._on_verse_segmentation_changed); splitter.addWidget(self.nav_panel); splitter.addWidget(ScriptureDisplay()); self.scripture_display=splitter.widget(1); splitter.setSizes([330,870]); layout.addWidget(splitter); central.setLayout(layout); self.setCentralWidget(central)
     def _create_shortcuts(self):
-        # F12 不再负责关闭/切换扩展；Esc 仅用于关闭已经打开的扩展屏。
-        shortcuts=[(Qt.Key.Key_Return,self._show_search),(Qt.Key.Key_Enter,self._show_search),(Qt.Key.Key_Escape,self._close_extension),(Qt.Key.Key_Right,self._add_verse_end),(Qt.Key.Key_Left,self._remove_verse_end),("Ctrl+Right",self._add_verse_start),("Ctrl+Left",self._remove_verse_start),(Qt.Key.Key_Up,lambda:self._scroll_manual(-30)),(Qt.Key.Key_Down,lambda:self._scroll_manual(30)),(Qt.Key.Key_Space,self._toggle_scroll_pause)]+[(getattr(Qt.Key,f"Key_{i}"),lambda i=i:self._set_speed_hotkey(i)) for i in range(1,7)]
+        shortcuts=[(Qt.Key.Key_Return,self._show_search),(Qt.Key.Key_Enter,self._show_search),(Qt.Key.Key_Escape,self._close_extension),(Qt.Key.Key_Right,self._add_verse_end),(Qt.Key.Key_Left,self._remove_verse_end),("Ctrl+Right",self._add_verse_start),("Ctrl+Left",self._remove_verse_start),(Qt.Key.Key_Up,lambda:self._scroll_manual(-30)),(Qt.Key.Key_Down,lambda:self._scroll_manual(30)),(Qt.Key.Key_Space,self._toggle_scroll_pause)]+[(getattr(Qt.Key,f"Key_{i}"),lambda i=i:self._set_speed_hotkey(i)) for i in range(1,10)]
         self._shortcuts=[]
         for key,fn in shortcuts:
             s=QShortcut(QKeySequence(key),self); s.setContext(Qt.ShortcutContext.WindowShortcut); s.activated.connect(fn); self._shortcuts.append(s)
-    def _set_speed_hotkey(self,speed): self.toolbar.scroll_slider.setValue(speed); self._on_scroll_speed(speed)
+    def _set_speed_hotkey(self,speed): self._on_scroll_speed(speed); self.toolbar._set_speed(speed)
     def _create_statusbar(self): self.status_label=QLabel("按回车键打开搜索"); status=QStatusBar(); status.addWidget(self.status_label); self.setStatusBar(status)
     def _on_settings_changed(self,s): self.settings.update(s); self._apply_settings(s); self.config.save_display_settings(s)
     def _apply_settings(self,s):
@@ -39,7 +39,7 @@ class MainWindow(QMainWindow):
     def _close_search(self):
         if hasattr(self,"search_widget"): self.search_widget.close()
     def _on_search_result(self,p): b,c,s,e=p; self._load_scripture(b,c,s,e); self.nav_panel.add_to_history(b,c,s,e); self._close_search()
-    def _on_book_selected(self,b,c): self._load_scripture(b,c,None,None); self.nav_panel.add_to_history(b,c,1,self.db.get_verse_count(b,c))
+    def _on_book_selected(self,b,c): self._load_scripture(b,c,None,None)
     def _on_verse_segmentation_changed(self,e): self.settings["verse_segmentation"]=bool(e); self.scripture_display.set_verse_segmentation(bool(e)); QApplication.processEvents(); self._sync_extension_scroll(); self.config.save_display_settings({"verse_segmentation":bool(e)})
     def _on_range_selected(self,b,c,s,e): self._load_scripture(b,c,s,e); self.nav_panel.add_to_history(b,c,s,e)
     def _load_scripture(self,b,c,s,e):
@@ -48,12 +48,10 @@ class MainWindow(QMainWindow):
         self._update_status()
     def _update_status(self): self.status_label.setText(f"{self.current_book} {self.current_chapter}:{self.current_start}-{self.current_end}" if self.current_book else "按回车键打开搜索")
     def _toggle_extension(self):
-        if self.extension_window and self.extension_window.isVisible():
-            self._close_extension(); return
+        if self.extension_window and self.extension_window.isVisible(): self._close_extension(); return
         self._show_extension()
     def _close_extension(self):
-        if self.extension_window and self.extension_window.isVisible():
-            self.extension_window.hide(); self._extension_sync_timer.stop(); self.scripture_display.clear_reference_size(); self.toolbar.set_extend_active(False); self.status_label.setText("扩展显示已关闭")
+        if self.extension_window and self.extension_window.isVisible(): self.extension_window.hide(); self._extension_sync_timer.stop(); self.scripture_display.clear_reference_size(); self.toolbar.set_extend_active(False); self.status_label.setText("扩展显示已关闭")
     def _show_extension(self):
         screens=QApplication.screens()
         if len(screens)<2: self.status_label.setText("未检测到第二块屏幕"); return
@@ -68,9 +66,9 @@ class MainWindow(QMainWindow):
     def _on_scroll_speed(self,speed): self.scripture_display.set_scroll_speed(speed); self.extension_window.set_scroll_speed(0) if self.extension_window and self.extension_window.isVisible() else None
     def _scroll_manual(self,delta): self.scripture_display.scroll_by(delta)
     def _toggle_scroll_pause(self):
-        slider=self.toolbar.scroll_slider
-        if slider.value()>0:self._last_speed=slider.value(); slider.setValue(0)
-        else:slider.setValue(getattr(self,"_last_speed",3))
+        current=self.toolbar.speed_buttons.index(next((b for b in self.toolbar.speed_buttons if b.isChecked()),self.toolbar.speed_buttons[0]))
+        if current>0:self._last_speed=current; self.toolbar._set_speed(0)
+        else:self.toolbar._set_speed(getattr(self,"_last_speed",3))
     def _add_verse_end(self):
         if self.verses and self.current_end<self.db.get_verse_count(self.current_book,self.current_chapter): self.current_end+=1; self.verses=self.db.get_verse_range(self.current_book,self.current_chapter,self.current_start,self.current_end); self._refresh_display()
     def _remove_verse_end(self):
