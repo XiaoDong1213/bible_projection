@@ -80,6 +80,7 @@ class MainWindow(QMainWindow):
         if self._syncing_scroll or not self.extension_window or not self.extension_window.isVisible(): return
         self._syncing_scroll=True
         try:
-            anchor=self.scripture_display.get_scroll_anchor()
-            self.extension_window.scripture_display.set_scroll_anchor(anchor)
-        finally:self._syncing_scroll=False
+            # 主屏是唯一滚动源；每次主屏滚动都把实际滚动比例映射到扩展屏。
+            self.extension_window.sync_from_main(self.scripture_display)
+        finally:
+            self._syncing_scroll=False
