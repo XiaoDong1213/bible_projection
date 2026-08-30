@@ -45,7 +45,7 @@ class ToolBarWidget(QToolBar):
         self.topmost_btn=QPushButton("🔝 置顶"); self.topmost_btn.setCheckable(True); self.topmost_btn.setChecked(True); self.topmost_btn.setEnabled(False); self.topmost_btn.toggled.connect(self.topmost_toggled); self.addWidget(self.topmost_btn)
         self.addSeparator(); self.addWidget(QLabel("滚动:")); up=QPushButton("↑"); up.setFixedWidth(32); up.clicked.connect(self.scroll_up); self.addWidget(up); down=QPushButton("↓"); down.setFixedWidth(32); down.clicked.connect(self.scroll_down); self.addWidget(down)
         self.addWidget(QLabel("速度:")); self.speed_buttons=[]
-        for speed,text in [(0,"暂停"),(1,"1档"),(2,"2档"),(3,"3档"),(4,"4档"),(5,"5档"),(6,"6档")]:
+        for speed,text in [(0,"暂停")]+[(i,f"{i}档") for i in range(1,10)]:
             btn=QPushButton(text); btn.setCheckable(True); btn.setAutoExclusive(False); btn.setFixedWidth(42 if speed else 50); btn.clicked.connect(lambda checked=False,s=speed:self._set_speed(s)); self.speed_buttons.append(btn); self.addWidget(btn)
         self.speed_label=QLabel("暂停"); self.speed_label.setFixedWidth(40); self.addWidget(self.speed_label); self._set_speed(0)
         self.addSeparator(); self.settings_btn=QPushButton("⚙ 显示设置"); self.settings_btn.clicked.connect(self._open_settings); self.addWidget(self.settings_btn); self.theme_btn=QPushButton("☀ 亮色"); self.theme_btn.clicked.connect(self._toggle_theme); self.addWidget(self.theme_btn)
@@ -55,9 +55,9 @@ class ToolBarWidget(QToolBar):
         if dialog.exec()==QDialog.DialogCode.Accepted: self.settings=dialog.get_settings(); self.settings_changed.emit(self.settings)
     def _set_speed(self,speed):
         for i,btn in enumerate(self.speed_buttons): btn.setChecked(i==speed)
-        names=["暂停","1档","2档","3档","4档","5档","6档"]; self.speed_label.setText(names[speed]); self.scroll_speed_changed.emit(speed)
+        names=["暂停"]+[f"{i}档" for i in range(1,10)]; self.speed_label.setText(names[speed]); self.scroll_speed_changed.emit(speed)
     def _toggle_theme(self): self.theme="light" if self.theme=="dark" else "dark"; self._update_theme_button(); self.theme_changed.emit(self.theme)
     def _update_theme_button(self): self.theme_btn.setText("🌙 暗色" if self.theme=="light" else "☀ 亮色")
     def set_extend_active(self,active):
         if active: self.extend_btn.setText("关闭扩展 (Esc)"); self.topmost_btn.setEnabled(True)
-        else: self.extend_btn.setText("扩展显示 (F12)"); self.topmost_btn.setEnabled(False)
+        else:self.extend_btn.setText("扩展显示 (F12)"); self.topmost_btn.setEnabled(False)
