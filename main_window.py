@@ -46,15 +46,21 @@ class MainWindow(QMainWindow):
         self._update_status()
     def _update_status(self): self.status_label.setText(f"{self.current_book} {self.current_chapter}:{self.current_start}-{self.current_end}" if self.current_book else "按回车键打开搜索")
     def _toggle_extension(self):
-        if self.extension_window and self.extension_window.isVisible(): self.extension_window.hide(); self.toolbar.set_extend_active(False); return
+        if self.extension_window and self.extension_window.isVisible():
+            self.extension_window.hide(); self.scripture_display.clear_reference_size(); self.toolbar.set_extend_active(False); return
         self._show_extension()
     def _show_extension(self):
         screens=QApplication.screens()
         if len(screens)<2: self.status_label.setText("未检测到第二块屏幕"); return
         if not self.extension_window:self.extension_window=ExtensionWindow(); self.extension_window.apply_settings(self.settings)
-        geom=screens[1].geometry(); self.extension_window.setGeometry(geom); self.extension_window.showFullScreen();
+        geom=screens[1].geometry();
+        # 扩展模式下，主屏和扩展屏统一使用第二屏的实际分辨率作为经文排版基准。
+        # 不改变主窗口尺寸，避免破坏左侧导航和工具栏；只统一经文内容的有效显示尺寸/换行计算。
+        self.scripture_display.set_reference_size(geom.width(),geom.height())
+        self.extension_window.scripture_display.set_reference_size(geom.width(),geom.height())
+        self.extension_window.setGeometry(geom); self.extension_window.showFullScreen();
         if self.verses:self.extension_window.update_scripture(self.current_book,self.current_chapter,self.current_start,self.current_end,self.verses)
-        self.extension_window.set_scroll_speed(0); QApplication.processEvents(); self._sync_extension_scroll(); self.toolbar.set_extend_active(True); self.status_label.setText(f"扩展显示: 屏幕2 ({geom.width()}x{geom.height()})")
+        self.extension_window.set_scroll_speed(0); QApplication.processEvents(); self._sync_extension_scroll(); self.toolbar.set_extend_active(True); self.status_label.setText(f"扩展显示: 屏幕2 ({geom.width()}x{geom.height()})，主屏排版基准已锁定")
     def _toggle_extension_topmost(self,on):
         if self.extension_window and self.extension_window.isVisible(): self.extension_window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint,on); self.extension_window.show()
         self.config.save_display_settings({"extension_topmost":on})
