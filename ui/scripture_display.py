@@ -16,23 +16,25 @@ class ScriptureDisplay(QWidget):
         self.verses=list(verses or []); unit="篇" if book_name=="诗篇" else "章"; title=f"{book_name}{chapter}{unit}" if start_verse is None else (f"{book_name}{chapter}{unit}{start_verse}-末节" if end_verse is None else (f"{book_name}{chapter}{unit}{start_verse}节" if start_verse==end_verse else f"{book_name}{chapter}{unit}{start_verse}-{end_verse}节")); self._set_adaptive_title(title); self._render_scripture(); self.set_scroll_position(0); self.update()
     def _set_adaptive_title(self,text):
         self._title_text=str(text or ""); size=max(self.title_min_size,int(self.title_size)); font=QFont(self.title_font_family,size); font.setBold(True); avail=max(100,self.title_bar.width()-48)
-        while QFontMetrics(font).horizontalAdvance(self._title_text)>avail and size>self.title_min_size: size-=1; font=QFont(self.title_font_family,size); font.setBold(True)
+        while QFontMetrics(font).horizontalAdvance(self._title_text)>avail and size>self.title_min_size:
+            size-=1; font=QFont(self.title_font_family,size); font.setBold(True)
         h=max(42,QFontMetrics(font).height()+6); self.title_bar.setMinimumHeight(h); self.title_bar.setMaximumHeight(h); self.title_bar.setFont(font); self.title_bar.setStyleSheet(f'color:{self.title_color.name()};font-family:"{self.title_font_family}";font-size:{size}px;font-weight:bold;background:transparent;padding:0 24px;'); self.title_bar.setText(self._title_text)
     def set_verse_segmentation(self,enabled):
         enabled=bool(enabled)
         if self.verse_segmentation==enabled:return
-        self.verse_segmentation=enabled
+        old=self.scroll_fraction(); self.verse_segmentation=enabled
         if self.verses:
-            old=self.scroll_fraction(); self._render_scripture(); self.set_scroll_fraction(old)
+            self._render_scripture(); self.set_scroll_fraction(old)
     def _verse_html(self,n,t):
         safe=str(t).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;"); return f'<span style="color:{self.verse_num_color.name()};font-size:{self.verse_num_size}px;font-family:&quot;{self.verse_num_font_family}&quot;;font-weight:bold;vertical-align:super;">{n}</span>&nbsp;<span style="color:{self.font_color.name()};font-size:{self.font_size}px;font-family:&quot;{self.font_family}&quot;;">{safe}</span>'
     def _render_scripture(self):
         top=max(10,int(self.font_size*.35)); bottom=self.footer_height+max(12,int(self.font_size*.45)); html=f"<div style='padding-top:{top}px;padding-bottom:{bottom}px;margin:0;line-height:{self.line_spacing}%;'>"
         if self.verse_segmentation:
-            for n,t in self.verses: html+=f"<p style='margin:0 0 8px 0;padding:0;'>{self._verse_html(n,t)}</p>"
+            # 分节模式：每节一个段落，并保留节间距。
+            html += "".join(f"<p style='margin:0 0 8px 0;padding:0;'>{self._verse_html(n,t)}</p>" for n,t in self.verses)
         else:
-            # 连续模式：不在节之间增加空白，但仍保留独立 block 供同步使用。
-            for n,t in self.verses: html+=f"<p style='margin:0;padding:0;'>{self._verse_html(n,t)}</p>"
+            # 连续模式：一个段落，节号和正文之间只有普通空格；绝不强制换行。
+            html += "<p style='margin:0;padding:0;white-space:normal;'>" + " ".join(self._verse_html(n,t) for n,t in self.verses) + "</p>"
         self.text_display.setHtml(html+"</div>"); self.text_display.document().setDocumentMargin(0); self._fit_document_width(); self.text_display.viewport().update()
     def paintEvent(self,event):
         painter=QPainter(self); painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform,True); painter.fillRect(self.rect(),self.bg_color)
