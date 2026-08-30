@@ -1,9 +1,12 @@
 # 第二屏幕扩展窗口：滚动位置由主屏强制驱动
 from PyQt6.QtWidgets import QWidget, QVBoxLayout
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from .scripture_display import ScriptureDisplay
 
 class ExtensionWindow(QWidget):
+    # 按 Esc 时通知主窗口执行完整的关闭扩展逻辑
+    close_requested = pyqtSignal()
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("圣经投影")
@@ -15,6 +18,14 @@ class ExtensionWindow(QWidget):
         layout.addWidget(self.scripture_display)
         self.current_data = None
         self._main_scroll_value = 0
+
+    def keyPressEvent(self, event):
+        # 扩展屏获得焦点时，Esc 直接关闭扩展显示。
+        if event.key() == Qt.Key.Key_Escape:
+            self.close_requested.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def update_scripture(self, book_name, chapter, start, end, verses):
         self.current_data = (book_name, chapter, start, end, list(verses or []))
@@ -39,7 +50,6 @@ class ExtensionWindow(QWidget):
             except (TypeError, ValueError):return
         bar = self.scripture_display.text_display.verticalScrollBar()
         if main_maximum is None:
-            # 兼容旧调用：若未传主屏 maximum，则按保存值直接使用。
             target = self._main_scroll_value
         else:
             try:
