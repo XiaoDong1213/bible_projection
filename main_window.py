@@ -21,7 +21,8 @@ class MainWindow(QMainWindow):
     def _create_central_widget(self):
         central=QWidget(); layout=QHBoxLayout(); layout.setContentsMargins(0,0,0,0); layout.setSpacing(0); splitter=QSplitter(Qt.Orientation.Horizontal); self.nav_panel=NavigationPanel(self.db); self.nav_panel.book_selected.connect(self._on_book_selected); self.nav_panel.range_selected.connect(self._on_range_selected); self.nav_panel.verse_segmentation_changed.connect(self._on_verse_segmentation_changed); splitter.addWidget(self.nav_panel); splitter.addWidget(ScriptureDisplay()); self.scripture_display=splitter.widget(1); splitter.setSizes([330,870]); layout.addWidget(splitter); central.setLayout(layout); self.setCentralWidget(central)
     def _create_shortcuts(self):
-        shortcuts=[(Qt.Key.Key_Return,self._show_search),(Qt.Key.Key_Enter,self._show_search),(Qt.Key.Key_F12,self._toggle_extension),(Qt.Key.Key_Right,self._add_verse_end),(Qt.Key.Key_Left,self._remove_verse_end),("Ctrl+Right",self._add_verse_start),("Ctrl+Left",self._remove_verse_start),(Qt.Key.Key_Up,lambda:self._scroll_manual(-30)),(Qt.Key.Key_Down,lambda:self._scroll_manual(30)),(Qt.Key.Key_Space,self._toggle_scroll_pause)]+[(getattr(Qt.Key,f"Key_{i}"),lambda i=i:self._set_speed_hotkey(i)) for i in range(1,7)]
+        # F12 不再负责关闭/切换扩展；Esc 仅用于关闭已经打开的扩展屏。
+        shortcuts=[(Qt.Key.Key_Return,self._show_search),(Qt.Key.Key_Enter,self._show_search),(Qt.Key.Key_Escape,self._close_extension),(Qt.Key.Key_Right,self._add_verse_end),(Qt.Key.Key_Left,self._remove_verse_end),("Ctrl+Right",self._add_verse_start),("Ctrl+Left",self._remove_verse_start),(Qt.Key.Key_Up,lambda:self._scroll_manual(-30)),(Qt.Key.Key_Down,lambda:self._scroll_manual(30)),(Qt.Key.Key_Space,self._toggle_scroll_pause)]+[(getattr(Qt.Key,f"Key_{i}"),lambda i=i:self._set_speed_hotkey(i)) for i in range(1,7)]
         self._shortcuts=[]
         for key,fn in shortcuts:
             s=QShortcut(QKeySequence(key),self); s.setContext(Qt.ShortcutContext.WindowShortcut); s.activated.connect(fn); self._shortcuts.append(s)
@@ -48,12 +49,16 @@ class MainWindow(QMainWindow):
     def _update_status(self): self.status_label.setText(f"{self.current_book} {self.current_chapter}:{self.current_start}-{self.current_end}" if self.current_book else "按回车键打开搜索")
     def _toggle_extension(self):
         if self.extension_window and self.extension_window.isVisible():
-            self.extension_window.hide(); self._extension_sync_timer.stop(); self.scripture_display.clear_reference_size(); self.toolbar.set_extend_active(False); return
+            self._close_extension(); return
         self._show_extension()
+    def _close_extension(self):
+        if self.extension_window and self.extension_window.isVisible():
+            self.extension_window.hide(); self._extension_sync_timer.stop(); self.scripture_display.clear_reference_size(); self.toolbar.set_extend_active(False); self.status_label.setText("扩展显示已关闭")
     def _show_extension(self):
         screens=QApplication.screens()
         if len(screens)<2: self.status_label.setText("未检测到第二块屏幕"); return
-        if not self.extension_window:self.extension_window=ExtensionWindow(); self.extension_window.apply_settings(self.settings)
+        if not self.extension_window:
+            self.extension_window=ExtensionWindow(); self.extension_window.close_requested.connect(self._close_extension); self.extension_window.apply_settings(self.settings)
         geom=screens[1].geometry(); self.scripture_display.set_reference_size(geom.width(),geom.height()); self.extension_window.scripture_display.set_reference_size(geom.width(),geom.height()); self.extension_window.setGeometry(geom); self.extension_window.showFullScreen()
         if self.verses:self.extension_window.update_scripture(self.current_book,self.current_chapter,self.current_start,self.current_end,self.verses)
         self.extension_window.set_scroll_speed(0); QApplication.processEvents(); self._sync_extension_scroll(); self._extension_sync_timer.start(); self.toolbar.set_extend_active(True); self.status_label.setText(f"扩展显示: 屏幕2 ({geom.width()}x{geom.height()})，已启用强制滚动同步")
