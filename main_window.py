@@ -9,7 +9,7 @@ from ui import ScriptureDisplay, SearchWidget, NavigationPanel, ToolBarWidget, E
 
 class MainWindow(QMainWindow):
     def __init__(self, db: BibleDatabase, config: AppConfig):
-        super().__init__(); self.db=db; self.config=config; self.extension_window=None
+        super().__init__(); self.db=db; self.config=config; self.extension_window=None; self._syncing_scroll=False
         self.current_book=None; self.current_chapter=None; self.current_start=None; self.current_end=None; self.verses=[]
         self.settings=config.load_display_settings(); self.theme=self.settings.get("theme","dark"); self.setWindowTitle("圣经投影系统"); self.setMinimumSize(800,600)
         geometry=config.load_window_state()
@@ -39,55 +39,38 @@ class MainWindow(QMainWindow):
         self.nav_panel=NavigationPanel(self.db); self.nav_panel.book_selected.connect(self._on_book_selected); self.nav_panel.range_selected.connect(self._on_range_selected); self.nav_panel.verse_segmentation_changed.connect(self._on_verse_segmentation_changed); splitter.addWidget(self.nav_panel)
         self.scripture_display=ScriptureDisplay(); splitter.addWidget(self.scripture_display); splitter.setStretchFactor(0,0); splitter.setStretchFactor(1,1); splitter.setSizes([330,870]); layout.addWidget(splitter); central.setLayout(layout); self.setCentralWidget(central)
     def _create_shortcuts(self):
-        # 数字 1-6 直接切换自动滚动速度，使用 WindowShortcut，焦点在搜索框/按钮等子控件时也能稳定响应。
-        shortcuts=[
-            (Qt.Key.Key_Return,self._show_search),(Qt.Key.Key_Enter,self._show_search),(Qt.Key.Key_F12,self._toggle_extension),
-            (Qt.Key.Key_Right,self._add_verse_end),(Qt.Key.Key_Left,self._remove_verse_end),
-            ("Ctrl+Right",self._add_verse_start),("Ctrl+Left",self._remove_verse_start),
-            (Qt.Key.Key_Up,lambda:self._scroll_manual(-30)),(Qt.Key.Key_Down,lambda:self._scroll_manual(30)),
-            (Qt.Key.Key_Space,self._toggle_scroll_pause),
-            (Qt.Key.Key_1,lambda:self._set_speed_hotkey(1)),(Qt.Key.Key_2,lambda:self._set_speed_hotkey(2)),
-            (Qt.Key.Key_3,lambda:self._set_speed_hotkey(3)),(Qt.Key.Key_4,lambda:self._set_speed_hotkey(4)),
-            (Qt.Key.Key_5,lambda:self._set_speed_hotkey(5)),(Qt.Key.Key_6,lambda:self._set_speed_hotkey(6)),
-        ]
+        shortcuts=[(Qt.Key.Key_Return,self._show_search),(Qt.Key.Key_Enter,self._show_search),(Qt.Key.Key_F12,self._toggle_extension),(Qt.Key.Key_Right,self._add_verse_end),(Qt.Key.Key_Left,self._remove_verse_end),("Ctrl+Right",self._add_verse_start),("Ctrl+Left",self._remove_verse_start),(Qt.Key.Key_Up,lambda:self._scroll_manual(-30)),(Qt.Key.Key_Down,lambda:self._scroll_manual(30)),(Qt.Key.Key_Space,self._toggle_scroll_pause),(Qt.Key.Key_1,lambda:self._set_speed_hotkey(1)),(Qt.Key.Key_2,lambda:self._set_speed_hotkey(2)),(Qt.Key.Key_3,lambda:self._set_speed_hotkey(3)),(Qt.Key.Key_4,lambda:self._set_speed_hotkey(4)),(Qt.Key.Key_5,lambda:self._set_speed_hotkey(5)),(Qt.Key.Key_6,lambda:self._set_speed_hotkey(6))]
         self._shortcuts=[]
         for key,fn in shortcuts:
-            shortcut=QShortcut(QKeySequence(key),self)
-            shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
-            shortcut.activated.connect(fn)
-            self._shortcuts.append(shortcut)
-    def _set_speed_hotkey(self,speed):
-        self.toolbar.scroll_slider.setValue(int(speed))
-        self._on_scroll_speed(int(speed))
+            shortcut=QShortcut(QKeySequence(key),self); shortcut.setContext(Qt.ShortcutContext.WindowShortcut); shortcut.activated.connect(fn); self._shortcuts.append(shortcut)
+    def _set_speed_hotkey(self,speed): self.toolbar.scroll_slider.setValue(int(speed)); self._on_scroll_speed(int(speed))
     def _create_statusbar(self):
         status=QStatusBar(); self.setStatusBar(status); self.status_label=QLabel("按回车键打开搜索"); status.addWidget(self.status_label)
     def _on_settings_changed(self,settings): self.settings.update(settings); self._apply_settings(settings); self.config.save_display_settings(settings)
     def _apply_settings(self,settings):
-        self.settings.update(settings); self.scripture_display.apply_settings(settings); self.nav_panel.set_verse_segmentation(bool(settings.get("verse_segmentation",False))); self.scripture_display.set_verse_segmentation(bool(settings.get("verse_segmentation",False)))
-        if self.extension_window: self.extension_window.apply_settings(settings); self.extension_window.scripture_display.set_verse_segmentation(bool(settings.get("verse_segmentation",False)))
+        self.settings.update(settings); enabled=bool(settings.get("verse_segmentation",False)); self.scripture_display.apply_settings(settings); self.nav_panel.set_verse_segmentation(enabled); self.scripture_display.set_verse_segmentation(enabled)
+        if self.extension_window: self.extension_window.apply_settings(settings); self.extension_window.scripture_display.set_verse_segmentation(enabled); QApplication.processEvents(); self._sync_extension_scroll()
     def _on_theme_changed(self,theme): self.theme=theme; self.settings["theme"]=theme; self._load_theme_style(); self.config.save_display_settings({"theme":theme})
     def _show_search(self):
         if hasattr(self,"search_widget") and self.search_widget.isVisible(): self.search_widget.close(); return
         self.search_widget=SearchWidget(self.db,self); self.search_widget.search_triggered.connect(self._on_search_result); self.search_widget.close_requested.connect(self._close_search); self.search_widget.move(self.mapToGlobal(QPoint(self.width()//2-180,80))); self.search_widget.show(); self.search_widget.search_input.setFocus()
     def _close_search(self):
         if hasattr(self,"search_widget"): self.search_widget.close()
-    def _on_search_result(self,parsed):
-        b,c,s,e=parsed; self._load_scripture(b,c,s,e); self.nav_panel.add_to_history(b,c,s,e); self._close_search()
+    def _on_search_result(self,parsed): b,c,s,e=parsed; self._load_scripture(b,c,s,e); self.nav_panel.add_to_history(b,c,s,e); self._close_search()
     def _on_book_selected(self,b,c): self._load_scripture(b,c,None,None); self.nav_panel.add_to_history(b,c,1,self.db.get_verse_count(b,c))
     def _on_verse_segmentation_changed(self,enabled):
         enabled=bool(enabled); self.settings['verse_segmentation']=enabled; self.scripture_display.set_verse_segmentation(enabled)
-        if self.extension_window: self.extension_window.scripture_display.set_verse_segmentation(enabled)
+        if self.extension_window: self.extension_window.scripture_display.set_verse_segmentation(enabled); QApplication.processEvents(); self._sync_extension_scroll()
         self.config.save_display_settings({'verse_segmentation':enabled})
     def _on_range_selected(self,b,c,s,e): self._load_scripture(b,c,s,e); self.nav_panel.add_to_history(b,c,s,e)
     def _load_scripture(self,b,c,s,e):
         self.current_book=b; self.current_chapter=c; self.current_start=s; self.current_end=e
-        if s is None:
-            v=self.db.get_verse_range(b,c,1); self.current_start=1; self.current_end=v[-1][0] if v else 0
+        if s is None: v=self.db.get_verse_range(b,c,1); self.current_start=1; self.current_end=v[-1][0] if v else 0
         else:
             v=self.db.get_verse_range(b,c,s,e)
             if e is None: self.current_end=v[-1][0] if v else s
         self.verses=v; self.scripture_display.set_scripture(b,c,self.current_start,self.current_end,v)
-        if self.extension_window and self.extension_window.isVisible(): self.extension_window.update_scripture(b,c,s,self.current_end if e is None else e,v)
+        if self.extension_window and self.extension_window.isVisible(): self.extension_window.update_scripture(b,c,self.current_start,self.current_end,v); QApplication.processEvents(); self._sync_extension_scroll()
         self._update_status()
     def _update_status(self):
         if self.current_start is None: status=f"{self.current_book} 第{self.current_chapter}章（整章）"
@@ -104,16 +87,14 @@ class MainWindow(QMainWindow):
         if not self.extension_window: self.extension_window=ExtensionWindow(); self.extension_window.apply_settings(self.settings)
         self.extension_window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint,self.toolbar.topmost_btn.isChecked()); geom=screens[1].geometry(); self.extension_window.setGeometry(geom); self.extension_window.showFullScreen()
         if self.verses: self.extension_window.update_scripture(self.current_book,self.current_chapter,self.current_start,self.current_end,self.verses)
-        self.extension_window.set_scroll_speed(self.toolbar.scroll_slider.value()); self.toolbar.set_extend_active(True); self.status_label.setText(f"扩展显示: 屏幕2 ({geom.width()}x{geom.height()})")
+        self.extension_window.set_scroll_speed(0); QApplication.processEvents(); self._sync_extension_scroll(); self.toolbar.set_extend_active(True); self.status_label.setText(f"扩展显示: 屏幕2 ({geom.width()}x{geom.height()})")
     def _toggle_extension_topmost(self,on):
         if self.extension_window and self.extension_window.isVisible(): self.extension_window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint,on); self.extension_window.show(); self.status_label.setText(f"扩展屏已{'开启' if on else '关闭'}置顶")
         self.config.save_display_settings({"extension_topmost":on})
     def _on_scroll_speed(self,speed):
         self.scripture_display.set_scroll_speed(speed)
-        if self.extension_window and self.extension_window.isVisible(): self.extension_window.set_scroll_speed(speed)
-    def _scroll_manual(self,delta):
-        self.scripture_display.scroll_by(delta)
-        if self.extension_window and self.extension_window.isVisible(): self.extension_window.scroll_by(delta)
+        if self.extension_window and self.extension_window.isVisible(): self.extension_window.set_scroll_speed(0)
+    def _scroll_manual(self,delta): self.scripture_display.scroll_by(delta)
     def _toggle_scroll_pause(self):
         slider=self.toolbar.scroll_slider
         if slider.value()>0: self._last_speed=slider.value(); slider.setValue(0)
@@ -131,7 +112,10 @@ class MainWindow(QMainWindow):
         if len(self.verses)>1:self.verses.pop(0); self.current_start+=1; self._refresh_display()
     def _refresh_display(self):
         self.scripture_display.set_scripture(self.current_book,self.current_chapter,self.current_start,self.current_end,self.verses)
-        if self.extension_window and self.extension_window.isVisible(): self.extension_window.update_scripture(self.current_book,self.current_chapter,self.current_start,self.current_end,self.verses)
+        if self.extension_window and self.extension_window.isVisible(): self.extension_window.update_scripture(self.current_book,self.current_chapter,self.current_start,self.current_end,self.verses); QApplication.processEvents(); self._sync_extension_scroll()
         self._update_status()
-    def _sync_extension_scroll(self,value):
-        if self.extension_window and self.extension_window.isVisible(): self.extension_window.set_scroll_position(value)
+    def _sync_extension_scroll(self,value=None):
+        if self._syncing_scroll or not self.extension_window or not self.extension_window.isVisible(): return
+        self._syncing_scroll=True
+        try: self.extension_window.set_scroll_fraction(self.scripture_display.scroll_fraction())
+        finally: self._syncing_scroll=False
