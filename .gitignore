@@ -13,6 +13,14 @@ config.ini
 build/
 dist/
 dist_installer/
+bible_projection.spec
+build.bat
+build_installer.bat
+installer.iss
+installer_assets/
+icon.ico
+app_paths.py
+.local_backup_keep/
 
 # 编辑器 / 系统
 .idea/

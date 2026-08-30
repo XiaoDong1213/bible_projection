@@ -4,9 +4,7 @@
 
 import sys
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui import QIcon
 
-from app_paths import resource_dir
 from config import AppConfig
 from bible_database import BibleDatabase
 from main_window import MainWindow
@@ -16,9 +14,6 @@ def main():
     # 创建Qt应用实例
     app = QApplication(sys.argv)
     app.setStyle("Fusion")  # 使用Fusion风格，跨平台一致美观
-    icon_path = resource_dir() / "icon.ico"
-    if icon_path.exists():
-        app.setWindowIcon(QIcon(str(icon_path)))
 
     # 1. 初始化配置管理器（负责保存/加载所有设置、历史记录）
     config = AppConfig()
