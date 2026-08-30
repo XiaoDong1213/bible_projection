@@ -2,11 +2,13 @@ import os
 import re
 import sqlite3
 
+from app_paths import resource_dir
+
 
 class BibleDatabase:
     def __init__(self, db_path=None):
         if db_path is None:
-            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "和合本.db")
+            db_path = str(resource_dir() / "和合本.db")
         self.db_path = db_path
         self.conn = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row
