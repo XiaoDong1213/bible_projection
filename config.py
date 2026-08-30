@@ -2,6 +2,8 @@
 # 配置管理模块：自动保存/加载显示设置、窗口状态、搜索历史
 
 import json
+import os
+import sys
 from pathlib import Path
 from configparser import ConfigParser
 from PyQt6.QtGui import QColor
@@ -13,7 +15,15 @@ class AppConfig:
         self.app_root = Path(__file__).parent.resolve()
         self.mark_file = self.app_root / "install.mark"
         self.is_install_version = self.mark_file.exists()
-        self.data_dir = self.app_root
+        # 安装版写入用户可写目录，避免 Program Files 无权限
+        if self.is_install_version:
+            if sys.platform == "win32":
+                base = Path(os.environ.get("APPDATA", str(Path.home())))
+            else:
+                base = Path.home()
+            self.data_dir = base / "bible_projection"
+        else:
+            self.data_dir = self.app_root
         self.ini_path = self.data_dir / "config.ini"
         self.parser = ConfigParser()
         self._ensure_data_dir()
@@ -21,19 +31,26 @@ class AppConfig:
 
     def _ensure_data_dir(self):
         try:
-            self.data_dir.mkdir(exist_ok=True)
+            self.data_dir.mkdir(parents=True, exist_ok=True)
         except PermissionError:
-            QMessageBox.critical(None, "权限警告", f"目录无写入权限：{self.data_dir}\n本次会话设置无法保存。")
+            QMessageBox.critical(
+                None,
+                "权限警告",
+                f"目录无写入权限：{self.data_dir}\n本次会话设置无法保存。",
+            )
 
     def _load_ini(self):
         if self.ini_path.exists():
             self.parser.read(self.ini_path, encoding="utf-8")
-            # 老版本配置没有该字段时，自动补上“默认不按节分段”。
             if "Display" not in self.parser:
                 self._fill_default_config()
             elif "verse_segmentation" not in self.parser["Display"]:
                 self.parser["Display"]["verse_segmentation"] = "False"
                 self._save_ini()
+            if "Window" not in self.parser:
+                self.parser["Window"] = {"geometry": ""}
+            if "History" not in self.parser:
+                self.parser["History"] = {"search_history": "[]"}
         else:
             self._fill_default_config()
             self._save_ini()
@@ -61,7 +78,7 @@ class AppConfig:
             "footer_color": "#AAAAAA",
             "footer_font_family": "微软雅黑",
             "extension_topmost": "True",
-            "verse_segmentation": "False"
+            "verse_segmentation": "False",
         }
         self.parser["Window"] = {"geometry": ""}
         self.parser["History"] = {"search_history": "[]"}
@@ -71,9 +88,15 @@ class AppConfig:
             with open(self.ini_path, "w", encoding="utf-8") as f:
                 self.parser.write(f)
         except PermissionError:
-            QMessageBox.critical(None, "保存失败", f"无法写入配置文件：{self.ini_path}\n权限不足，设置不会保存。")
+            QMessageBox.critical(
+                None,
+                "保存失败",
+                f"无法写入配置文件：{self.ini_path}\n权限不足，设置不会保存。",
+            )
 
     def save_display_settings(self, settings):
+        if "Display" not in self.parser:
+            self._fill_default_config()
         disp_section = self.parser["Display"]
         for key, value in settings.items():
             if isinstance(value, QColor):
@@ -106,17 +129,24 @@ class AppConfig:
             "footer_color": "#AAAAAA",
             "footer_font_family": "微软雅黑",
             "extension_topmost": True,
-            # 关键：默认关闭按节分段
-            "verse_segmentation": False
+            "verse_segmentation": False,
         }
         result = {}
-        sec = self.parser["Display"]
+        sec = self.parser["Display"] if "Display" in self.parser else {}
         color_keys = {"font_color", "verse_num_color", "title_color", "bg_color", "footer_color"}
         bool_keys = {"extension_topmost", "verse_segmentation"}
-        int_keys = {"font_size", "verse_num_size", "title_size", "line_spacing", "margin", "footer_height", "footer_size"}
+        int_keys = {
+            "font_size",
+            "verse_num_size",
+            "title_size",
+            "line_spacing",
+            "margin",
+            "footer_height",
+            "footer_size",
+        }
 
         for k, default_val in defaults.items():
-            raw = sec.get(k, None)
+            raw = sec.get(k, None) if hasattr(sec, "get") else None
             if raw is None:
                 result[k] = default_val
             elif k in color_keys:
@@ -134,12 +164,18 @@ class AppConfig:
 
     def save_window_state(self, geometry):
         import base64
+
+        if "Window" not in self.parser:
+            self.parser["Window"] = {"geometry": ""}
         geo_b64 = base64.b64encode(bytes(geometry)).decode("ascii") if geometry else ""
         self.parser["Window"]["geometry"] = geo_b64
         self._save_ini()
 
     def load_window_state(self):
         import base64
+
+        if "Window" not in self.parser:
+            return None
         raw = self.parser["Window"].get("geometry", "")
         if not raw:
             return None
@@ -149,10 +185,14 @@ class AppConfig:
             return None
 
     def save_history(self, history_list):
+        if "History" not in self.parser:
+            self.parser["History"] = {"search_history": "[]"}
         self.parser["History"]["search_history"] = json.dumps(history_list, ensure_ascii=False)
         self._save_ini()
 
     def load_history(self):
+        if "History" not in self.parser:
+            return []
         raw = self.parser["History"].get("search_history", "[]")
         try:
             return json.loads(raw)
