@@ -1,4 +1,4 @@
-# 第二屏幕扩展窗口：只跟随主屏滚动
+# 第二屏幕扩展窗口：完全跟随主屏滚动
 from PyQt6.QtWidgets import QWidget, QVBoxLayout
 from PyQt6.QtCore import Qt
 from .scripture_display import ScriptureDisplay
@@ -11,6 +11,7 @@ class ExtensionWindow(QWidget):
         self.scripture_display = ScriptureDisplay()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         layout.addWidget(self.scripture_display)
         self.current_data = None
         self._main_fraction = 0.0
@@ -18,14 +19,13 @@ class ExtensionWindow(QWidget):
     def update_scripture(self, book_name, chapter, start, end, verses):
         self.current_data = (book_name, chapter, start, end, list(verses or []))
         self.scripture_display.set_scripture(book_name, chapter, start, end, verses)
-        # 切换经文后立即恢复主屏当前滚动位置，避免扩展屏跳回顶部。
         self.set_scroll_fraction(self._main_fraction)
 
     def apply_settings(self, settings):
         self.scripture_display.apply_settings(settings)
 
     def set_scroll_speed(self, speed):
-        # 扩展屏禁止独立自动滚动，只跟随主屏。
+        # 扩展屏禁止独立滚动，滚动位置只由主屏决定。
         self.scripture_display.set_scroll_speed(0)
 
     def set_scroll_position(self, value):
@@ -39,9 +39,11 @@ class ExtensionWindow(QWidget):
         self.scripture_display.set_scroll_fraction(self._main_fraction)
 
     def sync_from_main(self, main_display):
-        # 主屏是唯一滚动控制源；按实际滚动范围比例同步，兼容不同屏幕尺寸和换行高度。
-        self.set_scroll_fraction(main_display.scroll_fraction())
+        # 直接读取主屏当前滚动比例，并立即设置扩展屏滚动条。
+        # 主屏和扩展屏使用相同的排版基准，因此同一比例对应同一经文位置。
+        fraction = main_display.scroll_fraction()
+        self.set_scroll_fraction(fraction)
 
     def scroll_by(self, delta):
-        # 扩展屏不作为滚动控制源。
+        # 扩展屏不接受独立滚动操作。
         return
