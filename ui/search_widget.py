@@ -25,23 +25,30 @@ class SearchWidget(QWidget):
         layout.setSpacing(4)
 
         self.search_input = QLineEdit()
+        self.search_input.setObjectName("searchInput")
         self.search_input.setPlaceholderText("例如：创世记1:2-12  或  CSJ 1:2-12")
         self.search_input.textChanged.connect(self._on_text_changed)
         self.search_input.returnPressed.connect(self._on_confirm)
         layout.addWidget(self.search_input)
 
         self.hint_label = QLabel(
-            "支持：书名 / 简称 / Books.Pinyin简拼　｜　自动补全空格、:、-　｜　例如 CSJ12 → CSJ 1:2　｜　ESC退出"
+            "书名 / 简称 / 简拼　｜　CSJ12 → CSJ 1:2　｜　Esc 退出"
         )
-        self.hint_label.setStyleSheet("color:#888;font-size:11px;padding:2px 4px;")
+        self.hint_label.setStyleSheet("color:#9AA3B2;font-size:11px;padding:2px 4px;")
         layout.addWidget(self.hint_label)
 
         self.result_list = QListWidget()
         self.result_list.setStyleSheet("""
-            QListWidget { border:1px solid #DDD; border-radius:6px;
-                background:rgba(255,255,255,0.98); max-height:240px; }
-            QListWidget::item { padding:7px 12px; font-size:13px; }
-            QListWidget::item:selected { background:#4A90E2; color:white; }
+            QListWidget {
+                border: 1px solid #E2E8F0;
+                border-radius: 8px;
+                background: rgba(255,255,255,0.98);
+                max-height: 240px;
+                color: #1E293B;
+            }
+            QListWidget::item { padding: 8px 12px; font-size: 13px; border-radius: 4px; margin: 1px 2px; }
+            QListWidget::item:selected { background: #3B82F6; color: white; }
+            QListWidget::item:hover:!selected { background: #EEF1F6; }
         """)
         self.result_list.itemClicked.connect(self._on_item_clicked)
         layout.addWidget(self.result_list)
@@ -58,11 +65,9 @@ class SearchWidget(QWidget):
 
     @staticmethod
     def _normalize(value):
-        """统一简拼输入：忽略大小写、空格及常见分隔符。"""
         return re.sub(r"[\s._-]+", "", str(value or "").strip().lower())
 
     def _find_by_pinyin(self, query):
-        """直接从 Books.Pinyin 建立的 book_meta 中查找，确保简拼不依赖硬编码。"""
         q = self._normalize(query)
         if not q:
             return None
@@ -73,7 +78,6 @@ class SearchWidget(QWidget):
         return None
 
     def _validate_parsed(self, parsed):
-        """经文地址必须符合数据库实际章节/节号范围，不能让SQL只返回一部分而误显示。"""
         if not parsed or len(parsed) != 4:
             return None
         book, chapter, start, end = parsed
@@ -99,58 +103,88 @@ class SearchWidget(QWidget):
                 return None
         return parsed
 
+    def _best_chapter_verse_split(self, book, digits):
+        """对连续数字做经数据库校验的章:节拆分。
+
+        优先较短节号（CSJ12 → 1:2；CSJ1234 → 12:34）。
+        若无一合法章:节，则整段视为章节号。
+        """
+        digits = str(digits or "").strip()
+        if not digits or not digits.isdigit() or not book:
+            return None
+        # 节号长度从 1 增到 len-1，优先「章短、节也合理」的拆法
+        candidates = []
+        for verse_len in range(1, len(digits)):
+            ch_s = digits[:-verse_len]
+            v_s = digits[-verse_len:]
+            if not ch_s or ch_s.startswith("0") or v_s.startswith("0"):
+                continue
+            ch, v = int(ch_s), int(v_s)
+            parsed = self._validate_parsed((book, ch, v, v))
+            if parsed:
+                # 评分：优先章号位数合理（1–3）、节号位数合理（1–3）
+                score = (0 if len(ch_s) <= 3 else 10) + (0 if len(v_s) <= 3 else 10) + abs(len(ch_s) - len(v_s)) * 0.1
+                candidates.append((score, len(v_s), parsed))
+        if candidates:
+            candidates.sort(key=lambda x: (x[0], x[1]))
+            return candidates[0][2]
+        # 整段作为章节
+        return self._validate_parsed((book, int(digits), None, None))
+
+    def _format_from_parsed(self, label, parsed):
+        book, chapter, start, end = parsed
+        if start is None:
+            return f"{label} {chapter}"
+        if end is None or end == start:
+            return f"{label} {chapter}:{start}"
+        return f"{label} {chapter}:{start}-{end}"
+
     def _auto_format_reference(self, text):
         """搜索框输入时自动补充分隔符。
 
-        支持：
-        CSJ12       -> CSJ 1:2
-        CSJ 12      -> CSJ 1:2
-        CSJ1234     -> CSJ 12:34
-        CSJ 1 2     -> CSJ 1:2
-        CSJ 1 2 12  -> CSJ 1:2-12
-        CSJ 1:2-12  -> 保持原样
+        简拼：CSJ12 → CSJ 1:2（经 DB 校验拆分）
+        中文书名：创世记12 → 保持为章节（不误拆成 1:2）；已有分隔符则规范化
         """
         raw = str(text or "").strip()
         if not raw:
             return raw
 
-        # 已经包含中文书名时，只把连续的章节/节号数字补成标准格式。
-        # 中文书名后面的数字允许没有空格，例如“创世记12”。
+        # 中文书名（非纯字母开头）
         m = re.fullmatch(r"(.+?)[\s]*([0-9]+)(?:[\s:：.]+([0-9]+))?(?:[\s-]+([0-9]+))?", raw)
         if m and not re.fullmatch(r"[A-Za-z]+.*", raw):
             book_part, n1, n2, n3 = m.groups()
+            book = self.db.find_book(book_part.strip())
             if n2:
                 result = f"{book_part.strip()} {int(n1)}:{int(n2)}"
                 if n3:
                     result += f"-{int(n3)}"
                 return result
-            if len(n1) >= 3:
-                # 中文书名 + 连续数字：优先按“章节 + 节”拆分。
-                # 例如 创世记12 -> 1:2，创世记123 -> 12:3。
-                return f"{book_part.strip()} {int(n1[:-1])}:{int(n1[-1])}"
+            # 无分隔的连续数字：中文书名只当作「章」，避免 创世记12→1:2
+            if book:
+                return f"{book_part.strip()} {int(n1)}"
             return raw
 
-        # 简拼 + 数字。先确定书卷，避免把普通英文输入误格式化。
+        # 简拼 + 数字
         m = re.fullmatch(r"([A-Za-z]+)[\s]*([0-9]+)(?:[\s:：.]+([0-9]+))?(?:[\s-]+([0-9]+))?", raw)
         if not m:
             return raw
         code, n1, n2, n3 = m.groups()
-        if not self._find_by_pinyin(code):
+        book = self._find_by_pinyin(code)
+        if not book:
             return raw
 
+        label = code.upper()
         if n2:
-            result = f"{code.upper()} {int(n1)}:{int(n2)}"
+            result = f"{label} {int(n1)}:{int(n2)}"
             if n3:
                 result += f"-{int(n3)}"
             return result
 
-        # 连续数字自动按“章节 + 节”拆分。
-        if len(n1) >= 3:
-            chapter = n1[:-1]
-            verse = n1[-1]
-            return f"{code.upper()} {int(chapter)}:{int(verse)}"
-
-        # 两位数字无法可靠判断 1:2 还是第12章，因此保持输入，避免误导。
+        # 连续数字：含 2 位起做章:节智能拆分（修复 CSJ12）
+        if len(n1) >= 2:
+            parsed = self._best_chapter_verse_split(book, n1)
+            if parsed:
+                return self._format_from_parsed(label, parsed)
         return raw
 
     def _set_formatted_text(self, text):
@@ -159,22 +193,18 @@ class SearchWidget(QWidget):
         self._formatting_text = True
         try:
             cursor_pos = self.search_input.cursorPosition()
-            old = self.search_input.text()
             self.search_input.setText(text)
-            # 尽量保持光标位于输入末尾，适合键盘连续输入。
             self.search_input.setCursorPosition(min(len(text), max(cursor_pos, len(text))))
         finally:
             self._formatting_text = False
 
     def _validate_and_parse_formatted(self, text):
-        """解析前统一使用自动补全后的标准格式。"""
         formatted = self._auto_format_reference(text)
         if formatted != text:
             self._set_formatted_text(formatted)
         return self._parse_reference(formatted)
 
     def _parse_reference(self, text):
-        """先处理 Books.Pinyin，再交给数据库处理其它格式，并严格限制实际范围。"""
         raw = str(text).strip().replace("：", ":").replace("．", ".").replace("。", ".")
         if not raw:
             return None
@@ -191,6 +221,20 @@ class SearchWidget(QWidget):
                     int(end) if end else (None if "-" in raw else int(start)),
                 )
                 return self._validate_parsed(parsed)
+
+        # 简拼 + 纯数字章节：CSJ 12
+        m = re.fullmatch(r"([A-Za-z]+)[\s]+(\d+)$", raw)
+        if m:
+            book = self._find_by_pinyin(m.group(1))
+            if book:
+                return self._validate_parsed((book, int(m.group(2)), None, None))
+
+        # 简拼连续数字未格式化时再拆一次
+        m = re.fullmatch(r"([A-Za-z]+)(\d+)$", raw)
+        if m:
+            book = self._find_by_pinyin(m.group(1))
+            if book:
+                return self._best_chapter_verse_split(book, m.group(2))
 
         book = self._find_by_pinyin(raw)
         if book:
@@ -221,7 +265,6 @@ class SearchWidget(QWidget):
 
         books = self.db.search_books(book_query)
         for index, book in enumerate(books[:12], 1):
-            # 候选项自动添加序号分隔符，便于直接按 1/2/3 选择。
             item = QListWidgetItem(f"{index}. {self.db._short_name(book)} {book}")
             item.setData(Qt.ItemDataRole.UserRole, (book, 1, None, None))
             self.result_list.addItem(item)
