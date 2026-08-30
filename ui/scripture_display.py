@@ -51,17 +51,20 @@ class ScriptureDisplay(QWidget):
     def set_scroll_fraction(self,fraction):self.set_scroll_position(round(max(0.0,min(1.0,float(fraction)))*self.text_display.verticalScrollBar().maximum()))
     def set_scroll_position(self,value):
         bar=self.text_display.verticalScrollBar(); value=max(bar.minimum(),min(int(value),bar.maximum())); bar.blockSignals(True); bar.setValue(value); bar.blockSignals(False)
+    def force_scroll_to(self,value):
+        bar=self.text_display.verticalScrollBar()
+        try:value=int(value)
+        except (TypeError,ValueError):return
+        value=max(bar.minimum(),min(value,bar.maximum()))
+        bar.blockSignals(True); bar.setValue(value); bar.blockSignals(False)
+        self.text_display.viewport().update(); self.text_display.update(); self.update()
     def get_scroll_anchor(self):
         if self.text_display.document().isEmpty():return 0
-        viewport=self.text_display.viewport(); p=QPoint(max(2,viewport.width()//2),8); cursor=self.text_display.cursorForPosition(p); return max(0,cursor.position())
+        viewport=self.text_display.viewport(); cursor=self.text_display.cursorForPosition(QPoint(max(2,viewport.width()//2),8)); return max(0,cursor.position())
     def set_scroll_anchor(self,anchor):
         try:pos=max(0,min(int(anchor),self.text_display.document().characterCount()-1))
         except Exception:return
-        cursor=QTextCursor(self.text_display.document()); cursor.setPosition(pos)
-        # 先让目标字符进入可视区，再把它精确移动到视口顶部附近。
-        self.text_display.setTextCursor(cursor); self.text_display.ensureCursorVisible(); QApplication_process=False
-        rect=self.text_display.cursorRect(cursor); bar=self.text_display.verticalScrollBar(); target_y=8; new_value=bar.value()+rect.top()-target_y
-        new_value=max(bar.minimum(),min(new_value,bar.maximum())); bar.blockSignals(True); bar.setValue(new_value); bar.blockSignals(False); self.text_display.setTextCursor(QTextCursor())
+        cursor=QTextCursor(self.text_display.document()); cursor.setPosition(pos); self.text_display.setTextCursor(cursor); self.text_display.ensureCursorVisible(); rect=self.text_display.cursorRect(cursor); bar=self.text_display.verticalScrollBar(); new_value=bar.value()+rect.top()-8; new_value=max(bar.minimum(),min(new_value,bar.maximum())); bar.blockSignals(True); bar.setValue(new_value); bar.blockSignals(False); self.text_display.setTextCursor(QTextCursor())
     def _smooth_to(self,target,duration=120):
         bar=self.text_display.verticalScrollBar(); target=max(bar.minimum(),min(int(target),bar.maximum()))
         if self._scroll_anim:self._scroll_anim.stop()
