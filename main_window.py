@@ -1,7 +1,7 @@
 # 主窗口 - 业务逻辑层
 import os
 from PyQt6.QtWidgets import QMainWindow,QWidget,QHBoxLayout,QSplitter,QStatusBar,QLabel,QApplication
-from PyQt6.QtCore import Qt,QPoint
+from PyQt6.QtCore import Qt,QPoint,QTimer
 from PyQt6.QtGui import QKeySequence,QShortcut
 from config import AppConfig
 from bible_database import BibleDatabase
@@ -11,6 +11,8 @@ class MainWindow(QMainWindow):
     def __init__(self,db:BibleDatabase,config:AppConfig):
         super().__init__(); self.db=db; self.config=config; self.extension_window=None; self._syncing_scroll=False; self.current_book=None; self.current_chapter=None; self.current_start=None; self.current_end=None; self.verses=[]; self.settings=config.load_display_settings(); self.theme=self.settings.get("theme","dark"); self.setWindowTitle("圣经投影系统"); self.setMinimumSize(800,600)
         geometry=config.load_window_state(); self.restoreGeometry(geometry) if geometry else self.resize(1200,800); self._load_theme_style(); self._create_central_widget(); self._create_toolbar(); self._create_shortcuts(); self._create_statusbar(); self.nav_panel.load_history(config.load_history()); self.nav_panel.history_changed.connect(self._save_history); self._apply_settings(self.settings)
+        # 扩展模式下持续读取主屏滚动位置，避免 Qt 滚动动画/自动滚动时信号丢失。
+        self._extension_sync_timer=QTimer(self); self._extension_sync_timer.setInterval(20); self._extension_sync_timer.timeout.connect(self._sync_extension_scroll)
     def _save_history(self,h): self.config.save_history(h)
     def _load_theme_style(self):
         p=os.path.join("styles",f"{self.theme}.qss")
@@ -47,7 +49,7 @@ class MainWindow(QMainWindow):
     def _update_status(self): self.status_label.setText(f"{self.current_book} {self.current_chapter}:{self.current_start}-{self.current_end}" if self.current_book else "按回车键打开搜索")
     def _toggle_extension(self):
         if self.extension_window and self.extension_window.isVisible():
-            self.extension_window.hide(); self.scripture_display.clear_reference_size(); self.toolbar.set_extend_active(False); return
+            self.extension_window.hide(); self._extension_sync_timer.stop(); self.scripture_display.clear_reference_size(); self.toolbar.set_extend_active(False); return
         self._show_extension()
     def _show_extension(self):
         screens=QApplication.screens()
@@ -55,12 +57,11 @@ class MainWindow(QMainWindow):
         if not self.extension_window:self.extension_window=ExtensionWindow(); self.extension_window.apply_settings(self.settings)
         geom=screens[1].geometry();
         # 扩展模式下，主屏和扩展屏统一使用第二屏的实际分辨率作为经文排版基准。
-        # 不改变主窗口尺寸，避免破坏左侧导航和工具栏；只统一经文内容的有效显示尺寸/换行计算。
         self.scripture_display.set_reference_size(geom.width(),geom.height())
         self.extension_window.scripture_display.set_reference_size(geom.width(),geom.height())
         self.extension_window.setGeometry(geom); self.extension_window.showFullScreen();
         if self.verses:self.extension_window.update_scripture(self.current_book,self.current_chapter,self.current_start,self.current_end,self.verses)
-        self.extension_window.set_scroll_speed(0); QApplication.processEvents(); self._sync_extension_scroll(); self.toolbar.set_extend_active(True); self.status_label.setText(f"扩展显示: 屏幕2 ({geom.width()}x{geom.height()})，主屏排版基准已锁定")
+        self.extension_window.set_scroll_speed(0); QApplication.processEvents(); self._sync_extension_scroll(); self._extension_sync_timer.start(); self.toolbar.set_extend_active(True); self.status_label.setText(f"扩展显示: 屏幕2 ({geom.width()}x{geom.height()})，主屏排版基准已锁定")
     def _toggle_extension_topmost(self,on):
         if self.extension_window and self.extension_window.isVisible(): self.extension_window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint,on); self.extension_window.show()
         self.config.save_display_settings({"extension_topmost":on})
@@ -86,7 +87,8 @@ class MainWindow(QMainWindow):
         if self._syncing_scroll or not self.extension_window or not self.extension_window.isVisible(): return
         self._syncing_scroll=True
         try:
-            # 主屏是唯一滚动源；每次主屏滚动都把实际滚动比例映射到扩展屏。
+            # 主屏是唯一滚动源。使用主屏滚动条的实时比例同步扩展屏。
+            # 该函数既由滚动信号调用，也由20ms定时器调用，因此滚轮、按钮、键盘、自动滚动、平滑动画都不会漏同步。
             self.extension_window.sync_from_main(self.scripture_display)
         finally:
             self._syncing_scroll=False
