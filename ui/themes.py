@@ -1,24 +1,33 @@
 # ui/themes.py
-# 主题配色常量
-# 用于代码中需要动态配色的地方（QSS之外的补充）
+# 冷蓝专业风配色（控制台）
 
 THEMES = {
     "dark": {
-        "toolbar_bg": "#1E1E2E",      # 工具栏背景
-        "panel_bg": "#1A1A28",        # 面板背景
-        "item_bg": "#252538",         # 条目背景
-        "text_primary": "#DDDDDD",    # 主要文字
-        "text_secondary": "#999999",  # 次要文字
-        "accent": "#4A90E2",          # 强调色
-        "border": "#3A3A5E"           # 边框色
+        "window_bg": "#0F1115",
+        "toolbar_bg": "#161A22",
+        "panel_bg": "#1C212B",
+        "item_bg": "#242B38",
+        "item_hover": "#2C3545",
+        "text_primary": "#E8EAED",
+        "text_secondary": "#9AA3B2",
+        "accent": "#3B82F6",
+        "accent_hover": "#2563EB",
+        "border": "#2A3344",
+        "danger": "#EF4444",
+        "success": "#22C55E",
     },
     "light": {
+        "window_bg": "#F3F5F8",
         "toolbar_bg": "#FFFFFF",
         "panel_bg": "#FFFFFF",
-        "item_bg": "#F0F2F5",
-        "text_primary": "#333333",
-        "text_secondary": "#888888",
+        "item_bg": "#EEF1F6",
+        "item_hover": "#E2E8F0",
+        "text_primary": "#1E293B",
+        "text_secondary": "#64748B",
         "accent": "#2563EB",
-        "border": "#E5E7EB"
-    }
+        "accent_hover": "#1D4ED8",
+        "border": "#E2E8F0",
+        "danger": "#DC2626",
+        "success": "#16A34A",
+    },
 }

@@ -3,24 +3,35 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout
 from PyQt6.QtCore import Qt, pyqtSignal
 from .scripture_display import ScriptureDisplay
 
+
 class ExtensionWindow(QWidget):
-    # 按 Esc 时通知主窗口执行完整的关闭扩展逻辑
     close_requested = pyqtSignal()
 
-    def __init__(self):
+    def __init__(self, topmost=True):
         super().__init__()
         self.setWindowTitle("圣经投影")
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+        self._topmost = bool(topmost)
+        self._apply_window_flags()
         self.scripture_display = ScriptureDisplay()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self.scripture_display)
         self.current_data = None
-        self._main_scroll_value = 0
+        self._main_scroll_fraction = 0.0
+
+    def _apply_window_flags(self):
+        flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool
+        if self._topmost:
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+        self.setWindowFlags(flags)
+
+    def apply_topmost(self, on):
+        """按配置切换置顶；调用方负责 showFullScreen 以保持全屏。"""
+        self._topmost = bool(on)
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self._topmost)
 
     def keyPressEvent(self, event):
-        # 扩展屏获得焦点时，Esc 直接关闭扩展显示。
         if event.key() == Qt.Key.Key_Escape:
             self.close_requested.emit()
             event.accept()
@@ -36,39 +47,25 @@ class ExtensionWindow(QWidget):
         self.scripture_display.apply_settings(settings)
 
     def set_scroll_speed(self, speed):
-        # 扩展屏绝不自己滚动。
         self.scripture_display.set_scroll_speed(0)
 
     def set_scroll_position(self, value):
-        self._main_scroll_value = int(value)
-        self.scripture_display.force_scroll_to(self._main_scroll_value)
+        self.scripture_display.force_scroll_to(value)
 
-    def force_sync_scroll(self, main_value=None, main_maximum=None):
-        """由主屏强制设置扩展屏滚动条，不使用 QTextCursor/anchor。"""
-        if main_value is not None:
-            try:self._main_scroll_value = int(main_value)
-            except (TypeError, ValueError):return
-        bar = self.scripture_display.text_display.verticalScrollBar()
-        if main_maximum is None:
-            target = self._main_scroll_value
-        else:
+    def force_sync_scroll(self, main_fraction=None):
+        if main_fraction is not None:
             try:
-                mm = max(0, int(main_maximum)); mv = max(0, int(self._main_scroll_value))
+                self._main_scroll_fraction = max(0.0, min(1.0, float(main_fraction)))
             except (TypeError, ValueError):
                 return
-            target = 0 if mm <= 0 else round((mv / mm) * bar.maximum())
-        self.scripture_display.force_scroll_to(target)
+        self.scripture_display.set_scroll_fraction(self._main_scroll_fraction)
 
     def sync_from_main(self, main_display):
-        main_bar = main_display.text_display.verticalScrollBar()
-        self.force_sync_scroll(main_bar.value(), main_bar.maximum())
+        self.force_sync_scroll(main_display.scroll_fraction())
 
     def set_scroll_fraction(self, fraction):
-        self.scripture_display.set_scroll_fraction(fraction)
+        self.force_sync_scroll(fraction)
 
-    def set_scroll_anchor(self, anchor):
-        # 保留兼容接口，但不再用于双屏同步。
-        self.scripture_display.set_scroll_anchor(anchor)
-
-    def scroll_by(self, delta):
-        return
+    def closeEvent(self, event):
+        self.close_requested.emit()
+        super().closeEvent(event)
