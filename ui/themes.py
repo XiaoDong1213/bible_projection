@@ -1,6 +1,6 @@
-# ui/themes.py
-# 冷蓝专业风配色（控制台）
+"""统一管理亮色和暗色界面的主题配色。"""
 
+# 深色主题：突出经文内容和主要操作
 THEMES = {
     "dark": {
         "window_bg": "#0F1115",
@@ -16,6 +16,7 @@ THEMES = {
         "danger": "#EF4444",
         "success": "#22C55E",
     },
+    # 浅色主题：保持与深色主题相同的控件层级
     "light": {
         "window_bg": "#F3F5F8",
         "toolbar_bg": "#FFFFFF",
