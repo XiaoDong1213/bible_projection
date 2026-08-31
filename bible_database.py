@@ -109,16 +109,40 @@ class BibleDatabase:
         q = self._normalize_code(query)
         if not q:
             return []
+
+        # 完全匹配优先：输入 q 之类的单字母时，不被其他简拼中间包含的 q 干扰。
         if q in self.book_codes:
             return [self.book_codes[q]]
-        results = []
+
+        prefix_results = []
+        fuzzy_results = []
+
         for book in self.book_names:
             codes = [code for code, target in self.book_codes.items() if target == book]
-            pinyin = self.book_meta.get(book, {}).get("pinyin", "")
-            if q in book.lower() or q in self._short_name(book).lower() or (pinyin and q in self._normalize_code(pinyin)) or any(q in code for code in codes):
-                if book not in results:
-                    results.append(book)
-        return results
+            pinyin = self._normalize_code(self.book_meta.get(book, {}).get("pinyin", ""))
+            short_name = self._short_name(book).lower()
+            book_name = book.lower()
+
+            # 核心规则：简拼“开头匹配”优先于任何包含匹配。
+            is_prefix = (
+                pinyin.startswith(q)
+                or any(code.startswith(q) for code in codes)
+                or short_name.startswith(q)
+                or book_name.startswith(q)
+            )
+            is_fuzzy = (
+                q in book_name
+                or q in short_name
+                or (pinyin and q in pinyin)
+                or any(q in code for code in codes)
+            )
+
+            if is_prefix and book not in prefix_results:
+                prefix_results.append(book)
+            elif is_fuzzy and book not in fuzzy_results:
+                fuzzy_results.append(book)
+
+        return prefix_results + fuzzy_results
 
     def find_book(self, query):
         q = self._normalize_code(query)
