@@ -144,7 +144,7 @@ class SearchWidget(QWidget):
     def _chapter_entry_info(self, text):
         """识别“书卷 + 连续章节数字”，按数据库 ChapterCount 判断是否补冒号。"""
         raw = str(text or "").strip()
-        m = re.fullmatch(r"(.+?)[\\s]*([0-9]+)", raw)
+        m = re.fullmatch(r"(.+?)[\s]*([0-9]+)", raw)
         if not m:
             return None
 
@@ -195,9 +195,9 @@ class SearchWidget(QWidget):
             return raw
 
         # 已经存在章:节分隔符，不处理。
-        if re.search(r"[0-9][\\s:：.]+[0-9]", raw):
+        if re.search(r"[0-9][\s:：.]+[0-9]", raw):
             m = re.fullmatch(
-                r"(.+?)[\\s]*([0-9]+)(?:[\\s:：.]+([0-9]+))?(?:[\\s-]+([0-9]+))?",
+                r"(.+?)[\s]*([0-9]+)(?:[\s:：.]+([0-9]+))?(?:[\s-]+([0-9]+))?",
                 raw
             )
             if m:
@@ -221,7 +221,7 @@ class SearchWidget(QWidget):
             return raw
 
         # 保留原有简拼连续数字的智能章:节拆分（例如 CSJ12）。
-        m = re.fullmatch(r"([A-Za-z]+)[\\s]*([0-9]+)(?:[\\s:：.]+([0-9]+))?(?:[\\s-]+([0-9]+))?", raw)
+        m = re.fullmatch(r"([A-Za-z]+)[\s]*([0-9]+)(?:[\s:：.]+([0-9]+))?(?:[\s-]+([0-9]+))?", raw)
         if not m:
             return raw
 
