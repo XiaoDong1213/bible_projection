@@ -30,26 +30,29 @@ Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.i
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-; Install the complete PyInstaller output directory.
-; Personal configuration files are deliberately excluded.
+; Personal configuration files are never included in the installer.
 Source: "{#MyAppSourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "config.ini,config.json,settings.ini,settings.json,history.ini,history.json"
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
-[Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "启动 {#MyAppName}"; Flags: nowait postinstall skipifsilent
-
 [Code]
 procedure DeleteUserData;
 var
   UserDataDir: string;
 begin
-  { config.py stores installed-version data under %APPDATA%\bible_projection. }
+  { Installed-version configuration is stored in %APPDATA%\bible_projection. }
   UserDataDir := ExpandConstant('{userappdata}\bible_projection');
   if DirExists(UserDataDir) then
     DelTree(UserDataDir, True, True, True);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  { Always reset installed-version user data before copying files. }
+  if CurStep = ssInstall then
+    DeleteUserData;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
@@ -60,3 +63,6 @@ begin
     DeleteUserData;
   end;
 end;
+
+[Run]
+Filename: "{app}\{#MyAppExeName}"; Description: "启动 {#MyAppName}"; Flags: nowait postinstall skipifsilent
