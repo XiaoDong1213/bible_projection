@@ -1,93 +1,42 @@
 import re
-from PyQt6.QtWidgets import QWidget,QVBoxLayout,QLineEdit,QLabel,QListWidget,QListWidgetItem,QSizePolicy
+from PyQt6.QtWidgets import QWidget,QVBoxLayout,QLineEdit,QLabel,QListWidget,QListWidgetItem
+from PyQt6.QtGui import QPalette
 from PyQt6.QtCore import Qt,pyqtSignal,QEvent
 
 class SearchWidget(QWidget):
     search_triggered=pyqtSignal(tuple); close_requested=pyqtSignal()
     ALLOWED=re.compile(r"[A-Za-z0-9 :：.．。\-]")
     def __init__(self,db,parent=None):
-        super().__init__(parent)
-        self.db=db; self._formatting=False; self._converted_book=False; self._converted_book_name=""; self._selected_book=None; self._stage="book"; self._space_mode=False
-        self._book_cache={}
-        self.setObjectName("searchPanel")
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint|Qt.WindowType.Popup)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground,True)
-        self.setMinimumWidth(520); self.setMaximumWidth(560)
-        self.setSizePolicy(QSizePolicy.Policy.Preferred,QSizePolicy.Policy.Maximum)
+        super().__init__(parent); self.db=db; self._formatting=False; self._converted_book=False; self._converted_book_name=""; self._selected_book=None; self._stage="book"; self._space_mode=False; self._candidate_cache={}
+        self.setObjectName("searchPanel"); self.setWindowFlags(Qt.WindowType.FramelessWindowHint|Qt.WindowType.Popup); self.setMinimumWidth(500); self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground,True)
         lay=QVBoxLayout(self); lay.setContentsMargins(14,14,14,14); lay.setSpacing(8)
-        self.search_input=QLineEdit(); self.search_input.setObjectName("searchInput"); self.search_input.setMinimumHeight(44); self.search_input.setPlaceholderText("输入简拼，例如：CSJ"); self.search_input.textEdited.connect(self._on_text_edited); self.search_input.returnPressed.connect(self._on_confirm); lay.addWidget(self.search_input)
-        self.hint_label=QLabel(); self.hint_label.setObjectName("searchHint"); self.hint_label.setMinimumHeight(28); self.hint_label.setMaximumHeight(32); self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter); self.hint_label.setWordWrap(False); lay.addWidget(self.hint_label)
-        self.result_list=QListWidget(); self.result_list.setObjectName("searchCandidates"); self.result_list.setFocusPolicy(Qt.FocusPolicy.NoFocus); self.result_list.setSpacing(2); self.result_list.setMinimumWidth(492); self.result_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff); self.result_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded); self.result_list.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Fixed); self.result_list.itemClicked.connect(self._on_item_clicked); lay.addWidget(self.result_list)
-        self.search_input.installEventFilter(self); self.result_list.installEventFilter(self); self.setFocusProxy(self.search_input); self._apply_theme(); self._set_hint("输入简拼　↑↓选择　空格选择/下一段　Enter确认　Esc退出")
+        self.search_input=QLineEdit(); self.search_input.setObjectName("searchInput"); self.search_input.setMinimumHeight(44); self.search_input.setPlaceholderText("输入简拼，例如：CSJ"); self.search_input.textEdited.connect(self._on_text_edited); lay.addWidget(self.search_input)
+        self.hint_label=QLabel("输入简拼　↑↓选择　空格选择/下一段　Enter确认　Esc退出"); self.hint_label.setObjectName("searchHint"); self.hint_label.setMinimumHeight(30); self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter); lay.addWidget(self.hint_label)
+        self.result_list=QListWidget(); self.result_list.setObjectName("searchCandidates"); self.result_list.setFocusPolicy(Qt.FocusPolicy.NoFocus); self.result_list.setSpacing(1); self.result_list.setMinimumHeight(0); self.result_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff); self.result_list.itemClicked.connect(self._on_item_clicked); lay.addWidget(self.result_list)
+        self.search_input.installEventFilter(self); self.result_list.installEventFilter(self); self.setFocusProxy(self.search_input); self._apply_theme(); self._resize_result_area()
     def _apply_theme(self):
-        if not all(hasattr(self,x) for x in ("search_input","hint_label","result_list")): return
-        # 使用 Qt stylesheet 的 palette 变量，不直接调用 QPalette.color，兼容不同 PyQt6 构建并自动跟随明暗主题。
-        self.setStyleSheet("""
-            QWidget#searchPanel {
-                background: palette(window);
-                border: 1px solid palette(mid);
-                border-radius: 12px;
-            }
-            QLineEdit#searchInput {
-                background: palette(base);
-                color: palette(text);
-                border: 1px solid palette(mid);
-                border-radius: 9px;
-                padding: 0 12px;
-                selection-background-color: palette(highlight);
-                selection-color: palette(highlighted-text);
-            }
-            QLabel#searchHint {
-                background: palette(base);
-                color: palette(text);
-                border: 1px solid palette(mid);
-                border-radius: 9px;
-                padding: 2px 10px;
-            }
-            QListWidget#searchCandidates {
-                background: palette(base);
-                color: palette(text);
-                border: 1px solid palette(mid);
-                border-radius: 9px;
-                padding: 3px;
-                outline: 0;
-            }
-            QListWidget#searchCandidates::item {
-                padding: 6px 10px;
-                border-radius: 6px;
-                min-height: 20px;
-            }
-            QListWidget#searchCandidates::item:selected {
-                background: palette(highlight);
-                color: palette(highlighted-text);
-            }
-        """)
+        if not hasattr(self,"result_list"): return
+        self.setStyleSheet("QWidget#searchPanel { background: palette(window); border: 1px solid palette(mid); border-radius: 10px; } QLineEdit#searchInput { background: palette(base); color: palette(text); border: 1px solid palette(mid); border-radius: 8px; padding: 0 12px; selection-background-color: palette(highlight); selection-color: palette(highlighted-text); } QLabel#searchHint { background: palette(base); color: palette(text); border: 1px solid palette(mid); border-radius: 8px; padding: 2px 10px; } QListWidget#searchCandidates { background: palette(base); color: palette(text); border: 1px solid palette(mid); border-radius: 8px; padding: 3px; outline: 0; } QListWidget#searchCandidates::item { padding: 5px 10px; border-radius: 5px; } QListWidget#searchCandidates::item:selected { background: palette(highlight); color: palette(highlighted-text); }")
     def changeEvent(self,event):
         super().changeEvent(event)
         if event.type() in (QEvent.Type.PaletteChange,QEvent.Type.StyleChange): self._apply_theme()
-    def _set_hint(self,text,resize=False):
-        self.hint_label.setText(text)
-        if resize:self._resize_result_area()
-    def _update_hint(self,text): self._set_hint(text,False)
-    def _resize_result_area(self,force=True):
+    def _update_hint(self,text): self.hint_label.setText(text); self._resize_result_area()
+    def _resize_result_area(self,*_):
         count=self.result_list.count()
         if count:
-            rows=min(count,8); row_h=max(32,self.result_list.sizeHintForRow(0)); new_h=rows*row_h+8
-            if self.result_list.height()!=new_h:self.result_list.setFixedHeight(new_h)
-        else:
-            if self.result_list.height()!=0:self.result_list.setFixedHeight(0)
-        if force:self.adjustSize()
+            rows=min(count,8); row_h=max(31,self.result_list.sizeHintForRow(0)); self.result_list.setFixedHeight(rows*row_h+10)
+        else: self.result_list.setFixedHeight(0)
+        self.adjustSize()
     def showEvent(self,e):
-        super().showEvent(e); self._apply_theme(); self.search_input.setFocus(); self.search_input.selectAll(); self._converted_book=False; self._converted_book_name=""; self._selected_book=None; self._stage="book"; self._space_mode=False; self.result_list.clear(); self._set_hint("输入简拼　↑↓选择　空格选择/下一段　Enter确认　Esc退出",True)
+        super().showEvent(e); self._apply_theme(); self.search_input.setFocus(); self.search_input.selectAll(); self._converted_book=False; self._converted_book_name=""; self._selected_book=None; self._stage="book"; self._space_mode=False; self.result_list.clear(); self._update_hint("输入简拼　↑↓选择　空格选择/下一段　Enter确认　Esc退出")
     @staticmethod
     def _norm(v): return re.sub(r"[\s._-]+","",str(v or "").strip().lower())
     def _code(self,b): return self._norm(self.db.book_meta.get(b,{}).get("pinyin",""))
     def _candidates(self,q):
         q=self._norm(q)
-        if not q:return []
-        if q in self._book_cache:return self._book_cache[q]
-        result=[b for b in self.db.book_names if self._code(b).startswith(q)]
-        self._book_cache[q]=result
+        if q in self._candidate_cache:return self._candidate_cache[q]
+        result=[b for b in self.db.book_names if self._code(b).startswith(q)] if q else []
+        self._candidate_cache[q]=result
         return result
     def _exact(self,q):
         q=self._norm(q)
@@ -101,50 +50,50 @@ class SearchWidget(QWidget):
         try:return int(self.db.get_verse_count(b,c) or 0)
         except Exception:return 0
     def _set_text(self,t,converted=None):
-        t=str(t or ""); self._formatting=True
-        try:self.search_input.setText(t); self.search_input.setCursorPosition(len(t))
+        self._formatting=True
+        try:
+            value=str(t or ""); self.search_input.setText(value); self.search_input.setCursorPosition(len(value))
         finally:self._formatting=False
-        if converted is not None:self._converted_book=bool(converted); self._converted_book_name=t if converted else ""
+        if converted is not None:self._converted_book=bool(converted); self._converted_book_name=str(t or "") if converted else ""
     def _show_candidates(self,cs):
         self.result_list.setUpdatesEnabled(False); self.result_list.clear()
         for i,b in enumerate(cs[:30],1):
             code=self._code(b).upper(); short=self.db._short_name(b); item=QListWidgetItem(f"{i}.  {code or short}  {b}"); item.setData(Qt.ItemDataRole.UserRole,b); self.result_list.addItem(item)
         self.result_list.setUpdatesEnabled(True)
         if self.result_list.count():self.result_list.setCurrentRow(0)
-        self._resize_result_area(True)
+        self._resize_result_area()
     def _move_highlight(self,d):
         if not self.result_list.count():return True
-        row=max(0,min(self.result_list.currentRow()+d,self.result_list.count()-1)); self.result_list.setCurrentRow(row); self.result_list.scrollToItem(self.result_list.currentItem()); return True
+        row=max(0,min(self.result_list.currentRow()+d,self.result_list.count()-1)); self.result_list.setCurrentRow(row); return True
     def _select_current_book(self):
         item=self.result_list.currentItem()
         if item is None:return False
         b=item.data(Qt.ItemDataRole.UserRole)
         if not b:return False
-        self._selected_book=b; self._stage="chapter"; self._space_mode=False; self._set_text(b,True); self.result_list.clear(); self._resize_result_area(True); self._update_hint(f"已选择 {b}　输入章节后按空格进入节号"); self.search_input.setFocus(); self.search_input.setCursorPosition(len(b)); return True
-    def _suffix(self): return self.search_input.text()[len(self._selected_book):] if self._selected_book and self.search_input.text().startswith(self._selected_book) else ""
+        self._selected_book=b; self._stage="chapter"; self._space_mode=False; self._set_text(b,True); self.result_list.clear(); self._resize_result_area(); self._update_hint(f"已选择 {b}　请输入章节　按空格进入节号"); self.search_input.setFocus(); self.search_input.setCursorPosition(len(b)); return True
+    def _suffix(self):return self.search_input.text()[len(self._selected_book):] if self._selected_book and self.search_input.text().startswith(self._selected_book) else ""
     def _space_after_chapter(self):
         s=self._suffix().strip()
         if not re.fullmatch(r"\d+",s):return True
         c=int(s); mx=self._chapter_count(self._selected_book)
-        if not 1<=c<=mx:self._update_hint(f"章节超出范围，本书最多 {mx} 章"); return True
-        self._stage="verse"; self._set_text(f"{self._selected_book} {c}:"); self._update_hint("请输入开始节　按空格自动生成 -"); return True
+        if not 1<=c<=mx:self._update_hint(f"章节超出范围，本书最多 {mx} 章");return True
+        self._stage="verse"; self._set_text(f"{self._selected_book} {c}:"); self._update_hint("请输入开始节　按空格生成节范围分隔符 -"); return True
     def _space_after_verse(self):
         s=self._suffix().strip(); m=re.fullmatch(r"(\d+)\s*[:.]\s*(\d+)",s)
         if not m:return True
         c,v=map(int,m.groups()); mx=self._verse_count(self._selected_book,c)
-        if not 1<=v<=mx:self._update_hint(f"本章最多 {mx} 节"); return True
+        if not 1<=v<=mx:self._update_hint(f"本章最多 {mx} 节");return True
         self._space_mode=True; self._set_text(f"{self._selected_book} {c}:{v}-"); self._update_hint(f"请输入结束节（{v}-{mx}）"); return True
     def _delete_segment(self):
         if not self._selected_book:
-            text=self.search_input.text(); new_text=text[:-1] if text else ""
-            self._set_text(new_text); self._refresh_book_state(new_text); self.search_input.setFocus(); self.search_input.setCursorPosition(len(new_text)); return True
+            text=self.search_input.text(); new=text[:-1] if text else ""; self._set_text(new); self._refresh_book_state(new); return True
         text=self.search_input.text(); b=self._selected_book; suffix=text[len(b):] if text.startswith(b) else ""
-        patterns=[(r"\s*(\d+)\s*:\s*(\d+)\s*-\s*(\d+)\s*$",lambda m:f"{b} {m.group(1)}:{m.group(2)}-", "verse_range"),(r"\s*(\d+)\s*:\s*(\d+)\s*-\s*$",lambda m:f"{b} {m.group(1)}:{m.group(2)}", "verse"),(r"\s*(\d+)\s*:\s*(\d+)\s*$",lambda m:f"{b} {m.group(1)}:", "verse"),(r"\s*(\d+)\s*:\s*$",lambda m:f"{b} {m.group(1)}", "chapter"),(r"\s*(\d+)\s*$",lambda m:b, "chapter")]
+        patterns=[(r"\s*(\d+)\s*:\s*(\d+)\s*-\s*(\d+)\s*$",lambda m:f"{b} {m.group(1)}:{m.group(2)}-","verse_range"),(r"\s*(\d+)\s*:\s*(\d+)\s*-\s*$",lambda m:f"{b} {m.group(1)}:{m.group(2)}","verse"),(r"\s*(\d+)\s*:\s*(\d+)\s*$",lambda m:f"{b} {m.group(1)}:","verse"),(r"\s*(\d+)\s*:\s*$",lambda m:f"{b} {m.group(1)}","chapter"),(r"\s*(\d+)\s*$",lambda m:b,"chapter")]
         for pat,make,stage in patterns:
             m=re.fullmatch(pat,suffix)
             if m:
                 self._set_text(make(m)); self._stage=stage; self._space_mode=(stage=="verse_range"); self._refresh_selected(b,self._suffix()); self._update_hint_for_stage(); self.search_input.setFocus(); return True
-        self._set_text(""); self._selected_book=None; self._stage="book"; self._space_mode=False; self._converted_book=False; self._converted_book_name=""; self.result_list.clear(); self._resize_result_area(True); self._update_hint("输入简拼　↑↓选择　空格选择/下一段　Enter确认　Esc退出"); self.search_input.setFocus(); self.search_input.setCursorPosition(0); return True
+        self._set_text(""); self._selected_book=None; self._stage="book"; self._space_mode=False; self._converted_book=False; self._converted_book_name=""; self.result_list.clear(); self._resize_result_area(); self._update_hint("输入简拼　↑↓选择　空格选择/下一段　Enter确认　Esc退出"); self.search_input.setFocus(); self.search_input.setCursorPosition(0); return True
     def _refresh_book_state(self,text):
         self._stage="book"; self._selected_book=None; self._converted_book=False; self._converted_book_name=""; self._space_mode=False
         q=text.strip()
@@ -159,14 +108,19 @@ class SearchWidget(QWidget):
         self._update_hint("输入简拼　↑↓选择　空格选择/下一段　Enter确认　Esc退出")
     def _update_hint_for_stage(self):
         if not self._selected_book:return
-        if self._stage=="chapter":self._update_hint(f"已选择 {self._selected_book}　输入章节后按空格进入节号")
-        elif self._stage=="verse":self._update_hint("请输入开始节　按空格自动生成 -")
+        if self._stage=="chapter":self._update_hint(f"已选择 {self._selected_book}　请输入章节　按空格进入节号")
+        elif self._stage=="verse":self._update_hint("请输入开始节　按空格生成节范围分隔符 -")
         elif self._space_mode:self._update_hint("请输入结束节")
     def eventFilter(self,obj,event):
-        if event.type()!=QEvent.Type.KeyPress:return super().eventFilter(obj,event)
-        k=event.key()
-        if k==Qt.Key.Key_Escape:self.close_requested.emit(); return True
+        if event.type()!=QEvent.Type.KeyPress:return False
         if obj is self.search_input:
+            k=event.key()
+            if k==Qt.Key.Key_Escape:
+                self.close_requested.emit(); return True
+            if k==Qt.Key.Key_Return or k==Qt.Key.Key_Enter:
+                # Enter 必须在事件过滤器内直接消费，不能再交给 QLineEdit 的
+                # returnPressed 信号，否则外部关闭/重新聚焦时可能再次进入过滤器造成递归。
+                self._on_confirm(); return True
             if k==Qt.Key.Key_Up:return self._move_highlight(-1)
             if k==Qt.Key.Key_Down:return self._move_highlight(1)
             if k==Qt.Key.Key_Space:
@@ -176,10 +130,10 @@ class SearchWidget(QWidget):
                 return True
             if k in (Qt.Key.Key_Backspace,Qt.Key.Key_Delete):return self._delete_segment()
             if self._converted_book and self._is_letter(k):return True
-            allowed={Qt.Key.Key_Left,Qt.Key.Key_Right,Qt.Key.Key_Home,Qt.Key.Key_End,Qt.Key.Key_Return,Qt.Key.Key_Enter}
+            allowed={Qt.Key.Key_Left,Qt.Key.Key_Right,Qt.Key.Key_Home,Qt.Key.Key_End}
             if not(event.modifiers()&Qt.KeyboardModifier.ControlModifier) and k not in allowed:
                 if event.text() and not all(self.ALLOWED.fullmatch(c) for c in event.text()):return True
-        return super().eventFilter(obj,event)
+        return False
     def _is_letter(self,k):return Qt.Key.Key_A<=k<=Qt.Key.Key_Z
     def _on_text_edited(self,text):
         if self._formatting:return
@@ -189,9 +143,9 @@ class SearchWidget(QWidget):
             self._refresh_book_state(text); return
         if not self._selected_book:return
         b=self._selected_book
-        if not text.startswith(b):self._set_text(b,True);return
+        if not text.startswith(b):self._set_text(b,True); return
         suffix=text[len(b):]
-        if not re.fullmatch(r"[\s0-9:：.．。\-]*",suffix):suffix=re.sub(r"[^0-9 :：.．。\-]","",suffix);self._set_text(b+suffix)
+        if not re.fullmatch(r"[\s0-9:：.．。\-]*",suffix):suffix=re.sub(r"[^0-9 :：.．。\-]","",suffix); self._set_text(b+suffix)
         self._refresh_selected(b,suffix)
     def _refresh_selected(self,b,suffix):
         s=suffix.strip().replace("：",":").replace("．",".").replace("。","."); self.result_list.clear()
