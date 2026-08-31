@@ -1,6 +1,5 @@
 import re
 from PyQt6.QtWidgets import QWidget,QVBoxLayout,QLineEdit,QLabel,QListWidget,QListWidgetItem,QSizePolicy
-from PyQt6.QtGui import QPalette
 from PyQt6.QtCore import Qt,pyqtSignal,QEvent
 
 class SearchWidget(QWidget):
@@ -20,17 +19,49 @@ class SearchWidget(QWidget):
         self.hint_label=QLabel(); self.hint_label.setObjectName("searchHint"); self.hint_label.setMinimumHeight(28); self.hint_label.setMaximumHeight(32); self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter); self.hint_label.setWordWrap(False); lay.addWidget(self.hint_label)
         self.result_list=QListWidget(); self.result_list.setObjectName("searchCandidates"); self.result_list.setFocusPolicy(Qt.FocusPolicy.NoFocus); self.result_list.setSpacing(2); self.result_list.setMinimumWidth(492); self.result_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff); self.result_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded); self.result_list.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Fixed); self.result_list.itemClicked.connect(self._on_item_clicked); lay.addWidget(self.result_list)
         self.search_input.installEventFilter(self); self.result_list.installEventFilter(self); self.setFocusProxy(self.search_input); self._apply_theme(); self._set_hint("输入简拼　↑↓选择　空格选择/下一段　Enter确认　Esc退出")
-    @staticmethod
-    def _palette_color(p,role):
-        try:
-            return p.color(role)
-        except TypeError:
-            return p.color(QPalette.ColorGroup.Active,role)
     def _apply_theme(self):
         if not all(hasattr(self,x) for x in ("search_input","hint_label","result_list")): return
-        p=self.search_input.palette(); base=self._palette_color(p,QPalette.ColorRole.Base); text=self._palette_color(p,QPalette.ColorRole.Text); mid=self._palette_color(p,QPalette.ColorRole.Mid); highlight=self._palette_color(p,QPalette.ColorRole.Highlight); htext=self._palette_color(p,QPalette.ColorRole.HighlightedText)
-        panel=self._palette_color(p,QPalette.ColorRole.Window)
-        self.setStyleSheet(f"QWidget#searchPanel{{background:{panel.name()};border:1px solid {mid.name()};border-radius:12px;}} QLineEdit#searchInput{{background:{base.name()};color:{text.name()};border:1px solid {mid.name()};border-radius:9px;padding:0 12px;selection-background-color:{highlight.name()};selection-color:{htext.name()};}} QLabel#searchHint{{background:{base.name()};color:{text.name()};border:1px solid {mid.name()};border-radius:9px;padding:2px 10px;}} QListWidget#searchCandidates{{background:{base.name()};color:{text.name()};border:1px solid {mid.name()};border-radius:9px;padding:3px;outline:0;}} QListWidget#searchCandidates::item{{padding:6px 10px;border-radius:6px;min-height:20px;}} QListWidget#searchCandidates::item:selected{{background:{highlight.name()};color:{htext.name()};}}")
+        # 使用 Qt stylesheet 的 palette 变量，不直接调用 QPalette.color，兼容不同 PyQt6 构建并自动跟随明暗主题。
+        self.setStyleSheet("""
+            QWidget#searchPanel {
+                background: palette(window);
+                border: 1px solid palette(mid);
+                border-radius: 12px;
+            }
+            QLineEdit#searchInput {
+                background: palette(base);
+                color: palette(text);
+                border: 1px solid palette(mid);
+                border-radius: 9px;
+                padding: 0 12px;
+                selection-background-color: palette(highlight);
+                selection-color: palette(highlighted-text);
+            }
+            QLabel#searchHint {
+                background: palette(base);
+                color: palette(text);
+                border: 1px solid palette(mid);
+                border-radius: 9px;
+                padding: 2px 10px;
+            }
+            QListWidget#searchCandidates {
+                background: palette(base);
+                color: palette(text);
+                border: 1px solid palette(mid);
+                border-radius: 9px;
+                padding: 3px;
+                outline: 0;
+            }
+            QListWidget#searchCandidates::item {
+                padding: 6px 10px;
+                border-radius: 6px;
+                min-height: 20px;
+            }
+            QListWidget#searchCandidates::item:selected {
+                background: palette(highlight);
+                color: palette(highlighted-text);
+            }
+        """)
     def changeEvent(self,event):
         super().changeEvent(event)
         if event.type() in (QEvent.Type.PaletteChange,QEvent.Type.StyleChange): self._apply_theme()
@@ -98,7 +129,7 @@ class SearchWidget(QWidget):
         if not 1<=c<=mx:self._update_hint(f"章节超出范围，本书最多 {mx} 章"); return True
         self._stage="verse"; self._set_text(f"{self._selected_book} {c}:"); self._update_hint("请输入开始节　按空格自动生成 -"); return True
     def _space_after_verse(self):
-        s=self._suffix().strip(); m=re.fullmatch(r"(\d+)\s*:\s*(\d+)",s)
+        s=self._suffix().strip(); m=re.fullmatch(r"(\d+)\s*[:.]\s*(\d+)",s)
         if not m:return True
         c,v=map(int,m.groups()); mx=self._verse_count(self._selected_book,c)
         if not 1<=v<=mx:self._update_hint(f"本章最多 {mx} 节"); return True
