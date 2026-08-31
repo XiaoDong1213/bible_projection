@@ -11,10 +11,8 @@ class SearchLineEdit(QLineEdit):
     special_key = pyqtSignal(int)
 
     def keyPressEvent(self, event):
-        if event.key() in (
-            Qt.Key.Key_Escape, Qt.Key.Key_Up, Qt.Key.Key_Down,
-            Qt.Key.Key_Space, Qt.Key.Key_Backspace, Qt.Key.Key_Delete
-        ):
+        if event.key() in (Qt.Key.Key_Escape, Qt.Key.Key_Up, Qt.Key.Key_Down,
+                           Qt.Key.Key_Space, Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
             self.special_key.emit(event.key())
             event.accept()
             return
@@ -42,7 +40,7 @@ class SearchWidget(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setMinimumWidth(660)
-        self.setMaximumWidth(760)
+        self.setMaximumWidth(900)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 22, 22, 18)
@@ -78,27 +76,21 @@ class SearchWidget(QWidget):
         self._resize_result_area()
 
     def _apply_visual_style(self):
-        # 透明控件本身不铺灰色背景；Windows 下由 Acrylic 提供真正的背景模糊。
         self.setStyleSheet("""
-        QWidget#searchPanel {
-            background: transparent;
-            border: none;
-        }
+        QWidget#searchPanel { background: transparent; border: none; }
         QLineEdit#searchInput {
-            background: rgba(255,255,255,145);
+            background: rgba(255,255,255,190);
             color: palette(text);
-            border: 1px solid rgba(255,255,255,95);
+            border: 1px solid rgba(255,255,255,135);
             border-radius: 17px;
             padding: 0 20px;
             selection-background-color: palette(highlight);
             selection-color: palette(highlighted-text);
         }
-        QLineEdit#searchInput:focus {
-            border: 2px solid palette(highlight);
-        }
+        QLineEdit#searchInput:focus { border: 2px solid palette(highlight); }
         QLabel#searchHint {
             background: transparent;
-            color: palette(mid);
+            color: palette(text);
             border: none;
             padding: 0 7px;
         }
@@ -117,9 +109,7 @@ class SearchWidget(QWidget):
             padding: 9px 16px;
             min-height: 25px;
         }
-        QListWidget#searchCandidates::item:hover {
-            background: rgba(127,127,127,28);
-        }
+        QListWidget#searchCandidates::item:hover { background: rgba(127,127,127,38); }
         QListWidget#searchCandidates::item:selected {
             background: palette(highlight);
             color: palette(highlighted-text);
@@ -133,30 +123,22 @@ class SearchWidget(QWidget):
         try:
             hwnd = int(self.winId())
             user32 = ctypes.windll.user32
-            accent = 4  # ACCENT_ENABLE_ACRYLICBLURBEHIND
             class ACCENTPOLICY(ctypes.Structure):
-                _fields_ = [
-                    ("AccentState", wintypes.DWORD),
-                    ("AccentFlags", wintypes.DWORD),
-                    ("GradientColor", wintypes.DWORD),
-                    ("AnimationId", wintypes.DWORD),
-                ]
+                _fields_ = [("AccentState", wintypes.DWORD), ("AccentFlags", wintypes.DWORD),
+                            ("GradientColor", wintypes.DWORD), ("AnimationId", wintypes.DWORD)]
             class WINDOWCOMPOSITIONATTRIBDATA(ctypes.Structure):
-                _fields_ = [
-                    ("Attribute", wintypes.DWORD),
-                    ("Data", ctypes.c_void_p),
-                    ("SizeOfData", wintypes.SIZE),
-                ]
-            # ABGR: alpha + RGB，颜色很淡，只让桌面/窗口背景透出来，不做死灰色遮罩。
+                _fields_ = [("Attribute", wintypes.DWORD), ("Data", ctypes.c_void_p),
+                            ("SizeOfData", wintypes.SIZE)]
             dark = self.palette().window().color().lightness() < 128
-            rgb = 0x241B1510 if dark else 0xB8FFFFFF
-            policy = ACCENTPOLICY(accent, 2, rgb, 0)
+            # 提高不透明度，减少背景干扰：亮色约 78%，暗色约 82%。
+            gradient = 0xD21C1712 if dark else 0xC8FFFFFF
+            policy = ACCENTPOLICY(4, 2, gradient, 0)
             data = WINDOWCOMPOSITIONATTRIBDATA(19, ctypes.addressof(policy), ctypes.sizeof(policy))
-            set_attr = getattr(user32, "SetWindowCompositionAttribute", None)
-            if set_attr:
-                set_attr.argtypes = [wintypes.HWND, ctypes.POINTER(WINDOWCOMPOSITIONATTRIBDATA)]
-                set_attr.restype = wintypes.BOOL
-                set_attr(hwnd, ctypes.byref(data))
+            fn = getattr(user32, "SetWindowCompositionAttribute", None)
+            if fn:
+                fn.argtypes = [wintypes.HWND, ctypes.POINTER(WINDOWCOMPOSITIONATTRIBDATA)]
+                fn.restype = wintypes.BOOL
+                fn(hwnd, ctypes.byref(data))
         except Exception:
             pass
 
@@ -183,9 +165,7 @@ class SearchWidget(QWidget):
         count = self.result_list.count()
         if count:
             row_h = max(42, self.result_list.sizeHintForRow(0))
-            # 不截断候选：有多少候选就显示多少，不提供滚动区域。
-            height = count * row_h + max(0, count - 1) * 4 + 8
-            self.result_list.setFixedHeight(height)
+            self.result_list.setFixedHeight(count * row_h + max(0, count - 1) * 4 + 8)
         else:
             self.result_list.setFixedHeight(0)
         self.adjustSize()
@@ -347,10 +327,35 @@ class SearchWidget(QWidget):
         self._space_mode = False
         self.result_list.clear()
         query = text.strip()
+        if not query:
+            self._update_hint("↑↓ 选择　·　Space 选择 / 下一段　·　Enter 确认　·　Esc 关闭")
+            return
         if re.fullmatch(r"[A-Za-z]+", query):
             candidates = self._candidates(query)
             if candidates:
                 self._show_candidates(candidates)
+                self._update_hint("↑↓ 选择书卷　·　Space 确认当前项　·　Enter 确认")
+                return
+            # 输入已经不可能继续匹配时，立即识别唯一的首字母书卷。
+            if len(query) == 1:
+                initial_matches = [b for b in self.db.book_names if self._code(b)[:1] == query.lower()]
+                if len(initial_matches) == 1:
+                    book = initial_matches[0]
+                    self._selected_book = book
+                    self._stage = "chapter"
+                    self._converted_book = True
+                    self._set_text(book, True)
+                    self._update_hint(f"已识别为 {book}　·　请输入章节")
+                    return
+            # 完整简拼唯一时也立即转换。
+            exact = self._exact(query)
+            if exact:
+                self._selected_book = exact
+                self._stage = "chapter"
+                self._converted_book = True
+                self._set_text(exact, True)
+                self._update_hint(f"已识别为 {exact}　·　请输入章节")
+                return
         self._update_hint("↑↓ 选择　·　Space 选择 / 下一段　·　Enter 确认　·　Esc 关闭")
 
     def _update_hint_for_stage(self):
