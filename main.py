@@ -1,6 +1,5 @@
 # main.py
-# 圣经投影系统 - 程序入口
-# 功能：初始化各模块，启动主窗口
+# Bible Pro 程序入口
 
 import sys
 import os
@@ -15,7 +14,7 @@ from main_window import MainWindow
 
 
 def _set_windows_app_id():
-    """设置 Windows AppUserModelID，避免任务栏把程序识别成 Python。"""
+    """设置 Windows 应用标识，确保任务栏正确显示程序。"""
     if os.name != "nt":
         return
     try:
@@ -28,29 +27,20 @@ def _set_windows_app_id():
 
 
 def main():
-    # Windows 下必须在创建 QApplication 前设置 AppUserModelID，任务栏才能正确识别应用
     _set_windows_app_id()
 
-    # 创建Qt应用实例
     app = QApplication(sys.argv)
-    app.setStyle("Fusion")  # 使用Fusion风格，跨平台一致美观
+    app.setStyle("Fusion")
 
-    # 使用项目根目录的 icon.ico 作为整个应用的默认图标
     icon_path = Path(__file__).resolve().parent / "icon.ico"
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
 
-    # 1. 初始化配置管理器（负责保存/加载所有设置、历史记录）
     config = AppConfig()
-
-    # 2. 初始化圣经数据库（对接你的数据库文件）
     db = BibleDatabase()
-
-    # 3. 创建主窗口，注入数据库和配置
     window = MainWindow(db, config)
     window.show()
 
-    # 进入事件循环
     sys.exit(app.exec())
 
 
