@@ -10,6 +10,8 @@ from bible_database import BibleDatabase
 from main_window import MainWindow
 
 
+# 设置 Windows 应用标识，确保任务栏图标正确关联
+
 def _set_windows_app_id():
     """设置 Windows 应用标识。"""
     if os.name != "nt":
@@ -24,6 +26,7 @@ def _set_windows_app_id():
 
 
 def main():
+    """初始化应用、数据库和主窗口。"""
     _set_windows_app_id()
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
