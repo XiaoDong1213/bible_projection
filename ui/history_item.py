@@ -1,6 +1,3 @@
-# ui/history_item.py
-# 历史记录：单行控件 + 滚动列表（不用 QListWidget，避免框与文字脱节）
-
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton,
     QScrollArea, QFrame, QSizePolicy,
@@ -66,7 +63,7 @@ class HistoryItemWidget(QWidget):
 
 
 class HistoryListWidget(QScrollArea):
-    """历史列表：QScrollArea + 行控件，选中高亮画在行上。"""
+    """历史记录列表。"""
 
     item_clicked = pyqtSignal(int)
     item_deleted = pyqtSignal(int)
@@ -91,7 +88,7 @@ class HistoryListWidget(QScrollArea):
         self._selected = -1
 
     def set_entries(self, texts, selected_index=-1):
-        """全量刷新列表。texts: 显示文案列表。"""
+        """刷新历史记录列表。"""
         bar = self.verticalScrollBar()
         old_value = bar.value()
         while self._rows:
