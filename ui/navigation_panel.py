@@ -2,8 +2,52 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTabWidget, QTabBar, QPushButton, QGridLayout,
     QLabel, QSpinBox, QHBoxLayout, QFrame, QScrollArea, QSizePolicy,
 )
-from PyQt6.QtCore import Qt, QSize, pyqtSignal
+from PyQt6.QtCore import Qt, QSize, pyqtSignal, QPoint
+from PyQt6.QtGui import QPainter, QPolygon
 from .history_item import HistoryListWidget
+
+
+class VisibleSpinBox(QSpinBox):
+    """数字输入框：在 Qt 原生按钮区域上直接绘制清晰的上下三角箭头。"""
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(Qt.PenStyle.NoPen)
+
+        # 根据当前背景亮度自动选择高对比度箭头颜色
+        bg = self.palette().color(self.backgroundRole())
+        if bg.lightness() >= 128:
+            arrow_color = self.palette().color(self.foregroundRole())
+            if arrow_color.lightness() > 160:
+                arrow_color = bg.darker(250)
+        else:
+            arrow_color = self.palette().color(self.foregroundRole())
+            if arrow_color.lightness() < 120:
+                arrow_color = bg.lighter(220)
+
+        painter.setBrush(arrow_color)
+
+        # 右侧按钮区域，独立计算位置，不依赖 QSS 的 arrow 绘制
+        button_width = 20
+        center_x = self.width() - button_width // 2
+        center_y = self.height() // 2
+
+        # 上箭头 ▲
+        painter.drawPolygon(QPolygon([
+            QPoint(center_x - 4, center_y - 1),
+            QPoint(center_x + 4, center_y - 1),
+            QPoint(center_x, center_y - 6),
+        ]))
+
+        # 下箭头 ▼
+        painter.drawPolygon(QPolygon([
+            QPoint(center_x - 4, center_y + 1),
+            QPoint(center_x + 4, center_y + 1),
+            QPoint(center_x, center_y + 6),
+        ]))
 
 
 class EqualTabBar(QTabBar):
@@ -177,12 +221,12 @@ class NavigationPanel(QWidget):
         grid.addWidget(QLabel("起"), 0, 1)
         grid.addWidget(QLabel("止"), 0, 2)
 
-        self.chapter_spin = QSpinBox()
+        self.chapter_spin = VisibleSpinBox()
         self.chapter_spin.setRange(1, 150)
         self.chapter_spin.valueChanged.connect(self._on_chapter_changed)
-        self.start_spin = QSpinBox()
+        self.start_spin = VisibleSpinBox()
         self.start_spin.setRange(1, 176)
-        self.end_spin = QSpinBox()
+        self.end_spin = VisibleSpinBox()
         self.end_spin.setRange(1, 176)
         grid.addWidget(self.chapter_spin, 1, 0)
         grid.addWidget(self.start_spin, 1, 1)
