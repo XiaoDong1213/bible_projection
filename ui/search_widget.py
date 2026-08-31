@@ -1,20 +1,17 @@
 import re
 from PyQt6.QtWidgets import QWidget,QVBoxLayout,QLineEdit,QLabel,QListWidget,QListWidgetItem
-from PyQt6.QtGui import QKeySequence,QShortcut
-from PyQt6.QtCore import Qt,pyqtSignal,QEvent
+from PyQt6.QtCore import Qt,pyqtSignal,QEvent,QTimer
 
 class SearchWidget(QWidget):
     search_triggered=pyqtSignal(tuple); close_requested=pyqtSignal()
     ALLOWED=re.compile(r"[A-Za-z0-9 :：.．。\-]")
     def __init__(self,db,parent=None):
-        super().__init__(parent); self.db=db; self._formatting=False; self._converted_book=False; self._converted_book_name=""; self._selected_book=None; self._stage="book"; self._space_mode=False; self._candidate_cache={}
+        super().__init__(parent); self.db=db; self._formatting=False; self._converted_book=False; self._converted_book_name=""; self._selected_book=None; self._stage="book"; self._space_mode=False; self._candidate_cache={}; self._confirm_pending=False
         self.setObjectName("searchPanel"); self.setWindowFlags(Qt.WindowType.FramelessWindowHint|Qt.WindowType.Popup); self.setMinimumWidth(500); self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground,True)
         lay=QVBoxLayout(self); lay.setContentsMargins(14,14,14,14); lay.setSpacing(8)
         self.search_input=QLineEdit(); self.search_input.setObjectName("searchInput"); self.search_input.setMinimumHeight(44); self.search_input.setPlaceholderText("输入简拼，例如：CSJ"); self.search_input.textEdited.connect(self._on_text_edited); lay.addWidget(self.search_input)
         self.hint_label=QLabel("输入简拼　↑↓选择　空格选择/下一段　Enter确认　Esc退出"); self.hint_label.setObjectName("searchHint"); self.hint_label.setMinimumHeight(30); self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter); lay.addWidget(self.hint_label)
         self.result_list=QListWidget(); self.result_list.setObjectName("searchCandidates"); self.result_list.setFocusPolicy(Qt.FocusPolicy.NoFocus); self.result_list.setSpacing(1); self.result_list.setMinimumHeight(0); self.result_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff); self.result_list.itemClicked.connect(self._on_item_clicked); lay.addWidget(self.result_list)
-        self.enter_shortcut=QShortcut(QKeySequence("Return"),self.search_input); self.enter_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut); self.enter_shortcut.activated.connect(self._on_confirm)
-        self.numpad_enter_shortcut=QShortcut(QKeySequence("Enter"),self.search_input); self.numpad_enter_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut); self.numpad_enter_shortcut.activated.connect(self._on_confirm)
         self.search_input.installEventFilter(self); self.result_list.installEventFilter(self); self.setFocusProxy(self.search_input); self._apply_theme(); self._resize_result_area()
     def _apply_theme(self):
         if not hasattr(self,"result_list"): return
@@ -30,7 +27,7 @@ class SearchWidget(QWidget):
         else:self.result_list.setFixedHeight(0)
         if not skip_adjust:self.adjustSize()
     def showEvent(self,e):
-        super().showEvent(e); self._apply_theme(); self.search_input.setFocus(); self.search_input.selectAll(); self._converted_book=False; self._converted_book_name=""; self._selected_book=None; self._stage="book"; self._space_mode=False; self.result_list.clear(); self._update_hint("输入简拼　↑↓选择　空格选择/下一段　Enter确认　Esc退出")
+        super().showEvent(e); self._apply_theme(); self.search_input.setFocus(); self.search_input.selectAll(); self._converted_book=False; self._converted_book_name=""; self._selected_book=None; self._stage="book"; self._space_mode=False; self._confirm_pending=False; self.result_list.clear(); self._update_hint("输入简拼　↑↓选择　空格选择/下一段　Enter确认　Esc退出")
     @staticmethod
     def _norm(v): return re.sub(r"[\s._-]+","",str(v or "").strip().lower())
     def _code(self,b): return self._norm(self.db.book_meta.get(b,{}).get("pinyin",""))
@@ -87,7 +84,7 @@ class SearchWidget(QWidget):
         self._space_mode=True; self._set_text(f"{self._selected_book} {c}:{v}-"); self._update_hint(f"请输入结束节（{v}-{mx}）"); return True
     def _delete_segment(self):
         if not self._selected_book:
-            text=self.search_input.text(); new=text[:-1] if text else ""; self._set_text(new); self._refresh_book_state(new); return True
+            text=self.search_input.text(); new=text[:-1] if text else ""; self._set_text(new); self._refresh_book_state(new); self.search_input.setFocus(); return True
         text=self.search_input.text(); b=self._selected_book; suffix=text[len(b):] if text.startswith(b) else ""
         patterns=[(r"\s*(\d+)\s*:\s*(\d+)\s*-\s*(\d+)\s*$",lambda m:f"{b} {m.group(1)}:{m.group(2)}-","verse_range"),(r"\s*(\d+)\s*:\s*(\d+)\s*-\s*$",lambda m:f"{b} {m.group(1)}:{m.group(2)}","verse"),(r"\s*(\d+)\s*:\s*(\d+)\s*$",lambda m:f"{b} {m.group(1)}:","verse"),(r"\s*(\d+)\s*:\s*$",lambda m:f"{b} {m.group(1)}","chapter"),(r"\s*(\d+)\s*$",lambda m:b,"chapter")]
         for pat,make,stage in patterns:
@@ -109,6 +106,11 @@ class SearchWidget(QWidget):
         if event.type()!=QEvent.Type.KeyPress:return False
         if obj is self.search_input:
             k=event.key()
+            if k in (Qt.Key.Key_Return,Qt.Key.Key_Enter):
+                if not self._confirm_pending:
+                    self._confirm_pending=True
+                    QTimer.singleShot(0,self._confirm_once)
+                return True
             if k==Qt.Key.Key_Escape:self.close_requested.emit(); return True
             if k==Qt.Key.Key_Up:return self._move_highlight(-1)
             if k==Qt.Key.Key_Down:return self._move_highlight(1)
@@ -123,6 +125,9 @@ class SearchWidget(QWidget):
             if not(event.modifiers()&Qt.KeyboardModifier.ControlModifier) and k not in allowed:
                 if event.text() and not all(self.ALLOWED.fullmatch(c) for c in event.text()):return True
         return False
+    def _confirm_once(self):
+        try:self._on_confirm()
+        finally:self._confirm_pending=False
     def _is_letter(self,k):return Qt.Key.Key_A<=k<=Qt.Key.Key_Z
     def _on_text_edited(self,text):
         if self._formatting:return
