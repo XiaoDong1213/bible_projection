@@ -81,7 +81,6 @@ class BibleDatabase:
                 mapped_names.append(name)
         self.book_names = [name for name in self.book_meta if name in mapped_names] or mapped_names
 
-        # 简拼完全读取 Books.Pinyin，不再在 Python 中硬编码。
         self.book_codes = {}
         for i, book in enumerate(self.book_names[:66], 1):
             self.book_codes[str(i)] = book
@@ -109,21 +108,15 @@ class BibleDatabase:
         q = self._normalize_code(query)
         if not q:
             return []
-
-        # 完全匹配优先：输入 q 之类的单字母时，不被其他简拼中间包含的 q 干扰。
         if q in self.book_codes:
             return [self.book_codes[q]]
-
         prefix_results = []
         fuzzy_results = []
-
         for book in self.book_names:
             codes = [code for code, target in self.book_codes.items() if target == book]
             pinyin = self._normalize_code(self.book_meta.get(book, {}).get("pinyin", ""))
             short_name = self._short_name(book).lower()
             book_name = book.lower()
-
-            # 核心规则：简拼“开头匹配”优先于任何包含匹配。
             is_prefix = (
                 pinyin.startswith(q)
                 or any(code.startswith(q) for code in codes)
@@ -136,12 +129,10 @@ class BibleDatabase:
                 or (pinyin and q in pinyin)
                 or any(q in code for code in codes)
             )
-
             if is_prefix and book not in prefix_results:
                 prefix_results.append(book)
             elif is_fuzzy and book not in fuzzy_results:
                 fuzzy_results.append(book)
-
         return prefix_results + fuzzy_results
 
     def find_book(self, query):
@@ -181,7 +172,6 @@ class BibleDatabase:
         sql += f" ORDER BY {self._quote(self.verse_col)}"
         return [(int(r["verse"]), str(r["text"])) for r in self.conn.execute(sql, params).fetchall()]
 
-    # 保持旧主窗口接口兼容
     def get_verse_range(self, book_name, chapter, start_verse=1, end_verse=None):
         return self.get_verses(book_name, chapter, start_verse, end_verse)
 
@@ -189,36 +179,27 @@ class BibleDatabase:
         raw = str(text).strip().replace("：", ":").replace("．", ".").replace("。", ".")
         if not raw:
             return None
-
-        # 小键盘：1.1.2.12 = 创世记1:2-12
         m = re.fullmatch(r"(\d{1,2})[.\s]+(\d+)[.\s]+(\d+)[.\s]+(\d+)", raw)
         if m:
             book, ch, start, end = m.groups()
             b = self.find_book(book)
             return (b, int(ch), int(start), int(end)) if b else None
-
-        # 小键盘：1.1.2 = 创世记1:2
         m = re.fullmatch(r"(\d{1,2})[.\s]+(\d+)[.\s]+(\d+)", raw)
         if m:
             book, ch, verse = m.groups()
             b = self.find_book(book)
             return (b, int(ch), int(verse), int(verse)) if b else None
-
-        # 创世记1:2-12 / CSJ1.2-12 / 创 1 2-12
         m = re.fullmatch(r"(.+?)[\s]*(\d+)(?::|[.\s]+)(\d+)(?:\s*-\s*(\d*))?", raw)
         if m:
             book_query, ch, start, end = m.groups()
             b = self.find_book(book_query)
             if b:
                 return (b, int(ch), int(start), int(end) if end else (None if "-" in raw else int(start)))
-
-        # 书卷 + 章节
         m = re.fullmatch(r"(.+?)[\s]*(\d+)", raw)
         if m:
             b = self.find_book(m.group(1))
             if b:
                 return b, int(m.group(2)), None, None
-
         b = self.find_book(raw)
         return (b, 1, None, None) if b else None
 
