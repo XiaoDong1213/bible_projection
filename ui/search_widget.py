@@ -17,6 +17,8 @@ class SearchWidget(QWidget):
         super().__init__(parent)
         self.db = db
         self._formatting_text = False
+        self._rejecting_input = False
+        self._last_valid_input = ""
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Popup)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
@@ -139,35 +141,90 @@ class SearchWidget(QWidget):
             return f"{label} {chapter}:{start}"
         return f"{label} {chapter}:{start}-{end}"
 
-    def _auto_format_reference(self, text):
-        """搜索框输入时自动补充分隔符。
+    def _chapter_entry_info(self, text):
+        """识别“书卷 + 连续章节数字”，按数据库 ChapterCount 判断是否补冒号。"""
+        raw = str(text or "").strip()
+        m = re.fullmatch(r"(.+?)[\\s]*([0-9]+)", raw)
+        if not m:
+            return None
 
-        简拼：CSJ12 → CSJ 1:2（经 DB 校验拆分）
-        中文书名：创世记12 → 保持为章节（不误拆成 1:2）；已有分隔符则规范化
-        """
+        book_part, digits = m.groups()
+        book_part = book_part.strip()
+        if not book_part or book_part.isdigit():
+            return None
+
+        book = self.db.find_book(book_part)
+        if not book:
+            return None
+
+        try:
+            chapter_count = int(
+                self.db.book_meta.get(book, {}).get("chapter_count")
+                or self.db.get_chapter_count(book)
+                or 0
+            )
+        except (TypeError, ValueError, AttributeError):
+            chapter_count = 0
+
+        if chapter_count <= 0:
+            return None
+
+        chapter = int(digits)
+        if chapter < 1 or chapter > chapter_count:
+            return {"invalid": True, "book": book, "book_part": book_part, "digits": digits}
+
+        # 如果再输入任意一位数字，都不可能形成合法章节，
+        # 当前数字就是明确的章节号，此时自动补“:”。
+        can_extend = any(
+            int(digits + str(next_digit)) <= chapter_count
+            for next_digit in range(10)
+        )
+        return {
+            "invalid": False,
+            "book": book,
+            "book_part": book_part,
+            "digits": digits,
+            "should_split": not can_extend,
+            "chapter": chapter,
+        }
+
+    def _auto_format_reference(self, text):
+        """输入书卷后的连续数字时，根据数据库 ChapterCount 自动补“:”。"""
         raw = str(text or "").strip()
         if not raw:
             return raw
 
-        # 中文书名（非纯字母开头）
-        m = re.fullmatch(r"(.+?)[\s]*([0-9]+)(?:[\s:：.]+([0-9]+))?(?:[\s-]+([0-9]+))?", raw)
-        if m and not re.fullmatch(r"[A-Za-z]+.*", raw):
-            book_part, n1, n2, n3 = m.groups()
-            book = self.db.find_book(book_part.strip())
-            if n2:
-                result = f"{book_part.strip()} {int(n1)}:{int(n2)}"
-                if n3:
-                    result += f"-{int(n3)}"
-                return result
-            # 无分隔的连续数字：中文书名只当作「章」，避免 创世记12→1:2
-            if book:
-                return f"{book_part.strip()} {int(n1)}"
+        # 已经存在章:节分隔符，不处理。
+        if re.search(r"[0-9][\\s:：.]+[0-9]", raw):
+            m = re.fullmatch(
+                r"(.+?)[\\s]*([0-9]+)(?:[\\s:：.]+([0-9]+))?(?:[\\s-]+([0-9]+))?",
+                raw
+            )
+            if m:
+                book_part, n1, n2, n3 = m.groups()
+                if n2:
+                    book = self.db.find_book(book_part.strip())
+                    if book:
+                        result = f"{book_part.strip()} {int(n1)}:{int(n2)}"
+                        if n3:
+                            result += f"-{int(n3)}"
+                        return result
             return raw
 
-        # 简拼 + 数字
-        m = re.fullmatch(r"([A-Za-z]+)[\s]*([0-9]+)(?:[\s:：.]+([0-9]+))?(?:[\s-]+([0-9]+))?", raw)
+        # 书卷名/简拼 + 连续章节数字：由数据库章节总数决定是否补冒号。
+        chapter_info = self._chapter_entry_info(raw)
+        if chapter_info:
+            if chapter_info.get("invalid"):
+                return raw
+            if chapter_info.get("should_split"):
+                return f"{chapter_info['book_part']} {chapter_info['chapter']}:"
+            return raw
+
+        # 保留原有简拼连续数字的智能章:节拆分（例如 CSJ12）。
+        m = re.fullmatch(r"([A-Za-z]+)[\\s]*([0-9]+)(?:[\\s:：.]+([0-9]+))?(?:[\\s-]+([0-9]+))?", raw)
         if not m:
             return raw
+
         code, n1, n2, n3 = m.groups()
         book = self._find_by_pinyin(code)
         if not book:
@@ -180,11 +237,15 @@ class SearchWidget(QWidget):
                 result += f"-{int(n3)}"
             return result
 
-        # 连续数字：含 2 位起做章:节智能拆分（修复 CSJ12）
         if len(n1) >= 2:
             parsed = self._best_chapter_verse_split(book, n1)
             if parsed:
                 return self._format_from_parsed(label, parsed)
+
+        chapter_info = self._chapter_entry_info(raw)
+        if chapter_info and not chapter_info.get("invalid") and chapter_info.get("should_split"):
+            return f"{label} {chapter_info['chapter']}:"
+
         return raw
 
     def _set_formatted_text(self, text):
@@ -243,15 +304,29 @@ class SearchWidget(QWidget):
         return self._validate_parsed(self.db.parse_reference(raw))
 
     def _on_text_changed(self, text):
-        if self._formatting_text:
+        if self._formatting_text or self._rejecting_input:
             return
+
+        # 超过当前书卷 ChapterCount 的章节直接回退，表现为“输入不上去”。
+        chapter_info = self._chapter_entry_info(text.strip())
+        if chapter_info and chapter_info.get("invalid"):
+            self._rejecting_input = True
+            try:
+                self.search_input.setText(self._last_valid_input)
+                self.search_input.setCursorPosition(len(self._last_valid_input))
+            finally:
+                self._rejecting_input = False
+            return
+
         self.result_list.clear()
         text = text.strip()
         if not text:
+            self._last_valid_input = text
             return
 
         parsed = self._validate_and_parse_formatted(text)
         if parsed:
+            self._last_valid_input = self.search_input.text()
             book, chapter, start, end = parsed
             item = QListWidgetItem("▶ " + self._format_display(book, chapter, start, end))
             item.setData(Qt.ItemDataRole.UserRole, parsed)
@@ -261,15 +336,20 @@ class SearchWidget(QWidget):
 
         book_query = self._extract_book_query(text)
         if not book_query:
+            self._last_valid_input = self.search_input.text()
             return
 
         books = self.db.search_books(book_query)
         for index, book in enumerate(books[:12], 1):
-            item = QListWidgetItem(f"{index}. {self.db._short_name(book)} {book}")
+            pinyin = self.db.book_meta.get(book, {}).get("pinyin", "")
+            short = self.db._short_name(book)
+            label = f"{pinyin} {book}" if pinyin else f"{short} {book}"
+            item = QListWidgetItem(f"{index}. {label}")
             item.setData(Qt.ItemDataRole.UserRole, (book, 1, None, None))
             self.result_list.addItem(item)
         if self.result_list.count():
             self.result_list.setCurrentRow(0)
+        self._last_valid_input = self.search_input.text()
 
     @staticmethod
     def _extract_book_query(text):
