@@ -31,6 +31,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 ; Personal configuration files are never included in the installer.
+; Existing user configuration is preserved during overwrite/upgrade installation.
 Source: "{#MyAppSourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "config.ini,config.json,settings.ini,settings.json,history.ini,history.json"
 
 [Icons]
@@ -48,15 +49,9 @@ begin
     DelTree(UserDataDir, True, True, True);
 end;
 
-procedure CurStepChanged(CurStep: TSetupStep);
-begin
-  { Always reset installed-version user data before copying files. }
-  if CurStep = ssInstall then
-    DeleteUserData;
-end;
-
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
+  { Only a real uninstall removes user data. Overwrite/upgrade installation does not call this. }
   if CurUninstallStep = usUninstall then
   begin
     MsgBox('Bible Pro 将删除程序文件以及当前用户保存的配置、历史记录等数据。', mbInformation, MB_OK);
