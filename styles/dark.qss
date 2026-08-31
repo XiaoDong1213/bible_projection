@@ -91,6 +91,7 @@ QSpinBox::up-button, QSpinBox::down-button {
     width: 20px;
 }
 QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: #3B82F6; }
+/* 统一使用 QSS 三角形，避免箭头资源/路径导致箭头消失 */
 QSpinBox::up-arrow, QSpinBox::down-arrow {
     width: 0px;
     height: 0px;
@@ -101,6 +102,8 @@ QSpinBox::up-arrow { border-bottom: 7px solid #E8EAED; }
 QSpinBox::down-arrow { border-top: 7px solid #E8EAED; }
 
 #rangeBox { background: #161A22; border-top: 1px solid #2A3344; border-radius: 0; }
+#rangeBox QLabel { color: #CBD5E1; }
+#rangeBox QSpinBox { background: #242B38; color: #E8EAED; }
 #selectRangeBtn { background: #3B82F6; color: white; border: none; border-radius: 6px; padding: 8px 12px; font-weight: 600; min-height: 30px; }
 #selectRangeBtn:hover { background: #2563EB; }
 #selectRangeBtn:pressed { background: #1D4ED8; }
