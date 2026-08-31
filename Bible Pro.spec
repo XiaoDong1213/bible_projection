@@ -3,7 +3,8 @@ from pathlib import Path
 
 project_root = Path(SPECPATH)
 
-
+# Only package files required by the application.
+# User configuration (config.ini) is intentionally NOT included.
 a = Analysis(
     ['main.py'],
     pathex=[str(project_root)],
