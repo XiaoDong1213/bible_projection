@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
     QToolBar, QPushButton, QLabel, QDialog, QFormLayout, QGroupBox,
     QHBoxLayout, QVBoxLayout, QSpinBox, QFontComboBox, QColorDialog,
     QFileDialog, QLineEdit, QDialogButtonBox, QWidget, QSizePolicy,
+    QScrollArea,
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
@@ -20,8 +21,17 @@ class DisplaySettingsDialog(QDialog):
         self._load_settings()
 
     def _build_ui(self):
+        # 根据当前屏幕自动限制对话框高度
+        screen = self.screen() or self.parentWidget().screen()
+        if screen:
+            available = screen.availableGeometry()
+            self.setMaximumHeight(int(available.height() * 0.9))
+
+        self.setSizeGripEnabled(True)
+
         root = QVBoxLayout(self)
-        root.setSpacing(12)
+        root.setSpacing(8)
+        root.setContentsMargins(12, 12, 12, 12)
         text_group = QGroupBox("文字设置")
         form = QFormLayout(text_group)
         form.setSpacing(8)
@@ -60,7 +70,7 @@ class DisplaySettingsDialog(QDialog):
             ("底注颜色", self.footer_color_btn),
         ]:
             form.addRow(label, w)
-        root.addWidget(text_group)
+
 
         layout_group = QGroupBox("布局与底注")
         lf = QFormLayout(layout_group)
@@ -83,7 +93,7 @@ class DisplaySettingsDialog(QDialog):
             ("底注文字", self.footer_text),
         ]:
             lf.addRow(label, w)
-        root.addWidget(layout_group)
+
 
         bg_group = QGroupBox("背景")
         bg_layout = QFormLayout(bg_group)
@@ -100,7 +110,31 @@ class DisplaySettingsDialog(QDialog):
         bg_row.addWidget(bg_clear)
         bg_layout.addRow("背景颜色", self.bg_color_btn)
         bg_layout.addRow("背景图片", bg_row)
-        root.addWidget(bg_group)
+
+        # =========================
+        # 中间设置内容：自适应滚动区域
+        # =========================
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setSpacing(12)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+
+        content_layout.addWidget(text_group)
+        content_layout.addWidget(layout_group)
+        content_layout.addWidget(bg_group)
+        content_layout.addStretch()
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        scroll.setWidget(content)
+
+        root.addWidget(scroll, 1)
+
+        
         bg_choose.clicked.connect(self._choose_bg)
         bg_clear.clicked.connect(self._clear_bg)
         for key, attr in [
@@ -112,11 +146,27 @@ class DisplaySettingsDialog(QDialog):
         ]:
             getattr(self, attr).clicked.connect(lambda checked=False, k=key: self._choose_color(k))
 
+        # 确认 / 取消按钮
         buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+            QDialogButtonBox.StandardButton.Ok |
+            QDialogButtonBox.StandardButton.Cancel
         )
+
+        # 修改按钮文字
+        buttons.button(
+            QDialogButtonBox.StandardButton.Ok
+        ).setText("确认")
+
+        buttons.button(
+            QDialogButtonBox.StandardButton.Cancel
+        ).setText("取消")
+
+        # 确认：保存设置
         buttons.accepted.connect(self.accept)
+
+        # 取消：关闭窗口，不保存本次修改
         buttons.rejected.connect(self.reject)
+
         root.addWidget(buttons)
 
     def _set_color_button(self, button, color):
