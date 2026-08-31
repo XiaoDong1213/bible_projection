@@ -46,7 +46,8 @@ procedure DeleteUserData;
 var
   UserDataDir: string;
 begin
-  UserDataDir := ExpandConstant('{localappdata}\bible_projection');
+  { config.py stores installed-version data under %APPDATA%\bible_projection. }
+  UserDataDir := ExpandConstant('{userappdata}\bible_projection');
   if DirExists(UserDataDir) then
     DelTree(UserDataDir, True, True, True);
 end;
