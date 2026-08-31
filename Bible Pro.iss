@@ -7,7 +7,6 @@
 #define MyAppExeName "Bible Pro.exe"
 #define MyAppSourceDir "C:\Users\XiaoDong\Documents\GitHub\bible_projection\dist\Bible Pro"
 #define MyAppIcon "C:\Users\XiaoDong\Documents\GitHub\bible_projection\icon.ico"
-#define MyAppConfigDir "{localappdata}\bible_projection"
 
 [Setup]
 AppId={{8B1BF115-C8D9-46A1-B711-01928676DCF0}
@@ -32,7 +31,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 ; Install the complete PyInstaller output directory.
-; User configuration files are deliberately excluded from the installer.
+; Personal configuration files are deliberately excluded.
 Source: "{#MyAppSourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "config.ini,config.json,settings.ini,settings.json,history.ini,history.json"
 
 [Icons]
@@ -42,15 +41,21 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "启动 {#MyAppName}"; Flags: nowait postinstall skipifsilent
 
-[UninstallDelete]
-; Remove user configuration and history created by Bible Pro.
-Type: filesandordirs; Name: "{#MyAppConfigDir}"
-
 [Code]
+procedure DeleteUserData;
+var
+  UserDataDir: string;
+begin
+  UserDataDir := ExpandConstant('{localappdata}\bible_projection');
+  if DirExists(UserDataDir) then
+    DelTree(UserDataDir, True, True, True);
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then
   begin
     MsgBox('Bible Pro 将删除程序文件以及当前用户保存的配置、历史记录等数据。', mbInformation, MB_OK);
+    DeleteUserData;
   end;
 end;
