@@ -1,6 +1,3 @@
-# main.py
-# Bible Pro 程序入口
-
 import sys
 import os
 from pathlib import Path
@@ -14,7 +11,7 @@ from main_window import MainWindow
 
 
 def _set_windows_app_id():
-    """设置 Windows 应用标识，确保任务栏正确显示程序。"""
+    """设置 Windows 应用标识。"""
     if os.name != "nt":
         return
     try:
@@ -28,19 +25,15 @@ def _set_windows_app_id():
 
 def main():
     _set_windows_app_id()
-
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-
     icon_path = Path(__file__).resolve().parent / "icon.ico"
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
-
     config = AppConfig()
     db = BibleDatabase()
     window = MainWindow(db, config)
     window.show()
-
     sys.exit(app.exec())
 
 
