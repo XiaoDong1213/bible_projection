@@ -7,15 +7,12 @@ from .history_item import HistoryListWidget
 
 
 class VisibleSpinBox(QSpinBox):
-    """数字输入框。
-
-    箭头只交给 QSS 中配置的新 SVG 绘制，避免 Qt 原生箭头与自绘箭头叠加。
-    """
+    """数字输入框。"""
     pass
 
 
 class EqualTabBar(QTabBar):
-    """四个页签均分整行宽度；避免 width=0 时把 Tab 算成 1px 塌掉。"""
+    """均分页签宽度。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -53,7 +50,7 @@ class EqualTabBar(QTabBar):
 
 
 class BookGridWidget(QScrollArea):
-    """书卷网格：QGridLayout 列均分拉伸，不锁死宽度，完整显示书名。"""
+    """书卷网格。"""
 
     book_clicked = pyqtSignal(str)
 
@@ -115,7 +112,6 @@ class BookGridWidget(QScrollArea):
 class NavigationPanel(QWidget):
     book_selected = pyqtSignal(str, int)
     range_selected = pyqtSignal(str, int, int, int)
-    # 从历史打开：只投影，不重排历史列表
     history_opened = pyqtSignal(str, int, int, int)
     verse_segmentation_changed = pyqtSignal(bool)
     history_changed = pyqtSignal(list)
@@ -229,7 +225,6 @@ class NavigationPanel(QWidget):
 
     def _on_book_name_clicked(self, book):
         self._set_selected_book(book, whole_chapter=True)
-        # 同步其它页的选中态
         for grid in (self.old_list, self.new_list, self.short_list):
             grid.select_book(book)
         self.book_selected.emit(book, self.chapter_spin.value())
@@ -351,7 +346,6 @@ class NavigationPanel(QWidget):
             return
         book, chapter, start, end = self.history[index]
         self.sync_selection(book, chapter, start, end)
-        # 只改选中态，不重建、不重排
         self.history_list.set_selected_index(index)
         self.history_opened.emit(book, chapter, start, end)
 
