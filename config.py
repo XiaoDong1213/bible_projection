@@ -8,7 +8,10 @@ from PyQt6.QtWidgets import QMessageBox
 
 
 class AppConfig:
+    """管理程序配置、窗口状态和搜索历史。"""
+
     def __init__(self):
+        # 区分源码运行和安装版的数据保存位置
         self.app_root = Path(__file__).parent.resolve()
         self.mark_file = self.app_root / "install.mark"
         self.is_install_version = self.mark_file.exists()
@@ -26,6 +29,7 @@ class AppConfig:
         self._load_ini()
 
     def _ensure_data_dir(self):
+        """确保配置目录存在并可写。"""
         try:
             self.data_dir.mkdir(parents=True, exist_ok=True)
         except PermissionError:
@@ -36,6 +40,7 @@ class AppConfig:
             )
 
     def _load_ini(self):
+        """读取配置文件，缺少配置时补充默认值。"""
         if self.ini_path.exists():
             self.parser.read(self.ini_path, encoding="utf-8")
             if "Display" not in self.parser:
@@ -52,6 +57,7 @@ class AppConfig:
             self._save_ini()
 
     def _fill_default_config(self):
+        """创建默认显示、窗口和历史记录配置。"""
         self.parser.clear()
         self.parser["Display"] = {
             "theme": "dark",
@@ -80,6 +86,7 @@ class AppConfig:
         self.parser["History"] = {"search_history": "[]"}
 
     def _save_ini(self):
+        """保存当前配置到 INI 文件。"""
         try:
             with open(self.ini_path, "w", encoding="utf-8") as f:
                 self.parser.write(f)
@@ -91,6 +98,7 @@ class AppConfig:
             )
 
     def save_display_settings(self, settings):
+        """保存显示相关设置。"""
         if "Display" not in self.parser:
             self._fill_default_config()
         disp_section = self.parser["Display"]
@@ -104,6 +112,7 @@ class AppConfig:
         self._save_ini()
 
     def load_display_settings(self):
+        """读取显示设置并转换为程序需要的数据类型。"""
         defaults = {
             "theme": "dark",
             "font_family": "微软雅黑",
@@ -158,6 +167,7 @@ class AppConfig:
         return result
 
     def save_window_state(self, geometry):
+        """保存主窗口位置和尺寸。"""
         import base64
         if "Window" not in self.parser:
             self.parser["Window"] = {"geometry": ""}
@@ -166,6 +176,7 @@ class AppConfig:
         self._save_ini()
 
     def load_window_state(self):
+        """读取已保存的窗口位置和尺寸。"""
         import base64
         if "Window" not in self.parser:
             return None
@@ -178,12 +189,14 @@ class AppConfig:
             return None
 
     def save_history(self, history_list):
+        """保存搜索历史记录。"""
         if "History" not in self.parser:
             self.parser["History"] = {"search_history": "[]"}
         self.parser["History"]["search_history"] = json.dumps(history_list, ensure_ascii=False)
         self._save_ini()
 
     def load_history(self):
+        """读取搜索历史，数据异常时返回空列表。"""
         if "History" not in self.parser:
             return []
         raw = self.parser["History"].get("search_history", "[]")
