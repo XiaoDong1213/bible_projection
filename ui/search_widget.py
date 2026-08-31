@@ -20,10 +20,16 @@ class SearchWidget(QWidget):
         self.hint_label=QLabel(); self.hint_label.setObjectName("searchHint"); self.hint_label.setMinimumHeight(28); self.hint_label.setMaximumHeight(32); self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter); self.hint_label.setWordWrap(False); lay.addWidget(self.hint_label)
         self.result_list=QListWidget(); self.result_list.setObjectName("searchCandidates"); self.result_list.setFocusPolicy(Qt.FocusPolicy.NoFocus); self.result_list.setSpacing(2); self.result_list.setMinimumWidth(492); self.result_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff); self.result_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded); self.result_list.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Fixed); self.result_list.itemClicked.connect(self._on_item_clicked); lay.addWidget(self.result_list)
         self.search_input.installEventFilter(self); self.result_list.installEventFilter(self); self.setFocusProxy(self.search_input); self._apply_theme(); self._set_hint("输入简拼　↑↓选择　空格选择/下一段　Enter确认　Esc退出")
+    @staticmethod
+    def _palette_color(p,role):
+        try:
+            return p.color(role)
+        except TypeError:
+            return p.color(QPalette.ColorGroup.Active,role)
     def _apply_theme(self):
         if not all(hasattr(self,x) for x in ("search_input","hint_label","result_list")): return
-        p=self.search_input.palette(); base=p.color(QPalette.ColorRole.Base); text=p.color(QPalette.ColorRole.Text); mid=p.color(QPalette.ColorRole.Mid); highlight=p.color(QPalette.ColorRole.Highlight); htext=p.color(QPalette.ColorRole.HighlightedText)
-        panel=p.color(QPalette.ColorRole.Window)
+        p=self.search_input.palette(); base=self._palette_color(p,QPalette.ColorRole.Base); text=self._palette_color(p,QPalette.ColorRole.Text); mid=self._palette_color(p,QPalette.ColorRole.Mid); highlight=self._palette_color(p,QPalette.ColorRole.Highlight); htext=self._palette_color(p,QPalette.ColorRole.HighlightedText)
+        panel=self._palette_color(p,QPalette.ColorRole.Window)
         self.setStyleSheet(f"QWidget#searchPanel{{background:{panel.name()};border:1px solid {mid.name()};border-radius:12px;}} QLineEdit#searchInput{{background:{base.name()};color:{text.name()};border:1px solid {mid.name()};border-radius:9px;padding:0 12px;selection-background-color:{highlight.name()};selection-color:{htext.name()};}} QLabel#searchHint{{background:{base.name()};color:{text.name()};border:1px solid {mid.name()};border-radius:9px;padding:2px 10px;}} QListWidget#searchCandidates{{background:{base.name()};color:{text.name()};border:1px solid {mid.name()};border-radius:9px;padding:3px;outline:0;}} QListWidget#searchCandidates::item{{padding:6px 10px;border-radius:6px;min-height:20px;}} QListWidget#searchCandidates::item:selected{{background:{highlight.name()};color:{htext.name()};}}")
     def changeEvent(self,event):
         super().changeEvent(event)
