@@ -1,14 +1,20 @@
 import re
+import sys
+import ctypes
+from ctypes import wintypes
+
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLineEdit, QLabel, QListWidget, QListWidgetItem
-from PyQt6.QtCore import Qt, pyqtSignal, QEvent
+from PyQt6.QtCore import Qt, pyqtSignal
 
 
 class SearchLineEdit(QLineEdit):
     special_key = pyqtSignal(int)
 
     def keyPressEvent(self, event):
-        if event.key() in (Qt.Key.Key_Escape, Qt.Key.Key_Up, Qt.Key.Key_Down,
-                           Qt.Key.Key_Space, Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+        if event.key() in (
+            Qt.Key.Key_Escape, Qt.Key.Key_Up, Qt.Key.Key_Down,
+            Qt.Key.Key_Space, Qt.Key.Key_Backspace, Qt.Key.Key_Delete
+        ):
             self.special_key.emit(event.key())
             event.accept()
             return
@@ -30,29 +36,30 @@ class SearchWidget(QWidget):
         self._space_mode = False
         self._candidate_cache = {}
         self._confirming = False
-        self._theme_sheet = ""
 
         self.setObjectName("searchPanel")
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Popup)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setMinimumWidth(620)
-        self.setMaximumWidth(700)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setMinimumWidth(660)
+        self.setMaximumWidth(760)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 18, 18, 16)
+        layout.setContentsMargins(22, 22, 22, 18)
         layout.setSpacing(0)
 
         self.search_input = SearchLineEdit()
         self.search_input.setObjectName("searchInput")
-        self.search_input.setMinimumHeight(54)
+        self.search_input.setMinimumHeight(58)
         self.search_input.setPlaceholderText("输入书卷简拼、章节或节号")
+        self.search_input.setClearButtonEnabled(False)
         self.search_input.textEdited.connect(self._on_text_edited)
         self.search_input.special_key.connect(self._on_special_key)
         layout.addWidget(self.search_input)
 
         self.hint_label = QLabel("↑↓ 选择　·　Space 选择 / 下一段　·　Enter 确认　·　Esc 关闭")
         self.hint_label.setObjectName("searchHint")
-        self.hint_label.setMinimumHeight(32)
+        self.hint_label.setMinimumHeight(34)
         self.hint_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(self.hint_label)
 
@@ -61,29 +68,28 @@ class SearchWidget(QWidget):
         self.result_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.result_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.result_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.result_list.setSpacing(3)
         self.result_list.setFrameShape(self.result_list.Shape.NoFrame)
+        self.result_list.setSpacing(4)
+        self.result_list.setUniformItemSizes(True)
         self.result_list.itemClicked.connect(self._on_item_clicked)
         layout.addWidget(self.result_list)
 
-        self._apply_theme_once()
+        self._apply_visual_style()
         self._resize_result_area()
 
-    def _apply_theme_once(self):
-        # 使用 Qt palette，不写死灰色；只在初始化时设置样式，避免 StyleChange 递归。
+    def _apply_visual_style(self):
+        # 透明控件本身不铺灰色背景；Windows 下由 Acrylic 提供真正的背景模糊。
         self.setStyleSheet("""
         QWidget#searchPanel {
-            background: palette(window);
-            color: palette(window-text);
-            border: 1px solid palette(mid);
-            border-radius: 18px;
+            background: transparent;
+            border: none;
         }
         QLineEdit#searchInput {
-            background: palette(base);
+            background: rgba(255,255,255,145);
             color: palette(text);
-            border: 1px solid palette(mid);
-            border-radius: 14px;
-            padding: 0 18px;
+            border: 1px solid rgba(255,255,255,95);
+            border-radius: 17px;
+            padding: 0 20px;
             selection-background-color: palette(highlight);
             selection-color: palette(highlighted-text);
         }
@@ -94,35 +100,65 @@ class SearchWidget(QWidget):
             background: transparent;
             color: palette(mid);
             border: none;
-            padding: 0 5px;
+            padding: 0 7px;
         }
         QListWidget#searchCandidates {
             background: transparent;
             color: palette(text);
             border: none;
-            padding: 2px 0 0 0;
+            padding: 4px 0 0 0;
             outline: none;
         }
         QListWidget#searchCandidates::item {
             background: transparent;
             color: palette(text);
             border: none;
-            border-radius: 10px;
-            padding: 8px 14px;
-            min-height: 24px;
+            border-radius: 12px;
+            padding: 9px 16px;
+            min-height: 25px;
         }
         QListWidget#searchCandidates::item:hover {
-            background: palette(alternate-base);
+            background: rgba(127,127,127,28);
         }
         QListWidget#searchCandidates::item:selected {
             background: palette(highlight);
             color: palette(highlighted-text);
         }
         """)
+        self._update_native_acrylic()
 
-    def changeEvent(self, event):
-        # 不在 PaletteChange/StyleChange 中 setStyleSheet，避免递归。
-        super().changeEvent(event)
+    def _update_native_acrylic(self):
+        if sys.platform != "win32":
+            return
+        try:
+            hwnd = int(self.winId())
+            user32 = ctypes.windll.user32
+            accent = 4  # ACCENT_ENABLE_ACRYLICBLURBEHIND
+            class ACCENTPOLICY(ctypes.Structure):
+                _fields_ = [
+                    ("AccentState", wintypes.DWORD),
+                    ("AccentFlags", wintypes.DWORD),
+                    ("GradientColor", wintypes.DWORD),
+                    ("AnimationId", wintypes.DWORD),
+                ]
+            class WINDOWCOMPOSITIONATTRIBDATA(ctypes.Structure):
+                _fields_ = [
+                    ("Attribute", wintypes.DWORD),
+                    ("Data", ctypes.c_void_p),
+                    ("SizeOfData", wintypes.SIZE),
+                ]
+            # ABGR: alpha + RGB，颜色很淡，只让桌面/窗口背景透出来，不做死灰色遮罩。
+            dark = self.palette().window().color().lightness() < 128
+            rgb = 0x241B1510 if dark else 0xB8FFFFFF
+            policy = ACCENTPOLICY(accent, 2, rgb, 0)
+            data = WINDOWCOMPOSITIONATTRIBDATA(19, ctypes.addressof(policy), ctypes.sizeof(policy))
+            set_attr = getattr(user32, "SetWindowCompositionAttribute", None)
+            if set_attr:
+                set_attr.argtypes = [wintypes.HWND, ctypes.POINTER(WINDOWCOMPOSITIONATTRIBDATA)]
+                set_attr.restype = wintypes.BOOL
+                set_attr(hwnd, ctypes.byref(data))
+        except Exception:
+            pass
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -137,6 +173,7 @@ class SearchWidget(QWidget):
         self._update_hint("↑↓ 选择　·　Space 选择 / 下一段　·　Enter 确认　·　Esc 关闭")
         self.search_input.setFocus()
         self.search_input.selectAll()
+        self._update_native_acrylic()
 
     def _update_hint(self, text):
         self.hint_label.setText(text)
@@ -145,9 +182,10 @@ class SearchWidget(QWidget):
     def _resize_result_area(self):
         count = self.result_list.count()
         if count:
-            rows = min(count, 7)
-            row_h = max(40, self.result_list.sizeHintForRow(0))
-            self.result_list.setFixedHeight(rows * row_h + max(0, rows - 1) * 3 + 8)
+            row_h = max(42, self.result_list.sizeHintForRow(0))
+            # 不截断候选：有多少候选就显示多少，不提供滚动区域。
+            height = count * row_h + max(0, count - 1) * 4 + 8
+            self.result_list.setFixedHeight(height)
         else:
             self.result_list.setFixedHeight(0)
         self.adjustSize()
@@ -189,8 +227,9 @@ class SearchWidget(QWidget):
     def _set_text(self, text, converted=None):
         self._formatting = True
         try:
-            self.search_input.setText(str(text or ""))
-            self.search_input.setCursorPosition(len(str(text or "")))
+            value = str(text or "")
+            self.search_input.setText(value)
+            self.search_input.setCursorPosition(len(value))
         finally:
             self._formatting = False
         if converted is not None:
@@ -200,7 +239,7 @@ class SearchWidget(QWidget):
         self.result_list.setUpdatesEnabled(False)
         try:
             self.result_list.clear()
-            for i, book in enumerate(books[:30], 1):
+            for i, book in enumerate(books, 1):
                 code = self._code(book).upper()
                 short = self.db._short_name(book)
                 item = QListWidgetItem(f"{i:02d}    {code or short}    {book}")
