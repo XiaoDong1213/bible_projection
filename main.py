@@ -28,9 +28,19 @@ def _set_windows_app_id():
 def main():
     """初始化应用、数据库和主窗口。"""
     _set_windows_app_id()
+
+    # 统一工作目录，确保打包后的 QSS 相对资源路径仍然有效。
+    # styles/*.qss 中的箭头图片使用 styles/xxx.svg 路径，
+    # 安装后从快捷方式启动时工作目录可能不是程序目录。
+    app_root = Path(__file__).resolve().parent
+    try:
+        os.chdir(app_root)
+    except OSError:
+        pass
+
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    icon_path = Path(__file__).resolve().parent / "icon.ico"
+    icon_path = app_root / "icon.ico"
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
     config = AppConfig()
