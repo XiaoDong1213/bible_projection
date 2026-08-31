@@ -10,6 +10,10 @@ from .navigation_panel import NavigationPanel
 from .toolbar import ToolBarWidget
 from .extension_window import ExtensionWindow
 
+# 集中加载运行时 UI 修复，避免改动核心显示控件的其它逻辑。
+from .runtime_fixes import apply_runtime_fixes
+apply_runtime_fixes(ScriptureDisplay, NavigationPanel)
+
 __all__ = [
     "THEMES",
     "HistoryItemWidget",
