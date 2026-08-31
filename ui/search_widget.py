@@ -7,7 +7,7 @@ class SearchWidget(QWidget):
     search_triggered=pyqtSignal(tuple); close_requested=pyqtSignal()
     ALLOWED=re.compile(r"[A-Za-z0-9 :：.．。\-]")
     def __init__(self,db,parent=None):
-        super().__init__(parent); self.db=db; self._formatting=False; self._converted_book=False; self._converted_book_name=""; self._selected_book=None; self._stage="book"; self._space_mode=False; self._candidate_cache={}
+        super().__init__(parent); self.db=db; self._formatting=False; self._converted_book=False; self._converted_book_name=""; self._selected_book=None; self._stage="book"; self._space_mode=False; self._candidate_cache={}; self._confirming=False
         self.setObjectName("searchPanel"); self.setWindowFlags(Qt.WindowType.FramelessWindowHint|Qt.WindowType.Popup); self.setMinimumWidth(500); self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground,True)
         lay=QVBoxLayout(self); lay.setContentsMargins(14,14,14,14); lay.setSpacing(8)
         self.search_input=QLineEdit(); self.search_input.setObjectName("searchInput"); self.search_input.setMinimumHeight(44); self.search_input.setPlaceholderText("输入简拼，例如：CSJ"); self.search_input.textEdited.connect(self._on_text_edited); lay.addWidget(self.search_input)
@@ -16,17 +16,17 @@ class SearchWidget(QWidget):
         self.search_input.installEventFilter(self); self.result_list.installEventFilter(self); self.setFocusProxy(self.search_input); self._apply_theme(); self._resize_result_area()
     def _apply_theme(self):
         if not hasattr(self,"result_list"): return
-        self.setStyleSheet("QWidget#searchPanel { background: palette(window); border: 1px solid palette(mid); border-radius: 10px; } QLineEdit#searchInput { background: palette(base); color: palette(text); border: 1px solid palette(mid); border-radius: 8px; padding: 0 12px; selection-background-color: palette(highlight); selection-color: palette(highlighted-text); } QLabel#searchHint { background: palette(base); color: palette(text); border: 1px solid palette(mid); border-radius: 8px; padding: 2px 10px; } QListWidget#searchCandidates { background: palette(base); color: palette(text); border: 1px solid palette(mid); border-radius: 8px; padding: 3px; outline: 0; } QListWidget#searchCandidates::item { padding: 5px 10px; border-radius: 5px; } QListWidget#searchCandidates::item:selected { background: palette(highlight); color: palette(highlighted-text); }")
+        self.setStyleSheet("QWidget#searchPanel{background:palette(window);border:1px solid palette(mid);border-radius:10px;} QLineEdit#searchInput,QLabel#searchHint,QListWidget#searchCandidates{background:palette(base);color:palette(text);border:1px solid palette(mid);border-radius:8px;} QLineEdit#searchInput{padding:0 12px;} QLabel#searchHint{padding:2px 10px;} QListWidget#searchCandidates{padding:3px;outline:0;} QListWidget#searchCandidates::item{padding:5px 10px;border-radius:5px;} QListWidget#searchCandidates::item:selected{background:palette(highlight);color:palette(highlighted-text);}")
     def changeEvent(self,event):
         super().changeEvent(event)
         if event.type() in (QEvent.Type.PaletteChange,QEvent.Type.StyleChange): self._apply_theme()
     def _update_hint(self,text): self.hint_label.setText(text); self._resize_result_area()
-    def _resize_result_area(self,*_):
+    def _resize_result_area(self,keep=False):
         count=self.result_list.count()
         if count:
             rows=min(count,8); row_h=max(31,self.result_list.sizeHintForRow(0)); self.result_list.setFixedHeight(rows*row_h+10)
         else: self.result_list.setFixedHeight(0)
-        self.adjustSize()
+        if not keep:self.adjustSize()
     def showEvent(self,e):
         super().showEvent(e); self._apply_theme(); self.search_input.setFocus(); self.search_input.selectAll(); self._converted_book=False; self._converted_book_name=""; self._selected_book=None; self._stage="book"; self._space_mode=False; self.result_list.clear(); self._update_hint("输入简拼　↑↓选择　空格选择/下一段　Enter确认　Esc退出")
     @staticmethod
@@ -36,8 +36,7 @@ class SearchWidget(QWidget):
         q=self._norm(q)
         if q in self._candidate_cache:return self._candidate_cache[q]
         result=[b for b in self.db.book_names if self._code(b).startswith(q)] if q else []
-        self._candidate_cache[q]=result
-        return result
+        self._candidate_cache[q]=result; return result
     def _exact(self,q):
         q=self._norm(q)
         for b in self.db.book_names:
@@ -51,8 +50,7 @@ class SearchWidget(QWidget):
         except Exception:return 0
     def _set_text(self,t,converted=None):
         self._formatting=True
-        try:
-            value=str(t or ""); self.search_input.setText(value); self.search_input.setCursorPosition(len(value))
+        try:self.search_input.setText(str(t or "")); self.search_input.setCursorPosition(len(str(t or "")))
         finally:self._formatting=False
         if converted is not None:self._converted_book=bool(converted); self._converted_book_name=str(t or "") if converted else ""
     def _show_candidates(self,cs):
@@ -91,23 +89,16 @@ class SearchWidget(QWidget):
         patterns=[(r"\s*(\d+)\s*:\s*(\d+)\s*-\s*(\d+)\s*$",lambda m:f"{b} {m.group(1)}:{m.group(2)}-","verse_range"),(r"\s*(\d+)\s*:\s*(\d+)\s*-\s*$",lambda m:f"{b} {m.group(1)}:{m.group(2)}","verse"),(r"\s*(\d+)\s*:\s*(\d+)\s*$",lambda m:f"{b} {m.group(1)}:","verse"),(r"\s*(\d+)\s*:\s*$",lambda m:f"{b} {m.group(1)}","chapter"),(r"\s*(\d+)\s*$",lambda m:b,"chapter")]
         for pat,make,stage in patterns:
             m=re.fullmatch(pat,suffix)
-            if m:
-                self._set_text(make(m)); self._stage=stage; self._space_mode=(stage=="verse_range"); self._refresh_selected(b,self._suffix()); self._update_hint_for_stage(); self.search_input.setFocus(); return True
-        self._set_text(""); self._selected_book=None; self._stage="book"; self._space_mode=False; self._converted_book=False; self._converted_book_name=""; self.result_list.clear(); self._resize_result_area(); self._update_hint("输入简拼　↑↓选择　空格选择/下一段　Enter确认　Esc退出"); self.search_input.setFocus(); self.search_input.setCursorPosition(0); return True
+            if m:self._set_text(make(m)); self._stage=stage; self._space_mode=(stage=="verse_range"); self._refresh_selected(b,self._suffix()); self._update_hint_for_stage(); return True
+        self._set_text(""); self._selected_book=None; self._stage="book"; self._space_mode=False; self._converted_book=False; self._converted_book_name=""; self.result_list.clear(); self._resize_result_area(); self._update_hint("输入简拼　↑↓选择　空格选择/下一段　Enter确认　Esc退出"); self.search_input.setFocus(); return True
     def _refresh_book_state(self,text):
-        self._stage="book"; self._selected_book=None; self._converted_book=False; self._converted_book_name=""; self._space_mode=False
+        self._stage="book"; self._selected_book=None; self._converted_book=False; self._converted_book_name=""; self._space_mode=False; self.result_list.clear()
         q=text.strip()
-        if not q:
-            self.result_list.clear(); self.result_list.setFixedHeight(0); self._update_hint("输入简拼　↑↓选择　空格选择/下一段　Enter确认　Esc退出"); return
         if re.fullmatch(r"[A-Za-z]+",q):
             cs=self._candidates(q)
-            if not cs:cs=self.db.search_books(q) or []
-            self._show_candidates(cs)
-        else:
-            self.result_list.clear(); self.result_list.setFixedHeight(0)
+            if cs:self._show_candidates(cs)
         self._update_hint("输入简拼　↑↓选择　空格选择/下一段　Enter确认　Esc退出")
     def _update_hint_for_stage(self):
-        if not self._selected_book:return
         if self._stage=="chapter":self._update_hint(f"已选择 {self._selected_book}　请输入章节　按空格进入节号")
         elif self._stage=="verse":self._update_hint("请输入开始节　按空格生成节范围分隔符 -")
         elif self._space_mode:self._update_hint("请输入结束节")
@@ -115,12 +106,13 @@ class SearchWidget(QWidget):
         if event.type()!=QEvent.Type.KeyPress:return False
         if obj is self.search_input:
             k=event.key()
-            if k==Qt.Key.Key_Escape:
-                self.close_requested.emit(); return True
-            if k==Qt.Key.Key_Return or k==Qt.Key.Key_Enter:
-                # Enter 必须在事件过滤器内直接消费，不能再交给 QLineEdit 的
-                # returnPressed 信号，否则外部关闭/重新聚焦时可能再次进入过滤器造成递归。
-                self._on_confirm(); return True
+            if k==Qt.Key.Key_Escape:self.close_requested.emit(); return True
+            if k in (Qt.Key.Key_Return,Qt.Key.Key_Enter):
+                if self._confirming:return True
+                self._confirming=True
+                try:self._on_confirm()
+                finally:self._confirming=False
+                return True
             if k==Qt.Key.Key_Up:return self._move_highlight(-1)
             if k==Qt.Key.Key_Down:return self._move_highlight(1)
             if k==Qt.Key.Key_Space:
@@ -183,9 +175,12 @@ class SearchWidget(QWidget):
         d=item.data(Qt.ItemDataRole.UserRole)
         if not d:return
         if isinstance(d,tuple) and len(d)==4 and d[2] is not None:self.search_triggered.emit(d); self.close_requested.emit(); return
-        b=d[0] if isinstance(d,tuple) else d; self._selected_book=b; self._stage="chapter"; self._set_text(b,True); self.result_list.clear(); self._resize_result_area(True); self.search_input.setFocus(); self._update_hint(f"已选择 {b}　输入章节后按空格进入节号")
+        b=d[0] if isinstance(d,tuple) else d; self._selected_book=b; self._stage="chapter"; self._set_text(b,True); self.result_list.clear(); self._resize_result_area(); self.search_input.setFocus(); self._update_hint(f"已选择 {b}　请输入章节　按空格进入节号")
     def _on_confirm(self):
         p=self._parse(self.search_input.text())
-        if p:self.search_triggered.emit(p); self.close_requested.emit(); return
+        if p:
+            self.search_triggered.emit(p)
+            self.close_requested.emit()
+            return
         if self._stage=="book" and self.result_list.count():self._select_current_book(); return
         self._update_hint("请输入有效的书卷、章节或节范围")
