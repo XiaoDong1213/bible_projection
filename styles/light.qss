@@ -44,15 +44,11 @@ QListWidget::item:selected { background: #DBEAFE; color: #1E3A8A; border-color: 
 #historyDeleteButton:hover { background: #EF4444; color: white; border: 1px solid #EF4444; }
 #historyDeleteButton:pressed { background: #DC2626; color: white; }
 
-/* ===== 数字输入框：显式绘制上下箭头，避免系统样式导致箭头消失 ===== */
 QSpinBox { background: #FFFFFF; color: #1E293B; border: 1px solid #E2E8F0; border-radius: 6px; padding: 5px 8px; min-height: 26px; font-size: 13px; }
 QSpinBox:hover, QSpinBox:focus { border-color: #2563EB; }
-QSpinBox::up-button, QSpinBox::down-button { background: #EEF1F6; border: none; width: 20px; subcontrol-origin: border; }
-QSpinBox::up-button { subcontrol-position: top right; }
-QSpinBox::down-button { subcontrol-position: bottom right; }
-QSpinBox::up-arrow, QSpinBox::down-arrow { width: 9px; height: 9px; }
-QSpinBox::up-arrow { image: none; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 5px solid #475569; }
-QSpinBox::down-arrow { image: none; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid #475569; }
+QSpinBox::up-button, QSpinBox::down-button { background: #EEF1F6; border: none; width: 20px; }
+QSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right; }
+QSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right; }
 QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: #E2E8F0; }
 
 #rangeBox { background: #F8FAFC; border-top: 1px solid #E2E8F0; }
