@@ -8,12 +8,9 @@ class SearchWidget(QWidget):
     close_requested=pyqtSignal()
     def __init__(self,db,parent=None):
         super().__init__(parent); self.db=db; self._formatting=False
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint|Qt.WindowType.Popup)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint|Qt.WindowType.Popup); self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         lay=QVBoxLayout(self); lay.setContentsMargins(10,10,10,10); lay.setSpacing(4)
-        self.search_input=QLineEdit(); self.search_input.setObjectName('searchInput')
-        self.search_input.setPlaceholderText('例如：创世记1:2-12  或  CSJ 1:2-12')
-        # textEdited 只处理用户编辑，因此删除冒号/空格不会被再次强制添加。
+        self.search_input=QLineEdit(); self.search_input.setObjectName('searchInput'); self.search_input.setPlaceholderText('例如：创世记1:2-12  或  CSJ 1:2-12')
         self.search_input.textEdited.connect(self._on_text_edited); self.search_input.returnPressed.connect(self._on_confirm); lay.addWidget(self.search_input)
         self.hint_label=QLabel('书名 / 简称 / 简拼　｜　输入简拼自动识别　｜　Esc 退出'); lay.addWidget(self.hint_label)
         self.result_list=QListWidget(); self.result_list.itemClicked.connect(self._on_item_clicked); lay.addWidget(self.result_list)
@@ -33,8 +30,7 @@ class SearchWidget(QWidget):
     def _show_candidates(self,q):
         self.result_list.clear()
         for i,b in enumerate(self._candidates(q)[:12],1):
-            code=self._code(b).upper(); short=self.db._short_name(b); item=QListWidgetItem(f'{i}. {code or short} {b}')
-            item.setData(Qt.ItemDataRole.UserRole,(b,1,None,None)); self.result_list.addItem(item)
+            code=self._code(b).upper(); short=self.db._short_name(b); item=QListWidgetItem(f'{i}. {code or short} {b}'); item.setData(Qt.ItemDataRole.UserRole,(b,1,None,None)); self.result_list.addItem(item)
         if self.result_list.count():self.result_list.setCurrentRow(0)
     def _valid(self,p):
         if not p or len(p)!=4:return None
@@ -70,6 +66,7 @@ class SearchWidget(QWidget):
     def _auto(self,text):
         r=str(text or '').strip()
         if not r:return r
+        # 已有分隔符时只规范已有格式。
         m=re.fullmatch(r'(.+?)[\s]*(\d+)[\s:：.]+(\d+)(?:\s*-\s*(\d*))?',r)
         if m:
             part,c,s,e=m.groups(); return f'{part.strip()} {int(c)}:{int(s)}'+(f'-{int(e)}' if e else '')
@@ -132,7 +129,16 @@ class SearchWidget(QWidget):
         if user:
             f=self._auto(r)
             if f!=r:self._set(f);r=f
-        # 单字母只有一个前缀候选立即转中文；多个候选保留简拼候选。
+        # 一旦输入框已经是中文书卷名，任何新增拉丁字母都视为无效：不允许继续进入简拼解析。
+        # 例如“启示录”之后输入 Q，不会变成“Q”候选或重新走简拼；直接保留中文书名。
+        if re.fullmatch(r'[\u3400-\u9fff]+',r):
+            self.result_list.clear()
+            # 纯中文书名保持可继续输入数字，但字母不会被接受。
+            return
+        # 中文书卷名 + 字母：删除刚输入的字母，恢复到合法中文书卷名。
+        m=re.fullmatch(r'([\u3400-\u9fff]+)[A-Za-z]+$',r)
+        if m and self.db.find_book(m.group(1)):
+            self._set(m.group(1)); r=m.group(1); self.result_list.clear(); return
         if re.fullmatch(r'[A-Za-z]+',r):
             cs=self._candidates(r)
             if len(cs)==1:self._set(cs[0]);r=cs[0];self.result_list.clear()
@@ -152,8 +158,7 @@ class SearchWidget(QWidget):
         if s is None:return f'{b} {c}章（整章）'
         return f'{b} {c}:{s}' if e is None or e==s else f'{b} {c}:{s}-{e}'
     def _on_confirm(self):
-        text=self.search_input.text().strip();p=self._parse(text)
-        if not p:p=self._clamp(text)
+        text=self.search_input.text().strip();p=self._parse(text) or self._clamp(text)
         if p:
             b,c,s,e=p;self._set(f'{b} {c}:{s}' if s==e else f'{b} {c}:{s}-{e}');self.search_triggered.emit(p);self.close_requested.emit();return
         it=self.result_list.currentItem()
