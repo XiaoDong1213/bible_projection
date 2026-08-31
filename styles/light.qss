@@ -46,12 +46,10 @@ QListWidget::item:selected { background: #DBEAFE; color: #1E3A8A; border-color: 
 
 QSpinBox { background: #FFFFFF; color: #1E293B; border: 1px solid #E2E8F0; border-radius: 6px; padding: 5px 8px; min-height: 26px; font-size: 13px; }
 QSpinBox:hover, QSpinBox:focus { border-color: #2563EB; }
-/* 亮色主题：自定义清晰的三角箭头，彻底覆盖系统默认黑色箭头 */
 QSpinBox::up-button, QSpinBox::down-button { background: #EEF1F6; border: 1px solid #CBD5E1; width: 20px; }
 QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: #DBEAFE; border-color: #2563EB; }
-QSpinBox::up-arrow, QSpinBox::down-arrow { width: 0px; height: 0px; border-left: 5px solid transparent; border-right: 5px solid transparent; }
-QSpinBox::up-arrow { border-bottom: 7px solid #1E3A8A; }
-QSpinBox::down-arrow { border-top: 7px solid #1E3A8A; }
+QSpinBox::up-arrow { image: url(up_arrow.svg); width: 10px; height: 7px; }
+QSpinBox::down-arrow { image: url(down_arrow.svg); width: 10px; height: 7px; }
 
 #rangeBox { background: #F8FAFC; border-top: 1px solid #E2E8F0; }
 #selectRangeBtn { background: #2563EB; color: white; border: none; border-radius: 6px; padding: 8px 12px; font-weight: 600; min-height: 30px; }
