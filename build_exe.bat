@@ -3,39 +3,41 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 echo ========================================
-echo        Bible Pro Windows 打包工具
+echo          Bible Pro Build Tool
 echo ========================================
 echo.
 
-where python >nul 2>nul
+set "PYTHON=D:\Python\python.exe"
+if not exist "%PYTHON%" set "PYTHON=python"
+
+"%PYTHON%" --version >nul 2>nul
 if errorlevel 1 (
-    echo [错误] 未找到 Python，请先安装 Python。
+    echo [ERROR] Python not found.
     pause
     exit /b 1
 )
 
-python -m PyInstaller --version >nul 2>nul
+"%PYTHON%" -m PyInstaller --version >nul 2>nul
 if errorlevel 1 (
-    echo [提示] 正在安装 PyInstaller...
-    python -m pip install pyinstaller
+    echo [INFO] Installing PyInstaller...
+    "%PYTHON%" -m pip install pyinstaller
     if errorlevel 1 (
-        echo [错误] PyInstaller 安装失败。
+        echo [ERROR] PyInstaller installation failed.
         pause
         exit /b 1
     )
 )
 
-echo [1/3] 清理旧的打包文件...
+echo [1/3] Cleaning old build files...
 if exist build rmdir /s /q build
 if exist "dist\Bible Pro" rmdir /s /q "dist\Bible Pro"
 if exist "installer\Bible Pro_Setup.exe" del /q "installer\Bible Pro_Setup.exe"
 if not exist installer mkdir installer
 
-echo [2/3] 正在打包 Bible Pro...
-python -m PyInstaller --noconfirm --clean "Bible Pro.spec"
+echo [2/3] Building Bible Pro...
+"%PYTHON%" -m PyInstaller --noconfirm --clean "Bible Pro.spec"
 if errorlevel 1 (
-    echo.
-    echo [错误] PyInstaller 打包失败。
+    echo [ERROR] PyInstaller build failed.
     pause
     exit /b 1
 )
@@ -45,31 +47,27 @@ if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles(x86
 if not defined ISCC if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe"
 
 if not defined ISCC (
-    echo.
-    echo [错误] 未找到 Inno Setup 6。
-    echo 请先安装 Inno Setup，然后重新运行本脚本。
-    echo.
-    echo 官方网站：https://jrsoftware.org/isinfo.php
+    echo [ERROR] Inno Setup 6 not found.
+    echo Please install Inno Setup and run this script again.
     pause
     exit /b 1
 )
 
-echo [3/3] 正在生成安装程序...
+echo [3/3] Creating installer...
 "%ISCC%" "Bible Pro.iss"
 if errorlevel 1 (
-    echo.
-    echo [错误] 安装程序生成失败。
+    echo [ERROR] Installer creation failed.
     pause
     exit /b 1
 )
 
 echo.
 echo ========================================
-echo       Bible Pro 打包完成！
+echo       Bible Pro build completed!
 echo ========================================
 echo.
-echo 安装程序：
- echo %CD%\installer\Bible Pro_Setup.exe
+echo Installer:
+echo %CD%\installer\Bible Pro_Setup.exe
 echo.
 pause
 endlocal
