@@ -44,14 +44,14 @@ QListWidget::item:selected { background: #DBEAFE; color: #1E3A8A; border-color: 
 #historyDeleteButton:hover { background: #EF4444; color: white; border: 1px solid #EF4444; }
 #historyDeleteButton:pressed { background: #DC2626; color: white; }
 
-QSpinBox { background: #FFFFFF; color: #1E293B; border: 1px solid #E2E8F0; border-radius: 6px; padding: 5px 8px; min-height: 26px; font-size: 13px; }
+QSpinBox { background: #FFFFFF; color: #1E293B; border: 1px solid #E2E8F0; border-radius: 6px; padding: 5px 26px 5px 8px; min-height: 26px; font-size: 13px; }
 QSpinBox:hover, QSpinBox:focus { border-color: #2563EB; }
-QSpinBox::up-button, QSpinBox::down-button { background: #EEF1F6; border: 1px solid #CBD5E1; width: 20px; }
+QSpinBox::up-button { subcontrol-origin: border; subcontrol-position: top right; width: 22px; height: 14px; background: #EEF1F6; border: 1px solid #CBD5E1; }
+QSpinBox::down-button { subcontrol-origin: border; subcontrol-position: bottom right; width: 22px; height: 14px; background: #EEF1F6; border: 1px solid #CBD5E1; }
 QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: #DBEAFE; border-color: #2563EB; }
-/* 不依赖 SVG 资源，直接用 QSS 三角形，保证亮色/暗色及所有 QSpinBox 都能显示箭头 */
-QSpinBox::up-arrow, QSpinBox::down-arrow { width: 0px; height: 0px; }
-QSpinBox::up-arrow { border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 7px solid #1E3A8A; }
-QSpinBox::down-arrow { border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 7px solid #1E3A8A; }
+QSpinBox::up-button:pressed, QSpinBox::down-button:pressed { background: #BFDBFE; }
+QSpinBox::up-arrow { image: url(up_arrow.svg); width: 12px; height: 8px; }
+QSpinBox::down-arrow { image: url(down_arrow.svg); width: 12px; height: 8px; }
 
 #rangeBox { background: #F8FAFC; border-top: 1px solid #E2E8F0; border-radius: 0; }
 #rangeBox QLabel { color: #475569; }
