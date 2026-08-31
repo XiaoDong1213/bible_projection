@@ -1,0 +1,50 @@
+# -*- mode: python ; coding: utf-8 -*-
+from pathlib import Path
+
+project_root = Path(SPECPATH)
+
+
+a = Analysis(
+    ['main.py'],
+    pathex=[str(project_root)],
+    binaries=[],
+    datas=[
+        (str(project_root / '和合本.db'), '.'),
+        (str(project_root / 'icon.ico'), '.'),
+        (str(project_root / 'styles'), 'styles'),
+        (str(project_root / 'install.mark'), '.'),
+    ],
+    hiddenimports=[
+        'PyQt6',
+        'PyQt6.QtCore',
+        'PyQt6.QtGui',
+        'PyQt6.QtWidgets',
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.datas,
+    [],
+    name='Bible Pro',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=str(project_root / 'icon.ico'),
+)
