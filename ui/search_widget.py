@@ -30,7 +30,7 @@ class SearchWidget(QWidget):
         self.result_list.clear()
         for i,b in enumerate(self._candidates(q)[:12],1):
             code=self._code(b).upper(); short=self.db._short_name(b); item=QListWidgetItem(f'{i}. {code or short} {b}'); item.setData(Qt.ItemDataRole.UserRole,(b,1,None,None)); self.result_list.addItem(item)
-        if self.result_list.count():self.result_list.setCurrentRow(0)
+        if self.result_list.count(): self.result_list.setCurrentRow(0)
     def _valid(self,p):
         if not p or len(p)!=4:return None
         b,c,s,e=p
@@ -86,7 +86,7 @@ class SearchWidget(QWidget):
             if converted_book is not None:self._converted_book=converted_book
             return
         self._formatting=True
-        try:self.search_input.setText(text); self.search_input.setCursorPosition(len(text));
+        try:self.search_input.setText(text); self.search_input.setCursorPosition(len(text))
         finally:self._formatting=False
         if converted_book is not None:
             self._converted_book=converted_book; self._converted_book_name=text if converted_book else ''
@@ -123,6 +123,10 @@ class SearchWidget(QWidget):
                 if e<s:e=s
             return (b,c,s,e) if mx else None
         except (TypeError,ValueError,AttributeError):return None
+    def _sanitize_user_text(self,text):
+        # 用户可输入：英文字母简拼、数字、空格、冒号、点号、短横线。
+        # 其它字符（中文、中文标点、括号、逗号、斜杠等）全部过滤掉。
+        return re.sub(r'[^A-Za-z0-9 :：.．。-]', '', str(text or ''))
     def _refresh(self,text,user=True):
         if self._formatting:return
         r=str(text or '').strip()
@@ -154,7 +158,13 @@ class SearchWidget(QWidget):
         for i,b in enumerate(self.db.search_books(q)[:12],1):
             code=self._code(b).upper();short=self.db._short_name(b);it=QListWidgetItem(f'{i}. {code or short} {b}');it.setData(Qt.ItemDataRole.UserRole,(b,1,None,None));self.result_list.addItem(it)
         if self.result_list.count():self.result_list.setCurrentRow(0)
-    def _on_text_edited(self,text):self._refresh(text,True)
+    def _on_text_edited(self,text):
+        # 键盘、粘贴、输入法提交都经过这里；非法字符直接被过滤。
+        clean=self._sanitize_user_text(text)
+        if clean!=text:
+            self._set(clean)
+            text=clean
+        self._refresh(text,True)
     def _display(self,b,c,s,e):
         if s is None:return f'{b} {c}章（整章）'
         return f'{b} {c}:{s}' if e is None or e==s else f'{b} {c}:{s}-{e}'
@@ -172,7 +182,14 @@ class SearchWidget(QWidget):
         if event.type()==event.Type.KeyPress:
             k=event.key()
             if k==Qt.Key.Key_Escape:self.close_requested.emit();return True
-            if obj in (self.search_input,self.result_list):
+            if obj==self.search_input:
+                # 单键阶段直接拦截非法字符。允许字母、数字、空格、冒号、点号、短横线。
+                txt=event.text()
+                if txt and not re.fullmatch(r'[A-Za-z0-9 :：.．。-]',txt):return True
+                if k==Qt.Key.Key_Down:self._move(1);return True
+                if k==Qt.Key.Key_Up:self._move(-1);return True
+                if k in (Qt.Key.Key_Return,Qt.Key.Key_Enter):self._on_confirm();return True
+            elif obj==self.result_list:
                 if k==Qt.Key.Key_Down:self._move(1);return True
                 if k==Qt.Key.Key_Up:self._move(-1);return True
                 if k in (Qt.Key.Key_Return,Qt.Key.Key_Enter):self._on_confirm();return True
