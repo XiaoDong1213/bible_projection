@@ -15,12 +15,16 @@ class SearchWidget(QWidget):
         self.search_input=QLineEdit(); self.search_input.setObjectName("searchInput"); self.search_input.setMinimumHeight(42); self.search_input.setPlaceholderText("输入简拼，例如：CSJ"); self.search_input.textEdited.connect(self._on_text_edited); self.search_input.returnPressed.connect(self._on_confirm); lay.addWidget(self.search_input)
         self.hint_label=QLabel("输入简拼　↑↓选择　空格选择/下一段　Enter确认　Esc退出"); self.hint_label.setMinimumHeight(28); self.hint_label.setMaximumHeight(32); self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter); self.hint_label.setWordWrap(True); lay.addWidget(self.hint_label)
         self.result_list=QListWidget(); self.result_list.setFocusPolicy(Qt.FocusPolicy.NoFocus); self.result_list.setSpacing(2); self.result_list.setMinimumWidth(406); self.result_list.itemClicked.connect(self._on_item_clicked); lay.addWidget(self.result_list)
-        self.search_input.installEventFilter(self); self.result_list.installEventFilter(self); self.setFocusProxy(self.search_input)
-        self._apply_hint_style()
+        self.search_input.installEventFilter(self); self.result_list.installEventFilter(self); self.setFocusProxy(self.search_input); self._apply_hint_style()
     def _apply_hint_style(self):
-        p=self.search_input.palette()
-        bg=p.color(QPalette.ColorRole.Base); fg=p.color(QPalette.ColorRole.Text); border=p.color(QPalette.ColorRole.Midlight)
-        self.hint_label.setStyleSheet("QLabel { background-color: rgb(%d,%d,%d); color: rgb(%d,%d,%d); border: 1px solid rgb(%d,%d,%d); border-radius: 5px; padding: 3px 8px; }"%(bg.red(),bg.green(),bg.blue(),fg.red(),fg.green(),fg.blue(),border.red(),border.green(),border.blue()))
+        # 直接复用候选列表的实际主题调色板，不指定灰色；提示条是不透明的，并与搜索框/候选框同色系。
+        p=self.result_list.palette(); hp=self.hint_label.palette()
+        for role in (QPalette.ColorRole.Window,QPalette.ColorRole.Base): hp.setColor(role,p.color(QPalette.ColorRole.Base))
+        for role in (QPalette.ColorRole.WindowText,QPalette.ColorRole.Text): hp.setColor(role,p.color(QPalette.ColorRole.Text))
+        hp.setColor(QPalette.ColorRole.Midlight,p.color(QPalette.ColorRole.Midlight))
+        self.hint_label.setPalette(hp); self.hint_label.setAutoFillBackground(True)
+        self.hint_label.setStyleSheet("QLabel { color: palette(text); border: 1px solid palette(midlight); border-radius: 5px; padding: 3px 8px; }")
+        self.hint_label.setFont(self.search_input.font())
     def changeEvent(self,event):
         super().changeEvent(event)
         if event.type() in (QEvent.Type.PaletteChange,QEvent.Type.StyleChange): self._apply_hint_style()
