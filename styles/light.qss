@@ -48,10 +48,14 @@ QSpinBox { background: #FFFFFF; color: #1E293B; border: 1px solid #E2E8F0; borde
 QSpinBox:hover, QSpinBox:focus { border-color: #2563EB; }
 QSpinBox::up-button, QSpinBox::down-button { background: #EEF1F6; border: 1px solid #CBD5E1; width: 20px; }
 QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: #DBEAFE; border-color: #2563EB; }
-QSpinBox::up-arrow { image: url(:/styles/up_arrow.svg); width: 10px; height: 7px; }
-QSpinBox::down-arrow { image: url(:/styles/down_arrow.svg); width: 10px; height: 7px; }
+/* 不依赖 SVG 资源，直接用 QSS 三角形，保证亮色/暗色及所有 QSpinBox 都能显示箭头 */
+QSpinBox::up-arrow, QSpinBox::down-arrow { width: 0px; height: 0px; }
+QSpinBox::up-arrow { border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 7px solid #1E3A8A; }
+QSpinBox::down-arrow { border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 7px solid #1E3A8A; }
 
-#rangeBox { background: #F8FAFC; border-top: 1px solid #E2E8F0; }
+#rangeBox { background: #F8FAFC; border-top: 1px solid #E2E8F0; border-radius: 0; }
+#rangeBox QLabel { color: #475569; }
+#rangeBox QSpinBox { background: #FFFFFF; color: #1E293B; }
 #selectRangeBtn { background: #2563EB; color: white; border: none; border-radius: 6px; padding: 8px 12px; font-weight: 600; min-height: 30px; }
 #selectRangeBtn:hover { background: #1D4ED8; }
 #selectRangeBtn:pressed { background: #1E40AF; }
