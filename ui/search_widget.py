@@ -4,10 +4,9 @@ from PyQt6.QtWidgets import QWidget,QVBoxLayout,QLineEdit,QLabel,QListWidget,QLi
 from PyQt6.QtCore import Qt,pyqtSignal
 
 class SearchWidget(QWidget):
-    search_triggered=pyqtSignal(tuple)
-    close_requested=pyqtSignal()
+    search_triggered=pyqtSignal(tuple); close_requested=pyqtSignal()
     def __init__(self,db,parent=None):
-        super().__init__(parent); self.db=db; self._formatting=False
+        super().__init__(parent); self.db=db; self._formatting=False; self._converted_book=False
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint|Qt.WindowType.Popup); self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         lay=QVBoxLayout(self); lay.setContentsMargins(10,10,10,10); lay.setSpacing(4)
         self.search_input=QLineEdit(); self.search_input.setObjectName('searchInput'); self.search_input.setPlaceholderText('例如：创世记1:2-12  或  CSJ 1:2-12')
@@ -66,7 +65,6 @@ class SearchWidget(QWidget):
     def _auto(self,text):
         r=str(text or '').strip()
         if not r:return r
-        # 已有分隔符时只规范已有格式。
         m=re.fullmatch(r'(.+?)[\s]*(\d+)[\s:：.]+(\d+)(?:\s*-\s*(\d*))?',r)
         if m:
             part,c,s,e=m.groups(); return f'{part.strip()} {int(c)}:{int(s)}'+(f'-{int(e)}' if e else '')
@@ -83,10 +81,10 @@ class SearchWidget(QWidget):
             if p and p[2] is not None:return self._fmt(code.upper(),p)
         info=self._chapter_info(f'{b} {c}')
         return f'{code.upper()} {info["chapter"]}:' if info and info['split'] else r
-    def _set(self,text):
+    def _set(self,text,converted_book=False):
         if text==self.search_input.text():return
         self._formatting=True
-        try:self.search_input.setText(text); self.search_input.setCursorPosition(len(text))
+        try:self.search_input.setText(text); self.search_input.setCursorPosition(len(text)); self._converted_book=converted_book
         finally:self._formatting=False
     def _fmt(self,label,p):
         b,c,s,e=p
@@ -113,8 +111,7 @@ class SearchWidget(QWidget):
         if not b:return None
         try:
             count=int(self.db.book_meta.get(b,{}).get('chapter_count') or self.db.get_chapter_count(b) or 0); c=int(cs); c=count if c<1 or c>count else c
-            mx=int(self.db.get_verse_count(b,c) or 0); s=int(ss); s=mx if s<1 or s>mx else s
-            e=s
+            mx=int(self.db.get_verse_count(b,c) or 0); s=int(ss); s=mx if s<1 or s>mx else s; e=s
             if es not in (None,''):
                 try:e=int(es)
                 except ValueError:e=mx
@@ -125,30 +122,31 @@ class SearchWidget(QWidget):
     def _refresh(self,text,user=True):
         if self._formatting:return
         r=str(text or '').strip()
-        if not r:self.result_list.clear();return
+        # 如果上一次是“简拼→中文”的自动转换，用户按一次退格时直接清空整个中文书卷名。
+        if user and self._converted_book and r and re.fullmatch(r'[\u3400-\u9fff]+',r):
+            # Q→启示录 后退格得到的文本是“启示”，说明一次退格正在删除自动转换结果；继续清空。
+            if len(r)<len(self._converted_book_name):
+                self._set('',converted_book=False); self.result_list.clear(); return
+        if not r:self._converted_book=False; self.result_list.clear();return
         if user:
             f=self._auto(r)
             if f!=r:self._set(f);r=f
-        # 一旦输入框已经是中文书卷名，任何新增拉丁字母都视为无效：不允许继续进入简拼解析。
-        # 例如“启示录”之后输入 Q，不会变成“Q”候选或重新走简拼；直接保留中文书名。
         if re.fullmatch(r'[\u3400-\u9fff]+',r):
-            self.result_list.clear()
-            # 纯中文书名保持可继续输入数字，但字母不会被接受。
-            return
-        # 中文书卷名 + 字母：删除刚输入的字母，恢复到合法中文书卷名。
+            self.result_list.clear(); return
         m=re.fullmatch(r'([\u3400-\u9fff]+)[A-Za-z]+$',r)
         if m and self.db.find_book(m.group(1)):
-            self._set(m.group(1)); r=m.group(1); self.result_list.clear(); return
+            self._set(m.group(1),converted_book=False); r=m.group(1); self.result_list.clear(); return
         if re.fullmatch(r'[A-Za-z]+',r):
             cs=self._candidates(r)
-            if len(cs)==1:self._set(cs[0]);r=cs[0];self.result_list.clear()
+            if len(cs)==1:
+                self._converted_book=True; self._converted_book_name=cs[0]; self._set(cs[0],converted_book=True);r=cs[0];self.result_list.clear();return
             elif len(cs)>1:self._show_candidates(r);return
         p=self._parse(r)
         if p:
-            self.result_list.clear(); b,c,s,e=p; it=QListWidgetItem('▶ '+self._display(b,c,s,e));it.setData(Qt.ItemDataRole.UserRole,p);self.result_list.addItem(it);self.result_list.setCurrentRow(0);return
+            self.result_list.clear(); b,c,s,e=p;it=QListWidgetItem('▶ '+self._display(b,c,s,e));it.setData(Qt.ItemDataRole.UserRole,p);self.result_list.addItem(it);self.result_list.setCurrentRow(0);return
         p=self._clamp(r)
         if p:
-            b,c,s,e=p; self._set(f'{b} {c}:{s}' if s==e else f'{b} {c}:{s}-{e}');self.result_list.clear();it=QListWidgetItem('▶ '+self._display(b,c,s,e));it.setData(Qt.ItemDataRole.UserRole,p);self.result_list.addItem(it);self.result_list.setCurrentRow(0);return
+            b,c,s,e=p;self._set(f'{b} {c}:{s}' if s==e else f'{b} {c}:{s}-{e}',converted_book=False);self.result_list.clear();it=QListWidgetItem('▶ '+self._display(b,c,s,e));it.setData(Qt.ItemDataRole.UserRole,p);self.result_list.addItem(it);self.result_list.setCurrentRow(0);return
         q=re.split(r'[0-9:：.\-\s]+',r,maxsplit=1)[0].strip() if re.search(r'\d',r) else r;self.result_list.clear()
         for i,b in enumerate(self.db.search_books(q)[:12],1):
             code=self._code(b).upper();short=self.db._short_name(b);it=QListWidgetItem(f'{i}. {code or short} {b}');it.setData(Qt.ItemDataRole.UserRole,(b,1,None,None));self.result_list.addItem(it)
@@ -160,7 +158,7 @@ class SearchWidget(QWidget):
     def _on_confirm(self):
         text=self.search_input.text().strip();p=self._parse(text) or self._clamp(text)
         if p:
-            b,c,s,e=p;self._set(f'{b} {c}:{s}' if s==e else f'{b} {c}:{s}-{e}');self.search_triggered.emit(p);self.close_requested.emit();return
+            b,c,s,e=p;self._set(f'{b} {c}:{s}' if s==e else f'{b} {c}:{s}-{e}',converted_book=False);self.search_triggered.emit(p);self.close_requested.emit();return
         it=self.result_list.currentItem()
         if it and it.data(Qt.ItemDataRole.UserRole):self.search_triggered.emit(it.data(Qt.ItemDataRole.UserRole));self.close_requested.emit();return
         self.hint_label.setText('无法识别该经文，请检查书卷、章和节号')
