@@ -1,6 +1,3 @@
-# ui/preview_host.py
-# 预览舞台：按副屏分辨率排版，再等比缩放到预览区（letterbox）
-
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QGraphicsView, QGraphicsScene, QFrame
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPainter
@@ -9,16 +6,12 @@ from .scripture_display import ScriptureDisplay
 
 
 class PreviewHost(QWidget):
-    """右侧预览容器。
-
-    - 无舞台尺寸时：经文区铺满预览（本地编辑）。
-    - 有舞台尺寸时：经文区按副屏 W×H 排版，再整体缩放入视口（所见即所得）。
-    """
+    """右侧预览容器。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("previewHost")
-        self._stage = None  # (w, h) | None
+        self._stage = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -46,14 +39,11 @@ class PreviewHost(QWidget):
 
         self.display = ScriptureDisplay()
         self.proxy = self.scene.addWidget(self.display)
-
         layout.addWidget(self.view)
-
-        # 延迟一次 fit，等布局完成
         QTimer.singleShot(0, self._fit_view)
 
     def set_stage_size(self, width, height):
-        """锁定为副屏逻辑分辨率，预览只做等比缩放。"""
+        """设置副屏舞台尺寸。"""
         w = max(1, int(width))
         h = max(1, int(height))
         self._stage = (w, h)
@@ -61,7 +51,7 @@ class PreviewHost(QWidget):
         self._fit_view()
 
     def clear_stage(self):
-        """退出舞台模式，预览铺满本地区域。"""
+        """退出舞台模式。"""
         self._stage = None
         self.display.clear_stage_size()
         self._fit_view()
