@@ -3,7 +3,9 @@
 # 功能：初始化各模块，启动主窗口
 
 import sys
+import os
 from pathlib import Path
+
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QIcon
 
@@ -12,12 +14,28 @@ from bible_database import BibleDatabase
 from main_window import MainWindow
 
 
+def _set_windows_app_id():
+    """设置 Windows AppUserModelID，避免任务栏把程序识别成 Python。"""
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "XiaoDong.BibleProjection"
+        )
+    except Exception:
+        pass
+
+
 def main():
+    # Windows 下必须在创建 QApplication 前设置 AppUserModelID，任务栏才能正确识别应用
+    _set_windows_app_id()
+
     # 创建Qt应用实例
     app = QApplication(sys.argv)
     app.setStyle("Fusion")  # 使用Fusion风格，跨平台一致美观
 
-    # 使用项目根目录的 icon.ico 作为应用图标
+    # 使用项目根目录的 icon.ico 作为整个应用的默认图标
     icon_path = Path(__file__).resolve().parent / "icon.ico"
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
