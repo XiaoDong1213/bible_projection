@@ -6,7 +6,7 @@ from .scripture_display import ScriptureDisplay
 
 
 class PreviewHost(QWidget):
-    """右侧预览容器。"""
+    """右侧预览容器，负责舞台尺寸和缩放显示。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -43,7 +43,7 @@ class PreviewHost(QWidget):
         QTimer.singleShot(0, self._fit_view)
 
     def set_stage_size(self, width, height):
-        """设置副屏舞台尺寸。"""
+        """设置预览舞台尺寸。"""
         w = max(1, int(width))
         h = max(1, int(height))
         self._stage = (w, h)
@@ -51,15 +51,17 @@ class PreviewHost(QWidget):
         self._fit_view()
 
     def clear_stage(self):
-        """退出舞台模式。"""
+        """退出舞台模式并恢复自适应尺寸。"""
         self._stage = None
         self.display.clear_stage_size()
         self._fit_view()
 
     def stage_size(self):
+        """返回当前舞台尺寸。"""
         return self._stage
 
     def _fit_view(self):
+        """根据预览区域大小调整舞台缩放比例。"""
         vw = max(1, self.view.viewport().width())
         vh = max(1, self.view.viewport().height())
 
@@ -82,5 +84,6 @@ class PreviewHost(QWidget):
             self.view.centerOn(self.proxy)
 
     def resizeEvent(self, event):
+        """窗口尺寸变化时重新适配预览区域。"""
         super().resizeEvent(event)
         self._fit_view()
