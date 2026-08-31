@@ -1,6 +1,3 @@
-# config.py
-# 配置管理模块：自动保存/加载显示设置、窗口状态、搜索历史
-
 import json
 import os
 import sys
@@ -15,7 +12,6 @@ class AppConfig:
         self.app_root = Path(__file__).parent.resolve()
         self.mark_file = self.app_root / "install.mark"
         self.is_install_version = self.mark_file.exists()
-        # 安装版写入用户可写目录，避免 Program Files 无权限
         if self.is_install_version:
             if sys.platform == "win32":
                 base = Path(os.environ.get("APPDATA", str(Path.home())))
@@ -144,7 +140,6 @@ class AppConfig:
             "footer_height",
             "footer_size",
         }
-
         for k, default_val in defaults.items():
             raw = sec.get(k, None) if hasattr(sec, "get") else None
             if raw is None:
@@ -164,7 +159,6 @@ class AppConfig:
 
     def save_window_state(self, geometry):
         import base64
-
         if "Window" not in self.parser:
             self.parser["Window"] = {"geometry": ""}
         geo_b64 = base64.b64encode(bytes(geometry)).decode("ascii") if geometry else ""
@@ -173,7 +167,6 @@ class AppConfig:
 
     def load_window_state(self):
         import base64
-
         if "Window" not in self.parser:
             return None
         raw = self.parser["Window"].get("geometry", "")
