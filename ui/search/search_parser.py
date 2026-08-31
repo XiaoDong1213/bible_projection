@@ -4,9 +4,6 @@ import re
 class SearchParser:
     """解析书卷、章节和节范围。"""
 
-    SEPARATOR_RE = re.compile(r"\s*[:.]\s*")
-    RANGE_RE = re.compile(r"\s*-\s*")
-
     @staticmethod
     def normalize(value):
         return (
@@ -30,27 +27,48 @@ class SearchParser:
 
         suffix = value[len(book):].strip() if value.startswith(book) else value
 
+        # 只有章节时，返回整章
         match = re.fullmatch(r"(\d+)", suffix)
         if match:
             chapter = int(match.group(1))
-            return (book, chapter, None, None) if 1 <= chapter <= chapter_count(book) else None
+            if 1 <= chapter <= chapter_count(book):
+                return book, chapter, None, None
+            return None
 
-        match = re.fullmatch(r"(\d+)\s*[:.]\s*(\d+)(?:\s*-\s*(\d+))?", suffix)
+        # 章节、单节或节范围
+        match = re.fullmatch(
+            r"(\d+)\s*[:.]\s*(\d+)(?:\s*-\s*(\d*))?",
+            suffix,
+        )
         if not match:
             return None
 
         chapter, verse, end = match.groups()
         chapter = int(chapter)
         verse = int(verse)
-        end = int(end) if end else verse
-        max_verse = verse_count(book, chapter)
 
-        if 1 <= chapter <= chapter_count(book) and 1 <= verse <= end <= max_verse:
+        if not 1 <= chapter <= chapter_count(book):
+            return None
+
+        max_verse = verse_count(book, chapter)
+        if not 1 <= verse <= max_verse:
+            return None
+
+        # 省略结束节时，默认显示到本章最后一节
+        if end is None or end == "":
+            end = max_verse
+        else:
+            end = int(end)
+
+        if verse <= end <= max_verse:
             return book, chapter, verse, end
         return None
 
     @staticmethod
     def parse_reference(value):
         value = SearchParser.normalize(value)
-        match = re.fullmatch(r"(\d+)(?:\s*[:.]\s*(\d+)(?:\s*-\s*(\d*))?)?", value)
+        match = re.fullmatch(
+            r"(\d+)(?:\s*[:.]\s*(\d+)(?:\s*-\s*(\d*))?)?",
+            value,
+        )
         return match.groups() if match else None
