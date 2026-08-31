@@ -6,6 +6,7 @@ class SearchParser:
 
     @staticmethod
     def normalize(value):
+        """统一章节搜索中的标点格式。"""
         return (
             str(value or "")
             .strip()
@@ -15,9 +16,11 @@ class SearchParser:
         )
 
     def parse(self, text, selected_book, exact_book, chapter_count, verse_count):
+        """解析搜索内容并校验章节、节范围。"""
         value = self.normalize(text)
         book = selected_book
 
+        # 未选定书卷时，先从输入内容中识别简拼
         if not book:
             match = re.match(r"^([A-Za-z]+)", value)
             book = exact_book(match.group(1)) if match else None
@@ -27,6 +30,7 @@ class SearchParser:
 
         suffix = value[len(book):].strip() if value.startswith(book) else value
 
+        # 只输入章节时，默认选择整章
         match = re.fullmatch(r"(\d+)", suffix)
         if match:
             chapter = int(match.group(1))
@@ -52,6 +56,7 @@ class SearchParser:
         if not 1 <= verse <= max_verse:
             return None
 
+        # 省略末节时，范围直接延伸到本章最后一节
         if end is None or end == "":
             end = max_verse
         else:
@@ -63,6 +68,7 @@ class SearchParser:
 
     @staticmethod
     def parse_reference(value):
+        """解析纯章节或章节节范围。"""
         value = SearchParser.normalize(value)
         match = re.fullmatch(
             r"(\d+)(?:\s*[:.]\s*(\d+)(?:\s*-\s*(\d*))?)?",
