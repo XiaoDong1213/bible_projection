@@ -1,4 +1,3 @@
-# 第二屏幕扩展窗口：滚动位置由主屏强制驱动
 from PyQt6.QtWidgets import QWidget, QVBoxLayout
 from PyQt6.QtCore import Qt, pyqtSignal
 from .scripture_display import ScriptureDisplay
@@ -27,7 +26,7 @@ class ExtensionWindow(QWidget):
         self.setWindowFlags(flags)
 
     def apply_topmost(self, on):
-        """按配置切换置顶；调用方负责 showFullScreen 以保持全屏。"""
+        """切换窗口置顶状态。"""
         self._topmost = bool(on)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self._topmost)
 
