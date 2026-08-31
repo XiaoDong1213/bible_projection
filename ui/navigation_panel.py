@@ -251,7 +251,8 @@ class NavigationPanel(QWidget):
 
     def _on_chapter_changed(self, chapter):
         if self.selected_book:
-            self._set_verse_ranges(self.selected_book, chapter, whole_chapter=False)
+            # 切换章节时默认选择该章完整范围：第1节至该章末节。
+            self._set_verse_ranges(self.selected_book, chapter, whole_chapter=True)
 
     def sync_selection(self, book, chapter, start, end):
         self._history_updating = True
