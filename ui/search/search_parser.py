@@ -27,7 +27,6 @@ class SearchParser:
 
         suffix = value[len(book):].strip() if value.startswith(book) else value
 
-        # 只有章节时，返回整章
         match = re.fullmatch(r"(\d+)", suffix)
         if match:
             chapter = int(match.group(1))
@@ -35,7 +34,6 @@ class SearchParser:
                 return book, chapter, None, None
             return None
 
-        # 章节、单节或节范围
         match = re.fullmatch(
             r"(\d+)\s*[:.]\s*(\d+)(?:\s*-\s*(\d*))?",
             suffix,
@@ -54,7 +52,6 @@ class SearchParser:
         if not 1 <= verse <= max_verse:
             return None
 
-        # 省略结束节时，默认显示到本章最后一节
         if end is None or end == "":
             end = max_verse
         else:
