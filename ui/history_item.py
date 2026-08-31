@@ -6,6 +6,8 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 
 class HistoryItemWidget(QWidget):
+    """单条历史记录及其删除操作。"""
+
     deleted = pyqtSignal(int)
     clicked = pyqtSignal(int)
 
@@ -28,6 +30,7 @@ class HistoryItemWidget(QWidget):
         self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         layout.addWidget(self.label, 1)
 
+        # 删除按钮单独触发当前记录的删除信号
         self.delete_btn = QPushButton("删除")
         self.delete_btn.setObjectName("historyDeleteButton")
         self.delete_btn.setFixedSize(48, 28)
@@ -38,12 +41,15 @@ class HistoryItemWidget(QWidget):
         layout.addWidget(self.delete_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
     def set_index(self, index):
+        """更新记录对应的索引。"""
         self.index = index
 
     def set_text(self, text):
+        """更新历史记录文本。"""
         self.label.setText(text)
 
     def set_selected(self, selected):
+        """更新当前记录的选中状态。"""
         selected = bool(selected)
         if self.property("selected") == selected:
             return
@@ -54,16 +60,18 @@ class HistoryItemWidget(QWidget):
         self.update()
 
     def _on_delete(self):
+        """发出删除当前记录的信号。"""
         self.deleted.emit(self.index)
 
     def mousePressEvent(self, event):
+        """处理历史记录点击事件。"""
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(self.index)
         super().mousePressEvent(event)
 
 
 class HistoryListWidget(QScrollArea):
-    """历史记录列表。"""
+    """显示和管理历史记录列表。"""
 
     item_clicked = pyqtSignal(int)
     item_deleted = pyqtSignal(int)
@@ -88,7 +96,7 @@ class HistoryListWidget(QScrollArea):
         self._selected = -1
 
     def set_entries(self, texts, selected_index=-1):
-        """刷新历史记录列表。"""
+        """刷新历史记录列表并恢复滚动位置。"""
         bar = self.verticalScrollBar()
         old_value = bar.value()
         while self._rows:
@@ -110,12 +118,15 @@ class HistoryListWidget(QScrollArea):
         bar.setValue(old_value)
 
     def set_selected_index(self, index):
+        """设置当前选中的历史记录。"""
         self._selected = index if 0 <= index < len(self._rows) else -1
         for i, row in enumerate(self._rows):
             row.set_selected(i == self._selected)
 
     def selected_index(self):
+        """返回当前选中记录的索引。"""
         return self._selected
 
     def clear(self):
+        """清空全部历史记录。"""
         self.set_entries([])
