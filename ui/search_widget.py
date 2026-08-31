@@ -265,6 +265,68 @@ class SearchWidget(QWidget):
             self._set_formatted_text(formatted)
         return self._parse_reference(formatted)
 
+    def _clamp_invalid_reference(self, text):
+        """经文输入超出实际章/节范围时，自动定位到该书卷的最后一节并返回规范引用。"""
+        raw = str(text or "").strip().replace("：", ":").replace("．", ".").replace("。", ".")
+        if not raw:
+            return None
+
+        # 支持：中文书名/简称/简拼 + 章:节（含范围）
+        m = re.fullmatch(
+            r"(.+?)[\\s]*(\\d+)(?::|[.\\s]+)(\\d+)(?:\\s*-\\s*(\\d*))?",
+            raw
+        )
+        if not m:
+            return None
+
+        book_query, chapter_s, start_s, end_s = m.groups()
+        book = self.db.find_book(book_query.strip())
+        if not book:
+            return None
+
+        try:
+            chapter = int(chapter_s)
+            chapter_count = int(
+                self.db.book_meta.get(book, {}).get("chapter_count")
+                or self.db.get_chapter_count(book)
+                or 0
+            )
+        except (TypeError, ValueError, AttributeError):
+            return None
+
+        if chapter_count <= 0:
+            return None
+
+        # 章号超出范围：定位到本书最后一章，再取最后一节。
+        if chapter < 1 or chapter > chapter_count:
+            chapter = chapter_count
+
+        try:
+            max_verse = int(self.db.get_verse_count(book, chapter) or 0)
+            start = int(start_s)
+        except (TypeError, ValueError, AttributeError):
+            return None
+
+        if max_verse <= 0:
+            return None
+
+        # 起始节超过本章实际节数：直接定位到最后一节。
+        if start < 1 or start > max_verse:
+            start = max_verse
+
+        # 范围结束节也超出时，同样收敛到最后一节。
+        if end_s is not None and end_s != "":
+            try:
+                end = int(end_s)
+            except ValueError:
+                end = max_verse
+            end = max(1, min(end, max_verse))
+            if end < start:
+                end = start
+            return book, chapter, start, end
+
+        return book, chapter, start, start
+
     def _parse_reference(self, text):
         raw = str(text).strip().replace("：", ":").replace("．", ".").replace("。", ".")
         if not raw:
@@ -330,6 +392,21 @@ class SearchWidget(QWidget):
             book, chapter, start, end = parsed
             item = QListWidgetItem("▶ " + self._format_display(book, chapter, start, end))
             item.setData(Qt.ItemDataRole.UserRole, parsed)
+            self.result_list.addItem(item)
+            self.result_list.setCurrentRow(0)
+            return
+
+        # 参考经文格式正确但章/节超出数据库范围：自动收敛到最后一节，
+        # 并把最终定位结果直接显示在搜索框中。
+        clamped = self._clamp_invalid_reference(text)
+        if clamped:
+            book, chapter, start, end = clamped
+            display_ref = f"{book} {chapter}:{start}"
+            self._set_formatted_text(display_ref)
+            self._last_valid_input = display_ref
+            self.result_list.clear()
+            item = QListWidgetItem("▶ " + self._format_display(book, chapter, start, end))
+            item.setData(Qt.ItemDataRole.UserRole, (book, chapter, start, end))
             self.result_list.addItem(item)
             self.result_list.setCurrentRow(0)
             return
