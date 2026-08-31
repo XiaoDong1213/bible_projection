@@ -6,7 +6,7 @@ from PyQt6.QtCore import Qt,pyqtSignal
 class SearchWidget(QWidget):
     search_triggered=pyqtSignal(tuple); close_requested=pyqtSignal()
     def __init__(self,db,parent=None):
-        super().__init__(parent); self.db=db; self._formatting=False; self._converted_book=False
+        super().__init__(parent); self.db=db; self._formatting=False; self._converted_book=False; self._converted_book_name=''
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint|Qt.WindowType.Popup); self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         lay=QVBoxLayout(self); lay.setContentsMargins(10,10,10,10); lay.setSpacing(4)
         self.search_input=QLineEdit(); self.search_input.setObjectName('searchInput'); self.search_input.setPlaceholderText('例如：创世记1:2-12  或  CSJ 1:2-12')
@@ -81,11 +81,15 @@ class SearchWidget(QWidget):
             if p and p[2] is not None:return self._fmt(code.upper(),p)
         info=self._chapter_info(f'{b} {c}')
         return f'{code.upper()} {info["chapter"]}:' if info and info['split'] else r
-    def _set(self,text,converted_book=False):
-        if text==self.search_input.text():return
+    def _set(self,text,converted_book=None):
+        if text==self.search_input.text():
+            if converted_book is not None:self._converted_book=converted_book
+            return
         self._formatting=True
-        try:self.search_input.setText(text); self.search_input.setCursorPosition(len(text)); self._converted_book=converted_book
+        try:self.search_input.setText(text); self.search_input.setCursorPosition(len(text));
         finally:self._formatting=False
+        if converted_book is not None:
+            self._converted_book=converted_book; self._converted_book_name=text if converted_book else ''
     def _fmt(self,label,p):
         b,c,s,e=p
         if s is None:return f'{label} {c}'
@@ -122,28 +126,27 @@ class SearchWidget(QWidget):
     def _refresh(self,text,user=True):
         if self._formatting:return
         r=str(text or '').strip()
-        # 如果上一次是“简拼→中文”的自动转换，用户按一次退格时直接清空整个中文书卷名。
-        if user and self._converted_book and r and re.fullmatch(r'[\u3400-\u9fff]+',r):
-            # Q→启示录 后退格得到的文本是“启示”，说明一次退格正在删除自动转换结果；继续清空。
-            if len(r)<len(self._converted_book_name):
+        # 简拼自动转换成完整中文书卷名后，第一次退格只要仍然是该中文名的前缀，就直接整段清空。
+        if user and self._converted_book:
+            book_name=self._converted_book_name
+            if r=='' or (book_name and len(r)<len(book_name) and book_name.startswith(r) and re.fullmatch(r'[\u3400-\u9fff]*',r)):
                 self._set('',converted_book=False); self.result_list.clear(); return
-        if not r:self._converted_book=False; self.result_list.clear();return
+        if not r:self._converted_book=False; self._converted_book_name=''; self.result_list.clear();return
         if user:
             f=self._auto(r)
             if f!=r:self._set(f);r=f
-        if re.fullmatch(r'[\u3400-\u9fff]+',r):
-            self.result_list.clear(); return
+        if re.fullmatch(r'[\u3400-\u9fff]+',r):self.result_list.clear();return
         m=re.fullmatch(r'([\u3400-\u9fff]+)[A-Za-z]+$',r)
         if m and self.db.find_book(m.group(1)):
-            self._set(m.group(1),converted_book=False); r=m.group(1); self.result_list.clear(); return
+            self._set(m.group(1),converted_book=False);r=m.group(1);self.result_list.clear();return
         if re.fullmatch(r'[A-Za-z]+',r):
             cs=self._candidates(r)
             if len(cs)==1:
-                self._converted_book=True; self._converted_book_name=cs[0]; self._set(cs[0],converted_book=True);r=cs[0];self.result_list.clear();return
+                self._set(cs[0],converted_book=True);r=cs[0];self.result_list.clear();return
             elif len(cs)>1:self._show_candidates(r);return
         p=self._parse(r)
         if p:
-            self.result_list.clear(); b,c,s,e=p;it=QListWidgetItem('▶ '+self._display(b,c,s,e));it.setData(Qt.ItemDataRole.UserRole,p);self.result_list.addItem(it);self.result_list.setCurrentRow(0);return
+            self.result_list.clear();b,c,s,e=p;it=QListWidgetItem('▶ '+self._display(b,c,s,e));it.setData(Qt.ItemDataRole.UserRole,p);self.result_list.addItem(it);self.result_list.setCurrentRow(0);return
         p=self._clamp(r)
         if p:
             b,c,s,e=p;self._set(f'{b} {c}:{s}' if s==e else f'{b} {c}:{s}-{e}',converted_book=False);self.result_list.clear();it=QListWidgetItem('▶ '+self._display(b,c,s,e));it.setData(Qt.ItemDataRole.UserRole,p);self.result_list.addItem(it);self.result_list.setCurrentRow(0);return
