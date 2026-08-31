@@ -316,6 +316,22 @@ class SearchWidget(QWidget):
             return f"{b} {c}章（整章）"
         return f"{b} {c}:{s}" if e is None or e == s else f"{b} {c}:{s}-{e}"
 
+    def _select_current_result_by_space(self):
+        """空格确认当前高亮结果：只把书卷名写回输入框，不立即关闭搜索框。"""
+        it = self.result_list.currentItem()
+        if it is None:
+            return False
+        p = it.data(Qt.ItemDataRole.UserRole)
+        if not p:
+            return False
+        b, c, s, e = p
+
+        # 空格选择搜索结果时，只显示中文书卷名，保持搜索框继续可输入。
+        # 后续再按任意 A-Z 简拼，会从新的简拼搜索开始，而不是继续拼接中文。
+        self._set(b, converted_book=True)
+        self.result_list.clear()
+        return True
+
     def _on_confirm(self):
         # Enter 必须始终走这里，不依赖全局快捷键。
         text = self.search_input.text().strip()
@@ -358,6 +374,11 @@ class SearchWidget(QWidget):
                 return True
 
             if obj == self.search_input:
+                # 空格：选择当前高亮结果，并把中文书卷名写入搜索框；不关闭搜索框。
+                if k == Qt.Key.Key_Space and self.result_list.currentItem() is not None:
+                    if self._select_current_result_by_space():
+                        return True
+
                 # Backspace/Delete 明确放行给 QLineEdit，保证可以正常删除。
                 if k in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
                     return super().eventFilter(obj, event)
@@ -378,6 +399,10 @@ class SearchWidget(QWidget):
                     return True
 
             elif obj == self.result_list:
+                if k == Qt.Key.Key_Space:
+                    if self._select_current_result_by_space():
+                        self.search_input.setFocus()
+                        return True
                 if k == Qt.Key.Key_Down:
                     self._move(1)
                     return True
