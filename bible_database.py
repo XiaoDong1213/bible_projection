@@ -4,7 +4,10 @@ import sqlite3
 
 
 class BibleDatabase:
+    """负责数据库连接、书卷索引和经文查询。"""
+
     def __init__(self, db_path=None):
+        # 默认使用程序目录下的数据库文件
         if db_path is None:
             db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "和合本.db")
         self.db_path = db_path
@@ -14,6 +17,7 @@ class BibleDatabase:
         self._build_book_index()
 
     def _inspect_database(self):
+        """识别经文表和主要字段。"""
         tables = self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         if not tables:
             raise RuntimeError("和合本.db中没有可用数据表")
@@ -39,6 +43,7 @@ class BibleDatabase:
         return '"' + name.replace('"', '""') + '"'
 
     def _build_book_index(self):
+        """建立书卷名称、简拼和简称索引。"""
         rows = self.conn.execute(
             f"SELECT {self._quote(self.book_col)} AS book, MIN(rowid) AS first_row "
             f"FROM {self._quote(self.verse_table)} "
@@ -88,6 +93,7 @@ class BibleDatabase:
             if pinyin:
                 self.book_codes[self._normalize_code(pinyin)] = book
 
+        # 内置常用简称，兼容中文书卷搜索
         self.short_names = {
             "创":"创世记","出":"出埃及记","利":"利未记","民":"民数记","申":"申命记","书":"约书亚记","士":"士师记","得":"路得记","撒上":"撒母耳记上","撒下":"撒母耳记下","王上":"列王纪上","王下":"列王纪下","代上":"历代志上","代下":"历代志下","拉":"以斯拉记","尼":"尼希米记","斯":"以斯帖记","伯":"约伯记","诗":"诗篇","箴":"箴言","传":"传道书","歌":"雅歌","赛":"以赛亚书","耶":"耶利米书","哀":"耶利米哀歌","结":"以西结书","但":"但以理书","何":"何西阿书","珥":"约珥书","摩":"阿摩司书","俄":"俄巴底亚书","拿":"约拿书","弥":"弥迦书","鸿":"那鸿书","哈":"哈巴谷书","番":"西番雅书","该":"哈该书","亚":"撒迦利亚书","玛":"玛拉基书","太":"马太福音","可":"马可福音","路":"路加福音","约":"约翰福音","徒":"使徒行传","罗":"罗马书","林前":"哥林多前书","林后":"哥林多后书","加":"加拉太书","弗":"以弗所书","腓":"腓立比书","西":"歌罗西书","帖前":"帖撒罗尼迦前书","帖后":"帖撒罗尼迦后书","提前":"提摩太前书","提后":"提摩太后书","多":"提多书","门":"腓利门书","来":"希伯来书","雅":"雅各书","彼前":"彼得前书","彼后":"彼得后书","约一":"约翰一书","约二":"约翰二书","约三":"约翰三书","犹":"犹大书","启":"启示录"
         }
@@ -96,15 +102,18 @@ class BibleDatabase:
                 self.book_codes[short.lower()] = full
 
     def _normalize_code(self, value):
+        """统一搜索编码格式。"""
         return str(value).strip().lower().replace(" ", "")
 
     def _short_name(self, book):
+        """获取书卷简称。"""
         for short, full in self.short_names.items():
             if full == book:
                 return short
         return self.book_meta.get(book, {}).get("short", book[:1])
 
     def search_books(self, query):
+        """按简拼、简称或书名查找匹配书卷。"""
         q = self._normalize_code(query)
         if not q:
             return []
@@ -136,6 +145,7 @@ class BibleDatabase:
         return prefix_results + fuzzy_results
 
     def find_book(self, query):
+        """返回搜索结果中的最佳匹配书卷。"""
         q = self._normalize_code(query)
         if q in self.book_codes:
             return self.book_codes[q]
@@ -143,6 +153,7 @@ class BibleDatabase:
         return results[0] if results else None
 
     def get_books(self, category="all"):
+        """按旧约、新约或全部返回书卷列表。"""
         if category == "old":
             books = self.book_names[:39]
         elif category == "new":
@@ -152,14 +163,17 @@ class BibleDatabase:
         return [(b, self._short_name(b)) for b in books]
 
     def get_chapter_count(self, book_name):
+        """获取指定书卷的章节数。"""
         row = self.conn.execute(f"SELECT MAX({self._quote(self.chapter_col)}) AS n FROM {self._quote(self.verse_table)} WHERE {self._quote(self.book_col)}=?", (self.book_meta.get(book_name, {}).get('id', book_name),)).fetchone()
         return int(row["n"] or 0)
 
     def get_verse_count(self, book_name, chapter):
+        """获取指定章节的节数。"""
         row = self.conn.execute(f"SELECT MAX({self._quote(self.verse_col)}) AS n FROM {self._quote(self.verse_table)} WHERE {self._quote(self.book_col)}=? AND {self._quote(self.chapter_col)}=?", (self.book_meta.get(book_name, {}).get('id', book_name), chapter)).fetchone()
         return int(row["n"] or 0)
 
     def get_verses(self, book_name, chapter, start_verse=None, end_verse=None):
+        """查询指定范围的经文。"""
         book_value = self.book_meta.get(book_name, {}).get('id', book_name)
         params = [book_value, chapter]
         sql = f"SELECT {self._quote(self.verse_col)} AS verse, {self._quote(self.text_col)} AS text FROM {self._quote(self.verse_table)} WHERE {self._quote(self.book_col)}=? AND {self._quote(self.chapter_col)}=?"
@@ -173,9 +187,11 @@ class BibleDatabase:
         return [(int(r["verse"]), str(r["text"])) for r in self.conn.execute(sql, params).fetchall()]
 
     def get_verse_range(self, book_name, chapter, start_verse=1, end_verse=None):
+        """查询连续节范围。"""
         return self.get_verses(book_name, chapter, start_verse, end_verse)
 
     def parse_reference(self, text):
+        """解析书卷、章节和节范围。"""
         raw = str(text).strip().replace("：", ":").replace("．", ".").replace("。", ".")
         if not raw:
             return None
@@ -204,4 +220,5 @@ class BibleDatabase:
         return (b, 1, None, None) if b else None
 
     def close(self):
+        """关闭数据库连接。"""
         self.conn.close()
