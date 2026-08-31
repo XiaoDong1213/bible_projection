@@ -21,7 +21,6 @@ ArchitecturesInstallIn64BitMode=x64compatible
 DisableProgramGroupPage=yes
 OutputBaseFilename=Bible Pro_Setup
 SetupIconFile={#MyAppIcon}
-LicenseFile=C:\Users\XiaoDong\Documents\GitHub\bible_projection\LICENSE
 SolidCompression=yes
 WizardStyle=modern dynamic
 
