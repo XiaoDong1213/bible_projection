@@ -12,7 +12,6 @@ class SearchLineEdit(QLineEdit):
             self.special_key.emit(key)
             event.accept()
             return
-        # Enter deliberately goes to the parent widget. No eventFilter/QShortcut is used.
         super().keyPressEvent(event)
 
 
@@ -82,9 +81,9 @@ class SearchWidget(QWidget):
         )
 
     def changeEvent(self, event):
+        # 不要在 StyleChange / PaletteChange 中再次 setStyleSheet。
+        # setStyleSheet 会再次触发 changeEvent，之前因此形成无限递归。
         super().changeEvent(event)
-        if event.type() in (QEvent.Type.PaletteChange, QEvent.Type.StyleChange):
-            self._apply_theme()
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -101,8 +100,6 @@ class SearchWidget(QWidget):
         self.search_input.selectAll()
 
     def keyPressEvent(self, event):
-        # Enter is handled here, outside the line edit's eventFilter.
-        # There is no QShortcut and no eventFilter recursion path.
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             if not self._confirming:
                 self._confirming = True
