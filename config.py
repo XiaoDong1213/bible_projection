@@ -11,11 +11,11 @@ class AppConfig:
     """管理程序配置、窗口状态和搜索历史。"""
 
     def __init__(self):
-        # 区分源码运行和安装版的数据保存位置
+        # 源码运行时使用项目目录；打包后的程序使用用户数据目录。
         self.app_root = Path(__file__).parent.resolve()
-        self.mark_file = self.app_root / "install.mark"
-        self.is_install_version = self.mark_file.exists()
-        if self.is_install_version:
+        self.is_frozen = bool(getattr(sys, "frozen", False))
+
+        if self.is_frozen:
             if sys.platform == "win32":
                 base = Path(os.environ.get("APPDATA", str(Path.home())))
             else:
@@ -23,6 +23,7 @@ class AppConfig:
             self.data_dir = base / "bible_projection"
         else:
             self.data_dir = self.app_root
+
         self.ini_path = self.data_dir / "config.ini"
         self.parser = ConfigParser()
         self._ensure_data_dir()
@@ -45,6 +46,7 @@ class AppConfig:
             self.parser.read(self.ini_path, encoding="utf-8")
             if "Display" not in self.parser:
                 self._fill_default_config()
+                self._save_ini()
             elif "verse_segmentation" not in self.parser["Display"]:
                 self.parser["Display"]["verse_segmentation"] = "False"
                 self._save_ini()
