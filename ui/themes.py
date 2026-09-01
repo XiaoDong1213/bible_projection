@@ -313,6 +313,15 @@ QToolBar QComboBox QAbstractItemView {{
     color: {t['text_muted']};
     font-size: 12px;
 }}
+#navPanel QLabel#fieldLabel {{
+    font-size: 11px;
+    color: {t['text_muted']};
+}}
+#navPanel QLabel#rowTitle {{
+    font-size: 12px;
+    color: {t['text']};
+    font-weight: 600;
+}}
 #bookGrid, #bookGridInner {{
     background: {t['surface_raised']};
     border: none;
@@ -325,7 +334,7 @@ QToolBar QComboBox QAbstractItemView {{
     padding: 8px 10px;
     font-size: 13px;
     text-align: center;
-    min-height: 36px;
+    min-height: 38px;
 }}
 #bookBtn:hover {{
     background: {t['control_hover']};
@@ -344,19 +353,19 @@ QTabWidget::pane {{
 }}
 QTabBar {{
     qproperty-drawBase: false;
-    min-height: 40px;
+    min-height: 42px;
     background: {t['surface']};
 }}
 QTabBar::tab {{
     background: transparent;
     color: {t['text_muted']};
-    padding: 10px 6px;
+    padding: 11px 6px;
     font-size: 12px;
     border: none;
     border-bottom: 2px solid transparent;
     margin: 0;
     min-width: 48px;
-    min-height: 34px;
+    min-height: 36px;
 }}
 QTabBar::tab:hover {{
     color: {t['text']};
@@ -481,14 +490,102 @@ QSpinBox::down-arrow {{
     background: {t['surface']};
     border-top: 1px solid {t['border']};
 }}
+#modeBar {{
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid {t['border']};
+}}
+#modeBtn {{
+    background: transparent;
+    color: {t['text_muted']};
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    padding: 6px 4px 8px 4px;
+    font-size: 12px;
+    min-height: 28px;
+}}
+#modeBtn:hover {{
+    color: {t['text']};
+    background: transparent;
+}}
+#modeBtn:checked {{
+    color: {t['accent']};
+    background: transparent;
+    border-bottom: 2px solid {t['accent']};
+    font-weight: 600;
+}}
+#modeBtn:focus {{
+    border-bottom: 2px solid {t['focus_ring']};
+}}
+#fieldLabel {{
+    color: {t['text_muted']};
+    font-size: 12px;
+    background: transparent;
+    padding: 0;
+}}
+#rowTitle {{
+    color: {t['text_muted']};
+    font-size: 12px;
+    font-weight: 600;
+    background: transparent;
+}}
+#navHint {{
+    color: {t['text_faint']};
+    font-size: 11px;
+    background: transparent;
+    padding: 0;
+}}
+#rangeBox QSpinBox#rangeSpin {{
+    background: {t['control']};
+    color: {t['text']};
+    border: 1px solid {t['border']};
+    border-radius: {r['sm']}px;
+    padding: 2px 4px;
+    min-height: 26px;
+    max-height: 28px;
+    font-size: 13px;
+}}
+#rangeBox QSpinBox#rangeSpin:focus {{
+    border-color: {t['focus_ring']};
+}}
+#rangeBox QSpinBox#rangeSpin::up-button,
+#rangeBox QSpinBox#rangeSpin::down-button {{
+    background: transparent;
+    border: none;
+    width: 14px;
+}}
+#rangeBox QSpinBox#rangeSpin::up-arrow {{
+    image: url({arrow_up});
+    width: 8px;
+    height: 5px;
+}}
+#rangeBox QSpinBox#rangeSpin::down-arrow {{
+    image: url({arrow_down_spin});
+    width: 8px;
+    height: 5px;
+}}
+#skipVerseEdit {{
+    background: {t['control']};
+    color: {t['text']};
+    border: 1px solid {t['border']};
+    border-radius: {r['sm']}px;
+    padding: 6px 10px;
+    font-size: 13px;
+    min-height: 28px;
+}}
+#skipVerseEdit:focus {{
+    border-color: {t['focus_ring']};
+}}
 #selectRangeBtn {{
     background: {t['accent']};
     color: #FFFFFF;
     border: none;
     border-radius: {r['sm']}px;
-    padding: 9px 12px;
+    padding: 8px 12px;
     font-weight: 600;
-    min-height: 32px;
+    font-size: 13px;
+    min-height: 34px;
 }}
 #selectRangeBtn:hover {{
     background: {t['accent_hover']};
@@ -497,12 +594,18 @@ QSpinBox::down-arrow {{
     background: {t['accent_pressed']};
 }}
 #segmentBtn {{
-    background: {t['control']};
+    background: transparent;
     color: {t['text_muted']};
     border: 1px solid {t['border']};
     border-radius: {r['sm']}px;
-    padding: 7px 10px;
-    text-align: left;
+    padding: 6px 8px;
+    text-align: center;
+    font-size: 12px;
+    min-height: 34px;
+}}
+#segmentBtn:hover {{
+    border-color: {t['border_strong']};
+    color: {t['text']};
 }}
 #segmentBtn:checked {{
     background: {t['accent_soft']};

@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 )
 
 from .search import BookMatcher, SearchParser, SearchState
+from .selection import ScriptureSelection
 from .themes import search_panel_style
 
 
@@ -39,10 +40,10 @@ class SearchLineEdit(QLineEdit):
 class SearchWidget(QWidget):
     """提供书卷、章节和节范围搜索。"""
 
-    search_triggered = pyqtSignal(tuple)
+    search_triggered = pyqtSignal(object)
     close_requested = pyqtSignal()
     ALLOWED = re.compile(r"[A-Za-z0-9 :：.．。\-]")
-    DEFAULT_HINT = "↑↓ 选择　·　Space 选择 / 下一段　·　Enter 确认　·　Esc 关闭"
+    DEFAULT_HINT = "↑↓ 选择　·　Space 下一段　·　Enter 确认　·　同章如 3:16-18（跨章/跳节请用左侧）"
 
     def __init__(self, db, parent=None, theme="dark"):
         super().__init__(parent)
@@ -66,7 +67,7 @@ class SearchWidget(QWidget):
         self.search_input = SearchLineEdit()
         self.search_input.setObjectName("searchInput")
         self.search_input.setMinimumHeight(48)
-        self.search_input.setPlaceholderText("输入书卷简拼、章节或节号")
+        self.search_input.setPlaceholderText("输入书卷简拼、章节或同章节号")
         self.search_input.setClearButtonEnabled(False)
         self.search_input.textEdited.connect(self._on_text_edited)
         self.search_input.special_key.connect(self._on_special_key)
@@ -123,12 +124,15 @@ class SearchWidget(QWidget):
             self.result_list.setFixedHeight(0)
         self.adjustSize()
 
-    def _set_text(self, text, converted=None):
+    def _set_text(self, text, converted=None, cursor=None):
         self.state.formatting = True
         try:
             value = str(text or "")
             self.search_input.setText(value)
-            self.search_input.setCursorPosition(len(value))
+            if cursor is None:
+                self.search_input.setCursorPosition(len(value))
+            else:
+                self.search_input.setCursorPosition(max(0, min(int(cursor), len(value))))
         finally:
             self.state.formatting = False
         if converted is not None:
@@ -244,40 +248,65 @@ class SearchWidget(QWidget):
         self._set_text(f"{self.state.selected_book} {chapter}:{verse}-")
         self._update_hint(f"请输入结束节　·　范围 {verse}–{maximum}")
 
-    def _delete_segment(self):
-        text = self.search_input.text()
+    def _delete_segment(self, key=Qt.Key.Key_Backspace):
+        """书卷名整段删除；其后内容逐字删除。"""
+        edit = self.search_input
+        text = edit.text()
+        pos = edit.cursorPosition()
         book = self.state.selected_book
+
         if not book:
-            self._set_text(text[:-1] if text else "")
+            new_text, new_pos = self._apply_char_delete(text, pos, key, edit)
+            self._set_text(new_text, cursor=new_pos)
             self._refresh_book_state(self.search_input.text())
             self.search_input.setFocus()
             return
+
         if not text.startswith(book):
             self._reset_book_search()
             return
 
-        suffix = text[len(book):]
-        patterns = [
-            (r"\s*(\d+)\s*[:.]\s*(\d+)\s*-\s*(\d+)\s*", lambda m: (f"{book} {m.group(1)}:{m.group(2)}-", "verse", True, "请输入结束节")),
-            (r"\s*(\d+)\s*[:.]\s*(\d+)\s*-\s*", lambda m: (f"{book} {m.group(1)}:{m.group(2)}", "verse", False, "请输入开始节　·　Space 生成节范围")),
-            (r"\s*(\d+)\s*[:.]\s*(\d+)\s*", lambda m: (f"{book} {m.group(1)}:", "verse", False, "请输入开始节　·　Space 生成节范围")),
-            (r"\s*(\d+)\s*[:.]\s*", lambda m: (f"{book} {m.group(1)}", "chapter", False, None)),
-            (r"\s*(\d+)\s*", lambda m: (book, "chapter", False, None)),
-        ]
-        for pattern, handler in patterns:
-            match = re.fullmatch(pattern, suffix)
-            if match:
-                value, stage, space_mode, hint = handler(match)
-                self._set_text(value)
-                self.state.stage = stage
-                self.state.space_mode = space_mode
-                self._refresh_selected(book, self._suffix())
-                if hint:
-                    self._update_hint(hint)
-                else:
-                    self._update_hint_for_stage()
-                return
-        self._reset_book_search()
+        book_end = len(book)
+        suffix = text[book_end:]
+
+        # 书卷后没有实质内容，或光标/选区碰到书卷名 → 整本删除
+        if not suffix.strip():
+            self._reset_book_search()
+            return
+        if edit.hasSelectedText() and edit.selectionStart() < book_end:
+            self._reset_book_search()
+            return
+        if key == Qt.Key.Key_Backspace and pos <= book_end and not edit.hasSelectedText():
+            self._reset_book_search()
+            return
+        if key == Qt.Key.Key_Delete and pos < book_end and not edit.hasSelectedText():
+            self._reset_book_search()
+            return
+
+        new_text, new_pos = self._apply_char_delete(text, pos, key, edit)
+        # 保护书卷前缀不被逐字拆掉
+        if not new_text.startswith(book):
+            self._reset_book_search()
+            return
+        self._set_text(new_text, converted=True, cursor=new_pos)
+        self._refresh_selected(book, new_text[len(book):])
+        self.search_input.setFocus()
+
+    @staticmethod
+    def _apply_char_delete(text, pos, key, edit):
+        if edit.hasSelectedText():
+            start = edit.selectionStart()
+            end = start + len(edit.selectedText())
+            return text[:start] + text[end:], start
+        if key == Qt.Key.Key_Backspace:
+            if pos <= 0:
+                return text, pos
+            return text[: pos - 1] + text[pos:], pos - 1
+        if key == Qt.Key.Key_Delete:
+            if pos >= len(text):
+                return text, pos
+            return text[:pos] + text[pos + 1 :], pos
+        return text, pos
 
     def _reset_book_search(self):
         self._set_text("")
@@ -343,7 +372,7 @@ class SearchWidget(QWidget):
             elif self.state.stage == "verse" and self.state.selected_book:
                 self._space_after_verse()
         elif key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
-            self._delete_segment()
+            self._delete_segment(key)
 
     def _on_text_edited(self, text):
         if self.state.formatting:
@@ -374,9 +403,36 @@ class SearchWidget(QWidget):
             self._resize_result_area()
             self._update_hint_for_stage()
             return
+
+        if re.search(r"-\s*$", value):
+            self._update_hint("请输入结束节，例如 3:16-18")
+            self._resize_result_area()
+            return
+
+        selection = self.parser.parse_suffix(
+            book, value, self._chapter_count, self._verse_count
+        )
+        if selection:
+            self._add_selection_item(selection)
+            if selection.primary_start == 1 and selection.is_simple:
+                span = selection.spans[0]
+                # 整章：start=1 且 end=max 时提示整章；单节 1 也是 start==end
+                if span.start == span.end:
+                    self._update_hint("Enter 确认投影")
+                elif ":" not in value and "." not in value:
+                    self._update_hint(f"{book} 第 {span.chapter} 章　·　Enter 确认整章")
+                else:
+                    self._update_hint("Enter 确认投影")
+            else:
+                self._update_hint("Enter 确认投影")
+            return
+
         match = self.parser.parse_reference(value)
         if not match:
+            self._update_hint("同章格式：章　或　章:节　或　章:节-节（跨章/跳节用左侧）")
+            self._resize_result_area()
             return
+
         chapter_text, verse_text, end_text = match
         chapter = int(chapter_text)
         max_chapter = self._chapter_count(book)
@@ -384,7 +440,12 @@ class SearchWidget(QWidget):
             self._update_hint(f"章节超出范围　·　本书最多 {max_chapter} 章")
             return
         if verse_text is None:
-            self._add_reference_item(book, chapter, None, None, f"{book}    第 {chapter} 章")
+            max_v = self._verse_count(book, chapter)
+            selection = ScriptureSelection.single_chapter(
+                book, chapter, 1, max_v, max_verse=max_v
+            )
+            self._add_selection_item(selection)
+            self._update_hint(f"{book} 第 {chapter} 章　·　Enter 确认整章")
             return
         verse = int(verse_text)
         max_verse = self._verse_count(book, chapter)
@@ -392,13 +453,9 @@ class SearchWidget(QWidget):
             self._update_hint(f"第 {chapter} 章最多 {max_verse} 节")
             return
         if end_text is None:
-            if "-" in value:
-                self._update_hint(f"请输入结束节　·　范围 {verse}–{max_verse}")
-                return
-            self._add_reference_item(book, chapter, verse, verse, f"{book}    {chapter}:{verse}")
-            return
-        if end_text == "":
-            self._update_hint(f"请输入结束节　·　范围 {verse}–{max_verse}")
+            selection = ScriptureSelection.single_chapter(book, chapter, verse, verse)
+            self._add_selection_item(selection)
+            self._update_hint("Enter 确认投影")
             return
         end = int(end_text)
         if end < verse:
@@ -407,11 +464,13 @@ class SearchWidget(QWidget):
         if end > max_verse:
             self._update_hint(f"本章最多 {max_verse} 节，不能输入 {end}")
             return
-        self._add_reference_item(book, chapter, verse, end, f"{book}    {chapter}:{verse}-{end}")
+        selection = ScriptureSelection.single_chapter(book, chapter, verse, end)
+        self._add_selection_item(selection)
+        self._update_hint("Enter 确认投影")
 
-    def _add_reference_item(self, book, chapter, verse, end, label):
-        item = QListWidgetItem(f"01    {label}")
-        item.setData(Qt.ItemDataRole.UserRole, (book, chapter, verse, end))
+    def _add_selection_item(self, selection: ScriptureSelection):
+        item = QListWidgetItem(f"01    {selection.label()}")
+        item.setData(Qt.ItemDataRole.UserRole, selection)
         self.result_list.addItem(item)
         self.result_list.setCurrentRow(0)
         self._resize_result_area()
@@ -423,14 +482,20 @@ class SearchWidget(QWidget):
             self.matcher.exact,
             self._chapter_count,
             self._verse_count,
+            book_names=self.db.book_names,
         )
 
     def _on_item_clicked(self, item):
         data = item.data(Qt.ItemDataRole.UserRole)
         if not data:
             return
-        if isinstance(data, tuple) and len(data) == 4 and data[2] is not None:
+        if isinstance(data, ScriptureSelection):
             self.search_triggered.emit(data)
+            self.close_requested.emit()
+            return
+        if isinstance(data, tuple) and len(data) == 4 and data[2] is not None:
+            selection = ScriptureSelection.from_legacy(*data)
+            self.search_triggered.emit(selection)
             self.close_requested.emit()
             return
         book = data[0] if isinstance(data, tuple) else data
@@ -448,7 +513,12 @@ class SearchWidget(QWidget):
             elif self.state.stage == "book" and self.result_list.count():
                 self._select_current_book()
             else:
-                self._update_hint("请输入有效的书卷、章节或节范围")
+                current = self.result_list.currentItem()
+                if current and isinstance(current.data(Qt.ItemDataRole.UserRole), ScriptureSelection):
+                    self.search_triggered.emit(current.data(Qt.ItemDataRole.UserRole))
+                    self.close_requested.emit()
+                else:
+                    self._update_hint("请输入有效的书卷或同章节范围（跨章/跳节用左侧）")
         finally:
             self.state.confirming = False
 
