@@ -47,6 +47,18 @@ class ExtensionWindow(QWidget):
         self.scripture_display.set_scripture(book_name, chapter, start, end, verses)
         self.force_sync_scroll()
 
+    def update_from_selection(self, selection, verses):
+        """按多段选择更新副屏。"""
+        self.current_data = (
+            selection.book,
+            selection.primary_chapter,
+            selection.primary_start,
+            selection.primary_end,
+            list(verses or []),
+        )
+        self.scripture_display.set_from_selection(selection, verses)
+        self.force_sync_scroll()
+
     def apply_settings(self, settings):
         """应用经文显示设置。"""
         self.scripture_display.apply_settings(settings)
