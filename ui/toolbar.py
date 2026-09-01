@@ -15,6 +15,7 @@ class DisplaySettingsDialog(QDialog):
     def __init__(self, settings, parent=None):
         super().__init__(parent)
         self.setWindowTitle("显示设置")
+        self.setObjectName("settingsDialog")
         self.setMinimumSize(680, 560)
         self.resize(760, 620)
         self.settings = dict(settings)
@@ -42,7 +43,8 @@ class DisplaySettingsDialog(QDialog):
         # 一级标签页
         # =====================================================
         tabs = QTabWidget()
-        tabs.setDocumentMode(False)
+        tabs.setObjectName("settingsTabs")
+        tabs.setDocumentMode(True)
 
         # =====================================================
         # 文字设置：二级标签页
@@ -53,7 +55,8 @@ class DisplaySettingsDialog(QDialog):
         text_root.setSpacing(8)
 
         text_tabs = QTabWidget()
-        text_tabs.setDocumentMode(False)
+        text_tabs.setObjectName("settingsSubTabs")
+        text_tabs.setDocumentMode(True)
 
         # ---------- 正文 ----------
         body_page = QWidget()
@@ -223,7 +226,8 @@ class DisplaySettingsDialog(QDialog):
         button.setText(color.name())
         text = "black" if color.lightness() > 128 else "white"
         button.setStyleSheet(
-            f"background:{color.name()};color:{text};padding:6px 12px;border-radius:6px;border:1px solid rgba(0,0,0,0.15);"
+            f"background:{color.name()};color:{text};padding:8px 12px;"
+            f"border-radius:6px;border:1px solid rgba(127,127,127,0.35);font-weight:600;"
         )
 
     def _choose_color(self, key):
@@ -356,11 +360,13 @@ class ToolBarWidget(QToolBar):
         scroll_layout.addWidget(QLabel("滚动"))
         up = QPushButton("↑")
         up.setMinimumWidth(36)
+        up.setCursor(Qt.CursorShape.PointingHandCursor)
         up.setToolTip("向上滚动")
         up.clicked.connect(self.scroll_up)
         scroll_layout.addWidget(up)
         down = QPushButton("↓")
         down.setMinimumWidth(36)
+        down.setCursor(Qt.CursorShape.PointingHandCursor)
         down.setToolTip("向下滚动")
         down.clicked.connect(self.scroll_down)
         scroll_layout.addWidget(down)
@@ -391,11 +397,13 @@ class ToolBarWidget(QToolBar):
 
         self.settings_btn = QPushButton("显示设置")
         self.settings_btn.setObjectName("settingsBtn")
+        self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.settings_btn.clicked.connect(self._open_settings)
         self.addWidget(self.settings_btn)
 
         self.theme_btn = QPushButton("亮色")
         self.theme_btn.setObjectName("themeBtn")
+        self.theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.theme_btn.setToolTip("切换亮色 / 暗色主题")
         self.theme_btn.clicked.connect(self._toggle_theme)
         self.addWidget(self.theme_btn)

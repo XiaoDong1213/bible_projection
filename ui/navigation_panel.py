@@ -19,7 +19,7 @@ class EqualTabBar(QTabBar):
         self.setExpanding(True)
         self.setDrawBase(False)
         self.setElideMode(Qt.TextElideMode.ElideNone)
-        self.setMinimumHeight(36)
+        self.setMinimumHeight(40)
 
     def _available_width(self):
         width = self.width()
@@ -37,12 +37,12 @@ class EqualTabBar(QTabBar):
             width = max(hint.width(), 64)
         else:
             width = max(hint.width(), available // count)
-        height = max(hint.height(), 36)
+        height = max(hint.height(), 40)
         return QSize(width, height)
 
     def minimumTabSizeHint(self, index):
         hint = super().minimumTabSizeHint(index)
-        return QSize(max(hint.width(), 48), max(hint.height(), 36))
+        return QSize(max(hint.width(), 48), max(hint.height(), 40))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -67,7 +67,7 @@ class BookGridWidget(QScrollArea):
         self._container = QWidget()
         self._container.setObjectName("bookGridInner")
         self._grid = QGridLayout(self._container)
-        self._grid.setContentsMargins(10, 10, 10, 10)
+        self._grid.setContentsMargins(12, 12, 12, 12)
         self._grid.setHorizontalSpacing(8)
         self._grid.setVerticalSpacing(8)
         self.setWidget(self._container)
@@ -89,7 +89,7 @@ class BookGridWidget(QScrollArea):
             btn.setToolTip(book)
             btn.setProperty("bookName", book)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            btn.setMinimumHeight(38)
+            btn.setMinimumHeight(40)
             btn.clicked.connect(lambda checked=False, b=book: self._on_btn_clicked(b))
             row, col = divmod(index, self._columns)
             self._grid.addWidget(btn, row, col)
@@ -145,14 +145,15 @@ class NavigationPanel(QWidget):
 
         history_widget = QWidget()
         hl = QVBoxLayout(history_widget)
-        hl.setContentsMargins(8, 8, 8, 8)
-        hl.setSpacing(8)
+        hl.setContentsMargins(12, 12, 12, 12)
+        hl.setSpacing(10)
         self.history_list = HistoryListWidget()
         self.history_list.item_clicked.connect(self._on_history_clicked)
         self.history_list.item_deleted.connect(self._delete_history)
         hl.addWidget(self.history_list, 1)
         clear_btn = QPushButton("清空历史")
         clear_btn.setObjectName("clearHistoryBtn")
+        clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         clear_btn.clicked.connect(self._clear_history)
         hl.addWidget(clear_btn)
         self.tab_widget.addTab(history_widget, "历史")
@@ -161,8 +162,8 @@ class NavigationPanel(QWidget):
         bottom = QFrame()
         bottom.setObjectName("rangeBox")
         bottom_layout = QVBoxLayout(bottom)
-        bottom_layout.setContentsMargins(12, 10, 12, 12)
-        bottom_layout.setSpacing(10)
+        bottom_layout.setContentsMargins(14, 12, 14, 14)
+        bottom_layout.setSpacing(12)
 
         options_row = QHBoxLayout()
         options_row.setSpacing(8)
@@ -170,6 +171,7 @@ class NavigationPanel(QWidget):
         self.segment_btn = QPushButton("按节分段：关")
         self.segment_btn.setObjectName("segmentBtn")
         self.segment_btn.setCheckable(True)
+        self.segment_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.segment_btn.clicked.connect(self._on_segment_clicked)
         options_row.addWidget(self.segment_btn, 1)
         bottom_layout.addLayout(options_row)
@@ -195,6 +197,7 @@ class NavigationPanel(QWidget):
 
         self.select_btn = QPushButton("显示所选经文")
         self.select_btn.setObjectName("selectRangeBtn")
+        self.select_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.select_btn.clicked.connect(self._select_range)
         bottom_layout.addWidget(self.select_btn)
 

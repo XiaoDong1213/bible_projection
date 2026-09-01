@@ -12,7 +12,7 @@ from PyQt6.QtGui import QKeySequence, QShortcut
 from config import AppConfig
 from bible_database import BibleDatabase
 from ui import SearchWidget, NavigationPanel, ToolBarWidget, ExtensionWindow, PreviewHost
-from ui.themes import THEMES
+from ui.themes import build_stylesheet, theme_tokens
 
 
 class MainWindow(QMainWindow):
@@ -30,7 +30,7 @@ class MainWindow(QMainWindow):
         self.settings = config.load_display_settings()
         self.theme = self.settings.get("theme", "dark")
         self._last_speed = 3
-        self.setWindowTitle("圣经投影系统")
+        self.setWindowTitle("Bible Pro")
         self.setMinimumSize(800, 600)
 
         geometry = config.load_window_state()
@@ -39,11 +39,11 @@ class MainWindow(QMainWindow):
         else:
             self.resize(1200, 800)
 
-        self._load_theme_style()
         self._create_central_widget()
         self._create_toolbar()
         self._create_shortcuts()
         self._create_statusbar()
+        self._load_theme_style()
         self.nav_panel.load_history(config.load_history())
         self.nav_panel.history_changed.connect(self._save_history)
         self._apply_settings(self.settings)
@@ -56,28 +56,20 @@ class MainWindow(QMainWindow):
         self.config.save_history(h)
 
     def _load_theme_style(self):
-        # 按源码目录定位 QSS，不依赖启动时的 cwd
-        p = Path(__file__).resolve().parent / "styles" / f"{self.theme}.qss"
+        # 单一令牌源：themes.py 生成整表，写入 styles 便于打包查看
+        styles_dir = Path(__file__).resolve().parent / "styles"
+        sheet = build_stylesheet(self.theme, styles_dir)
+        try:
+            (styles_dir / f"{self.theme}.qss").write_text(sheet, encoding="utf-8")
+        except OSError:
+            pass
         app = QApplication.instance()
-        if p.exists():
-            with open(p, "r", encoding="utf-8") as f:
-                app.setStyleSheet(f.read())
-            return
-        # QSS 缺失时用 themes.py 兜底，保证 THEMES 真正参与渲染
-        t = THEMES.get(self.theme, THEMES["dark"])
-        app.setStyleSheet(
-            f"""
-            QMainWindow {{ background: {t.get('window_bg', t['panel_bg'])}; color: {t['text_primary']}; }}
-            QStatusBar {{ background: {t['toolbar_bg']}; color: {t['text_secondary']}; }}
-            QToolBar {{ background: {t['toolbar_bg']}; border: none; spacing: 8px; padding: 8px 12px; }}
-            QToolBar QPushButton {{ background: {t['item_bg']}; color: {t['text_primary']}; border-radius: 6px; padding: 7px 12px; }}
-            #extendBtn {{ background: {t['accent']}; color: white; }}
-            QLabel {{ color: {t['text_secondary']}; font-size: 12px; }}
-            QListWidget {{ background: {t['panel_bg']}; color: {t['text_primary']}; border: none; }}
-            QListWidget::item:selected {{ background: {t['accent']}; color: white; }}
-            QTabWidget::pane {{ background: {t['panel_bg']}; border: none; }}
-            """
-        )
+        app.setStyleSheet(sheet)
+        tokens = theme_tokens(self.theme)
+        if hasattr(self, "preview_host"):
+            self.preview_host.apply_theme(tokens)
+        if hasattr(self, "search_widget") and self.search_widget is not None:
+            self.search_widget.apply_theme(self.theme)
 
     def _create_toolbar(self):
         self.toolbar = ToolBarWidget()
@@ -195,10 +187,10 @@ class MainWindow(QMainWindow):
         if hasattr(self, "search_widget") and self.search_widget.isVisible():
             self.search_widget.close()
             return
-        self.search_widget = SearchWidget(self.db, self)
+        self.search_widget = SearchWidget(self.db, self, theme=self.theme)
         self.search_widget.search_triggered.connect(self._on_search_result)
         self.search_widget.close_requested.connect(self._close_search)
-        self.search_widget.move(self.mapToGlobal(QPoint(self.width() // 2 - 180, 80)))
+        self.search_widget.move(self.mapToGlobal(QPoint(self.width() // 2 - 330, 72)))
         self.search_widget.show()
         self.search_widget.search_input.setFocus()
 

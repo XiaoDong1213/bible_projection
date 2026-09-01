@@ -301,11 +301,11 @@ class ScriptureDisplay(QWidget):
         )
         if self.verse_segmentation:
             html += "".join(
-        f"<p style='margin:0 0 {self._px(1)}px 0;padding:0;"
-        f"text-align:justify;line-height:{self.line_spacing}%;'>"
-        f"{self._verse_html(n, t)}</p>"
-        for n, t in self.verses
-    )
+                f"<p style='margin:0 0 {self._px(1)}px 0;padding:0;"
+                f"text-align:justify;line-height:{self.line_spacing}%;'>"
+                f"{self._verse_html(n, t)}</p>"
+                for n, t in self.verses
+            )
         else:
             html += (
                 "<p style='margin:0;padding:0;white-space:normal;text-align:justify;'>"
