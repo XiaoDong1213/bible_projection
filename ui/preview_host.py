@@ -1,8 +1,9 @@
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QGraphicsView, QGraphicsScene, QFrame
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QPainter
+from PyQt6.QtGui import QPainter, QColor, QBrush
 
 from .scripture_display import ScriptureDisplay
+from .themes import theme_tokens
 
 
 class PreviewHost(QWidget):
@@ -31,16 +32,27 @@ class PreviewHost(QWidget):
         self.view.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.view.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.view.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
-        self.view.setStyleSheet("QGraphicsView#previewView { background: #0B0D10; border: none; }")
 
         self.scene = QGraphicsScene(self)
-        self.scene.setBackgroundBrush(Qt.GlobalColor.black)
         self.view.setScene(self.scene)
 
         self.display = ScriptureDisplay()
         self.proxy = self.scene.addWidget(self.display)
         layout.addWidget(self.view)
+        self.apply_theme(theme_tokens("dark"))
         QTimer.singleShot(0, self._fit_view)
+
+    def apply_theme(self, tokens):
+        """预览区背景跟随控制台主题，舞台内容仍由经文设置决定。"""
+        if isinstance(tokens, str):
+            tokens = theme_tokens(tokens)
+        bg = tokens.get("preview_bg", "#07090D")
+        canvas = tokens.get("canvas", bg)
+        self.setStyleSheet(
+            f"#previewHost {{ background: {canvas}; }}"
+            f"QGraphicsView#previewView {{ background: {bg}; border: none; }}"
+        )
+        self.scene.setBackgroundBrush(QBrush(QColor(bg)))
 
     def set_stage_size(self, width, height):
         """设置预览舞台尺寸。"""

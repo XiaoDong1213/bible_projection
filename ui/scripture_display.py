@@ -152,6 +152,7 @@ class ScriptureDisplay(QWidget):
         self._title_text = ""
         self.verses = []
         self.verse_segmentation = False
+        self._show_chapter_nums = False
         self._reference_size = None
         self._design_height = 1080
         self.scroll_timer = QTimer(self)
@@ -232,19 +233,44 @@ class ScriptureDisplay(QWidget):
             self.text_display._fit_text_width()
             self.text_display.update()
 
-    def set_scripture(self, book_name, chapter, start_verse, end_verse, verses):
+    def set_scripture(self, book_name, chapter, start_verse, end_verse, verses, title=None, show_chapter_nums=False):
         self.verses = list(verses or [])
-        unit = "篇" if book_name == "诗篇" else "章"
-        if start_verse is None:
-            title = f"{book_name}{chapter}{unit}"
-        elif end_verse is None:
-            title = f"{book_name}{chapter}{unit}{start_verse}-末节"
-        elif start_verse == end_verse:
-            title = f"{book_name}{chapter}{unit}{start_verse}节"
+        self._show_chapter_nums = bool(show_chapter_nums)
+        if title:
+            self._set_adaptive_title(title)
         else:
-            title = f"{book_name}{chapter}{unit}{start_verse}-{end_verse}节"
-        self._set_adaptive_title(title)
+            unit = "篇" if book_name == "诗篇" else "章"
+            if start_verse is None:
+                title_text = f"{book_name}{chapter}{unit}"
+            elif end_verse is None:
+                title_text = f"{book_name}{chapter}{unit}{start_verse}-末节"
+            elif start_verse == end_verse:
+                title_text = f"{book_name}{chapter}{unit}{start_verse}节"
+            else:
+                title_text = f"{book_name}{chapter}{unit}{start_verse}-{end_verse}节"
+            self._set_adaptive_title(title_text)
         self._render_scripture()
+        self.set_scroll_position(0)
+        self.update()
+
+    def set_from_selection(self, selection, verses):
+        """按 ScriptureSelection 更新标题与经文。"""
+        self.set_scripture(
+            selection.book,
+            selection.primary_chapter,
+            selection.primary_start,
+            selection.primary_end,
+            verses,
+            title=selection.title(),
+            show_chapter_nums=selection.is_multi_chapter,
+        )
+
+    def clear_scripture(self):
+        """清空标题与经文内容。"""
+        self.verses = []
+        self._show_chapter_nums = False
+        self._set_adaptive_title("")
+        self.text_display.set_html("")
         self.set_scroll_position(0)
         self.update()
 
@@ -280,13 +306,22 @@ class ScriptureDisplay(QWidget):
             self._render_scripture()
             self.set_scroll_fraction(old)
 
-    def _verse_html(self, n, t):
+    def _verse_row(self, row):
+        """兼容 (verse, text) 与 (chapter, verse, text)。"""
+        if row is None:
+            return None, None, ""
+        if len(row) >= 3:
+            return row[0], row[1], row[2]
+        return None, row[0], row[1]
+
+    def _verse_html(self, chapter, n, t):
         safe = str(t).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         vn = self._px(self.verse_num_size)
         fs = self._px(self.font_size)
+        label = f"{chapter}:{n}" if getattr(self, "_show_chapter_nums", False) and chapter is not None else str(n)
         return (
             f'<span style="color:{self.verse_num_color.name()};font-size:{vn}px;'
-            f'font-family:&quot;{self.verse_num_font_family}&quot;;font-weight:bold;vertical-align:super;">{n}</span>'
+            f'font-family:&quot;{self.verse_num_font_family}&quot;;font-weight:bold;vertical-align:super;">{label}</span>'
             f'&nbsp;<span style="color:{self.font_color.name()};font-size:{fs}px;'
             f'font-family:&quot;{self.font_family}&quot;;">{safe}</span>'
         )
@@ -299,17 +334,18 @@ class ScriptureDisplay(QWidget):
             f"<div style='padding-top:{top}px;padding-bottom:{bottom}px;margin:0;"
             f"line-height:{self.line_spacing}%;text-align:justify;'>"
         )
+        rows = [self._verse_row(row) for row in self.verses]
         if self.verse_segmentation:
             html += "".join(
-        f"<p style='margin:0 0 {self._px(1)}px 0;padding:0;"
-        f"text-align:justify;line-height:{self.line_spacing}%;'>"
-        f"{self._verse_html(n, t)}</p>"
-        for n, t in self.verses
-    )
+                f"<p style='margin:0 0 {self._px(1)}px 0;padding:0;"
+                f"text-align:justify;line-height:{self.line_spacing}%;'>"
+                f"{self._verse_html(ch, n, t)}</p>"
+                for ch, n, t in rows
+            )
         else:
             html += (
                 "<p style='margin:0;padding:0;white-space:normal;text-align:justify;'>"
-                + " ".join(self._verse_html(n, t) for n, t in self.verses)
+                + " ".join(self._verse_html(ch, n, t) for ch, n, t in rows)
                 + "</p>"
             )
         self.text_display.set_html(html + "</div>")

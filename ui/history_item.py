@@ -16,14 +16,14 @@ class HistoryItemWidget(QWidget):
         self.index = index
         self.setObjectName("historyItem")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setMinimumHeight(40)
+        self.setMinimumHeight(44)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setProperty("selected", False)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 6, 8, 6)
-        layout.setSpacing(8)
+        layout.setContentsMargins(12, 8, 10, 8)
+        layout.setSpacing(10)
 
         self.label = QLabel(text)
         self.label.setObjectName("historyText")
@@ -88,7 +88,7 @@ class HistoryListWidget(QScrollArea):
         self._container.setObjectName("historyListInner")
         self._layout = QVBoxLayout(self._container)
         self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.setSpacing(4)
+        self._layout.setSpacing(8)
         self._layout.addStretch(1)
         self.setWidget(self._container)
 
