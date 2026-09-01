@@ -13,6 +13,7 @@ from config import AppConfig
 from bible_database import BibleDatabase
 from ui import SearchWidget, NavigationPanel, ToolBarWidget, ExtensionWindow, PreviewHost
 from ui.themes import build_stylesheet, theme_tokens
+from ui.selection import ScriptureSelection
 
 
 class MainWindow(QMainWindow):
@@ -26,6 +27,7 @@ class MainWindow(QMainWindow):
         self.current_chapter = None
         self.current_start = None
         self.current_end = None
+        self.current_selection = None
         self.verses = []
         self.settings = config.load_display_settings()
         self.theme = self.settings.get("theme", "dark")
@@ -83,6 +85,7 @@ class MainWindow(QMainWindow):
         self.toolbar.topmost_toggled.connect(self._toggle_extension_topmost)
         self.toolbar.scroll_up.connect(lambda: self._scroll_manual(-40))
         self.toolbar.scroll_down.connect(lambda: self._scroll_manual(40))
+        self.toolbar.clear_requested.connect(self._clear_display)
         self.scripture_display.scroll_changed.connect(self._sync_extension_scroll)
         self.scripture_display.scroll_finished.connect(self._on_scroll_finished)
 
@@ -198,18 +201,21 @@ class MainWindow(QMainWindow):
         if hasattr(self, "search_widget"):
             self.search_widget.close()
 
-    def _on_search_result(self, p):
-        b, c, s, e = p
-        self._load_scripture(b, c, s, e)
-        self.nav_panel.add_to_history(b, c, self.current_start, self.current_end)
-        self.nav_panel.sync_selection(b, c, self.current_start, self.current_end)
+    def _on_search_result(self, selection):
+        selection = self._coerce_selection(selection)
+        if selection is None:
+            return
+        self._load_selection(selection)
+        self.nav_panel.add_selection_to_history(selection)
+        self.nav_panel.sync_from_selection(selection)
         self._close_search()
 
     def _on_book_selected(self, b, c):
-        self._load_scripture(b, c, None, None)
-        # 历史与投影一致：整章
-        self.nav_panel.add_to_history(b, c, self.current_start, self.current_end)
-        self.nav_panel.sync_selection(b, c, self.current_start, self.current_end)
+        max_v = self.db.get_verse_count(b, c)
+        selection = ScriptureSelection.single_chapter(b, c, 1, max_v, max_verse=max_v)
+        self._load_selection(selection)
+        self.nav_panel.add_selection_to_history(selection)
+        self.nav_panel.sync_from_selection(selection)
 
     def _on_verse_segmentation_changed(self, e):
         enabled = bool(e)
@@ -222,41 +228,78 @@ class MainWindow(QMainWindow):
         self._sync_extension_scroll()
         self.config.save_display_settings({"verse_segmentation": enabled})
 
-    def _on_range_selected(self, b, c, s, e):
-        self._load_scripture(b, c, s, e)
-        self.nav_panel.add_to_history(b, c, self.current_start, self.current_end)
+    def _on_range_selected(self, selection):
+        selection = self._coerce_selection(selection)
+        if selection is None:
+            return
+        self._load_selection(selection)
+        self.nav_panel.add_selection_to_history(selection)
 
-    def _on_history_opened(self, b, c, s, e):
+    def _on_history_opened(self, selection):
+        selection = self._coerce_selection(selection)
+        if selection is None:
+            return
         # 从历史点开：只投影，不重排历史
-        self._load_scripture(b, c, s, e)
+        self._load_selection(selection)
+
+    @staticmethod
+    def _coerce_selection(value):
+        if isinstance(value, ScriptureSelection):
+            return value
+        if isinstance(value, (list, tuple)) and len(value) == 4:
+            return ScriptureSelection.from_legacy(*value)
+        if isinstance(value, dict):
+            return ScriptureSelection.from_history_entry(value)
+        return None
 
     def _load_scripture(self, b, c, s, e):
-        self.current_book = b
-        self.current_chapter = c
+        """兼容旧调用：单章范围。"""
+        max_v = self.db.get_verse_count(b, c)
         if s is None:
-            v = self.db.get_verse_range(b, c, 1)
-            self.current_start = 1
-            self.current_end = v[-1][0] if v else 0
+            selection = ScriptureSelection.single_chapter(b, c, 1, max_v, max_verse=max_v)
         else:
-            v = self.db.get_verse_range(b, c, s, e)
-            self.current_start = s
-            self.current_end = (v[-1][0] if v else 0) if e is None else e
-        self.verses = v
-        self.scripture_display.set_scripture(b, c, self.current_start, self.current_end, v)
+            end = max_v if e is None else e
+            selection = ScriptureSelection.single_chapter(b, c, s, end, max_verse=max_v)
+        self._load_selection(selection)
+
+    def _load_selection(self, selection: ScriptureSelection):
+        self.current_selection = selection
+        self.current_book = selection.book
+        self.current_chapter = selection.primary_chapter
+        self.current_start = selection.primary_start
+        self.current_end = selection.primary_end
+        self.verses = self.db.get_selection_verses(selection)
+        self.scripture_display.set_from_selection(selection, self.verses)
         if self.extension_window and self.extension_window.isVisible():
             QApplication.processEvents()
-            self.extension_window.update_scripture(b, c, self.current_start, self.current_end, v)
+            self.extension_window.update_from_selection(selection, self.verses)
             QApplication.processEvents()
             self._sync_extension_scroll()
         self._update_status()
 
     def _update_status(self):
-        if self.current_book:
+        if self.current_selection is not None:
+            self.status_label.setText(self.current_selection.label())
+        elif self.current_book:
             self.status_label.setText(
                 f"{self.current_book} {self.current_chapter}:{self.current_start}-{self.current_end}"
             )
         else:
             self.status_label.setText("按回车键打开搜索")
+
+    def _clear_display(self):
+        """清空预览与扩展屏经文。"""
+        self.toolbar._set_speed(0)
+        self.current_selection = None
+        self.current_book = None
+        self.current_chapter = 1
+        self.current_start = 1
+        self.current_end = 1
+        self.verses = []
+        self.scripture_display.clear_scripture()
+        if self.extension_window:
+            self.extension_window.scripture_display.clear_scripture()
+        self.status_label.setText("已清屏")
 
     def _toggle_extension(self):
         if self.extension_window and self.extension_window.isVisible():
@@ -303,7 +346,11 @@ class MainWindow(QMainWindow):
         self.extension_window.scripture_display.set_stage_size(stage_w, stage_h)
         self.extension_window.setGeometry(geom)
         self.extension_window.showFullScreen()
-        if self.verses:
+        if self.verses and self.current_selection is not None:
+            self.extension_window.update_from_selection(
+                self.current_selection, self.verses
+            )
+        elif self.verses:
             self.extension_window.update_scripture(
                 self.current_book, self.current_chapter, self.current_start, self.current_end, self.verses
             )
@@ -343,53 +390,90 @@ class MainWindow(QMainWindow):
             self.toolbar._set_speed(getattr(self, "_last_speed", 3))
 
     def _add_verse_end(self):
-        if not self.verses:
+        selection = self._simple_selection_or_none()
+        if selection is None:
             return
-        max_v = self.db.get_verse_count(self.current_book, self.current_chapter)
-        if self.current_end < max_v:
-            self.current_end += 1
-            self.verses = self.db.get_verse_range(
-                self.current_book, self.current_chapter, self.current_start, self.current_end
+        span = selection.spans[0]
+        max_v = self.db.get_verse_count(selection.book, span.chapter)
+        if span.end >= max_v:
+            return
+        self._load_selection(
+            ScriptureSelection.single_chapter(
+                selection.book, span.chapter, span.start, span.end + 1
             )
-            self._refresh_display()
+        )
+        self.nav_panel.sync_from_selection(self.current_selection)
 
     def _remove_verse_end(self):
-        if not self.verses or self.current_end <= self.current_start:
+        selection = self._simple_selection_or_none()
+        if selection is None:
             return
-        self.current_end -= 1
-        self.verses = self.db.get_verse_range(
-            self.current_book, self.current_chapter, self.current_start, self.current_end
+        span = selection.spans[0]
+        if span.end <= span.start:
+            return
+        self._load_selection(
+            ScriptureSelection.single_chapter(
+                selection.book, span.chapter, span.start, span.end - 1
+            )
         )
-        self._refresh_display()
+        self.nav_panel.sync_from_selection(self.current_selection)
 
     def _add_verse_start(self):
-        if not self.verses or self.current_start <= 1:
+        selection = self._simple_selection_or_none()
+        if selection is None:
             return
-        self.current_start -= 1
-        self.verses = self.db.get_verse_range(
-            self.current_book, self.current_chapter, self.current_start, self.current_end
+        span = selection.spans[0]
+        if span.start <= 1:
+            return
+        self._load_selection(
+            ScriptureSelection.single_chapter(
+                selection.book, span.chapter, span.start - 1, span.end
+            )
         )
-        self._refresh_display()
+        self.nav_panel.sync_from_selection(self.current_selection)
 
     def _remove_verse_start(self):
-        if not self.verses or self.current_start >= self.current_end:
+        selection = self._simple_selection_or_none()
+        if selection is None:
             return
-        self.current_start += 1
-        self.verses = self.db.get_verse_range(
-            self.current_book, self.current_chapter, self.current_start, self.current_end
+        span = selection.spans[0]
+        if span.start >= span.end:
+            return
+        self._load_selection(
+            ScriptureSelection.single_chapter(
+                selection.book, span.chapter, span.start + 1, span.end
+            )
         )
-        self._refresh_display()
+        self.nav_panel.sync_from_selection(self.current_selection)
+
+    def _simple_selection_or_none(self):
+        """扩缩节快捷键仅作用于单章单段；跨章/跳节时提示。"""
+        if self.current_selection is None or not self.verses:
+            return None
+        if not self.current_selection.is_simple:
+            self.status_label.setText("跨章或跳节选择请用搜索调整范围")
+            return None
+        return self.current_selection
 
     def _refresh_display(self):
-        self.scripture_display.set_scripture(
-            self.current_book, self.current_chapter, self.current_start, self.current_end, self.verses
-        )
-        if self.extension_window and self.extension_window.isVisible():
-            self.extension_window.update_scripture(
+        if self.current_selection is not None:
+            self.scripture_display.set_from_selection(self.current_selection, self.verses)
+            if self.extension_window and self.extension_window.isVisible():
+                self.extension_window.update_from_selection(
+                    self.current_selection, self.verses
+                )
+                QApplication.processEvents()
+                self._sync_extension_scroll()
+        else:
+            self.scripture_display.set_scripture(
                 self.current_book, self.current_chapter, self.current_start, self.current_end, self.verses
             )
-            QApplication.processEvents()
-            self._sync_extension_scroll()
+            if self.extension_window and self.extension_window.isVisible():
+                self.extension_window.update_scripture(
+                    self.current_book, self.current_chapter, self.current_start, self.current_end, self.verses
+                )
+                QApplication.processEvents()
+                self._sync_extension_scroll()
         self._update_status()
 
     def _sync_extension_scroll(self, value=None):

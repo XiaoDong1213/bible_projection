@@ -186,6 +186,16 @@ class BibleDatabase:
         sql += f" ORDER BY {self._quote(self.verse_col)}"
         return [(int(r["verse"]), str(r["text"])) for r in self.conn.execute(sql, params).fetchall()]
 
+    def get_selection_verses(self, selection):
+        """按多段选择查询经文，返回 (chapter, verse, text) 列表。"""
+        rows = []
+        for span in selection.spans:
+            for verse, text in self.get_verses(
+                selection.book, span.chapter, span.start, span.end
+            ):
+                rows.append((span.chapter, verse, text))
+        return rows
+
     def get_verse_range(self, book_name, chapter, start_verse=1, end_verse=None):
         """查询连续节范围。"""
         return self.get_verses(book_name, chapter, start_verse, end_verse)

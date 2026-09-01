@@ -323,6 +323,7 @@ class ToolBarWidget(QToolBar):
     topmost_toggled = pyqtSignal(bool)
     scroll_up = pyqtSignal()
     scroll_down = pyqtSignal()
+    clear_requested = pyqtSignal()
 
     SPEED_LABELS = ["暂停"] + [f"{i}档" for i in range(1, 10)]
 
@@ -350,6 +351,13 @@ class ToolBarWidget(QToolBar):
         self.topmost_btn.setToolTip("扩展窗口始终置顶")
         self.topmost_btn.toggled.connect(self.topmost_toggled)
         self.addWidget(self.topmost_btn)
+
+        self.clear_btn = QPushButton("清屏")
+        self.clear_btn.setObjectName("clearBtn")
+        self.clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_btn.setToolTip("清空预览与扩展屏经文")
+        self.clear_btn.clicked.connect(self.clear_requested)
+        self.addWidget(self.clear_btn)
 
         self.addSeparator()
 

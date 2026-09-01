@@ -128,6 +128,15 @@ QToolBar QComboBox QAbstractItemView {
     color: #475569;
     font-size: 12px;
 }
+#navPanel QLabel#fieldLabel {
+    font-size: 11px;
+    color: #475569;
+}
+#navPanel QLabel#rowTitle {
+    font-size: 12px;
+    color: #0F172A;
+    font-weight: 600;
+}
 #bookGrid, #bookGridInner {
     background: #FFFFFF;
     border: none;
@@ -140,7 +149,7 @@ QToolBar QComboBox QAbstractItemView {
     padding: 8px 10px;
     font-size: 13px;
     text-align: center;
-    min-height: 36px;
+    min-height: 38px;
 }
 #bookBtn:hover {
     background: #E5EAF1;
@@ -159,19 +168,19 @@ QTabWidget::pane {
 }
 QTabBar {
     qproperty-drawBase: false;
-    min-height: 40px;
+    min-height: 42px;
     background: #FFFFFF;
 }
 QTabBar::tab {
     background: transparent;
     color: #475569;
-    padding: 10px 6px;
+    padding: 11px 6px;
     font-size: 12px;
     border: none;
     border-bottom: 2px solid transparent;
     margin: 0;
     min-width: 48px;
-    min-height: 34px;
+    min-height: 36px;
 }
 QTabBar::tab:hover {
     color: #0F172A;
@@ -282,12 +291,12 @@ QSpinBox::up-button:hover, QSpinBox::down-button:hover {
     background: #B8C2D0;
 }
 QSpinBox::up-arrow {
-    image: url(F:/Project/bible_projection/styles/arrow-up-light.svg);
+    image: url(styles/arrow-up-light.svg);
     width: 10px;
     height: 6px;
 }
 QSpinBox::down-arrow {
-    image: url(F:/Project/bible_projection/styles/arrow-down-spin-light.svg);
+    image: url(styles/arrow-down-spin-light.svg);
     width: 10px;
     height: 6px;
 }
@@ -296,14 +305,102 @@ QSpinBox::down-arrow {
     background: #FFFFFF;
     border-top: 1px solid #D5DCE6;
 }
+#modeBar {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid #D5DCE6;
+}
+#modeBtn {
+    background: transparent;
+    color: #475569;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    padding: 6px 4px 8px 4px;
+    font-size: 12px;
+    min-height: 28px;
+}
+#modeBtn:hover {
+    color: #0F172A;
+    background: transparent;
+}
+#modeBtn:checked {
+    color: #2563EB;
+    background: transparent;
+    border-bottom: 2px solid #2563EB;
+    font-weight: 600;
+}
+#modeBtn:focus {
+    border-bottom: 2px solid #2563EB;
+}
+#fieldLabel {
+    color: #475569;
+    font-size: 12px;
+    background: transparent;
+    padding: 0;
+}
+#rowTitle {
+    color: #475569;
+    font-size: 12px;
+    font-weight: 600;
+    background: transparent;
+}
+#navHint {
+    color: #64748B;
+    font-size: 11px;
+    background: transparent;
+    padding: 0;
+}
+#rangeBox QSpinBox#rangeSpin {
+    background: #F1F4F8;
+    color: #0F172A;
+    border: 1px solid #D5DCE6;
+    border-radius: 6px;
+    padding: 2px 4px;
+    min-height: 26px;
+    max-height: 28px;
+    font-size: 13px;
+}
+#rangeBox QSpinBox#rangeSpin:focus {
+    border-color: #2563EB;
+}
+#rangeBox QSpinBox#rangeSpin::up-button,
+#rangeBox QSpinBox#rangeSpin::down-button {
+    background: transparent;
+    border: none;
+    width: 14px;
+}
+#rangeBox QSpinBox#rangeSpin::up-arrow {
+    image: url(styles/arrow-up-light.svg);
+    width: 8px;
+    height: 5px;
+}
+#rangeBox QSpinBox#rangeSpin::down-arrow {
+    image: url(styles/arrow-down-spin-light.svg);
+    width: 8px;
+    height: 5px;
+}
+#skipVerseEdit {
+    background: #F1F4F8;
+    color: #0F172A;
+    border: 1px solid #D5DCE6;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 13px;
+    min-height: 28px;
+}
+#skipVerseEdit:focus {
+    border-color: #2563EB;
+}
 #selectRangeBtn {
     background: #2563EB;
     color: #FFFFFF;
     border: none;
     border-radius: 6px;
-    padding: 9px 12px;
+    padding: 8px 12px;
     font-weight: 600;
-    min-height: 32px;
+    font-size: 13px;
+    min-height: 34px;
 }
 #selectRangeBtn:hover {
     background: #1D4ED8;
@@ -312,12 +409,18 @@ QSpinBox::down-arrow {
     background: #1E40AF;
 }
 #segmentBtn {
-    background: #F1F4F8;
+    background: transparent;
     color: #475569;
     border: 1px solid #D5DCE6;
     border-radius: 6px;
-    padding: 7px 10px;
-    text-align: left;
+    padding: 6px 8px;
+    text-align: center;
+    font-size: 12px;
+    min-height: 34px;
+}
+#segmentBtn:hover {
+    border-color: #B8C2D0;
+    color: #0F172A;
 }
 #segmentBtn:checked {
     background: #DBEAFE;
@@ -411,7 +514,7 @@ QComboBox::drop-down, QFontComboBox::drop-down {
     border: none;
 }
 QComboBox::down-arrow, QFontComboBox::down-arrow {
-    image: url(F:/Project/bible_projection/styles/arrow-down-light.svg);
+    image: url(styles/arrow-down-light.svg);
     width: 12px;
     height: 8px;
 }
