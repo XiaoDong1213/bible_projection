@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTabWidget, QTabBar, QPushButton, QGridLayout,
     QLabel, QSpinBox, QHBoxLayout, QFrame, QScrollArea, QSizePolicy,
-    QLineEdit, QStackedWidget, QButtonGroup,
+    QLineEdit, QStackedWidget, QButtonGroup, QApplication,
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from .history_item import HistoryListWidget
@@ -156,6 +156,7 @@ class NavigationPanel(QWidget):
         self.history_list = HistoryListWidget()
         self.history_list.item_clicked.connect(self._on_history_clicked)
         self.history_list.item_deleted.connect(self._delete_history)
+        self.history_list.item_copy_requested.connect(self._copy_history)
         hl.addWidget(self.history_list, 1)
         clear_btn = QPushButton("清空历史")
         clear_btn.setObjectName("clearHistoryBtn")
@@ -636,6 +637,24 @@ class NavigationPanel(QWidget):
         self.sync_from_selection(selection)
         self.history_list.set_selected_index(index)
         self.history_opened.emit(selection)
+
+    def _copy_history(self, index):
+        """复制历史记录的简称引用，内容可直接粘贴到搜索框。"""
+        if not 0 <= index < len(self.history):
+            return
+        selection = self.history[index]
+        short = self.db._short_name(selection.book)
+        QApplication.clipboard().setText(self._history_short_label(selection, short))
+
+    @staticmethod
+    def _history_short_label(selection, short):
+        if selection.is_simple:
+            span = selection.spans[0]
+            body = str(span.start) if span.start == span.end else f"{span.start}-{span.end}"
+            return f"{short} {span.chapter}:{body}"
+        if selection.is_multi_chapter:
+            return selection.label()
+        return f"{short} {selection.primary_chapter}:{selection.space_verse_text()}"
 
     def _delete_history(self, index):
         if 0 <= index < len(self.history):
