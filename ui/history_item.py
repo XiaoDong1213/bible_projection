@@ -10,6 +10,7 @@ class HistoryItemWidget(QWidget):
 
     deleted = pyqtSignal(int)
     clicked = pyqtSignal(int)
+    copy_requested = pyqtSignal(int)
 
     def __init__(self, index, text, parent=None):
         super().__init__(parent)
@@ -29,6 +30,15 @@ class HistoryItemWidget(QWidget):
         self.label.setObjectName("historyText")
         self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         layout.addWidget(self.label, 1)
+
+        self.copy_btn = QPushButton("复制")
+        self.copy_btn.setObjectName("historyCopyButton")
+        self.copy_btn.setFixedSize(48, 28)
+        self.copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.copy_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.copy_btn.setToolTip("复制这条历史记录的简称引用")
+        self.copy_btn.clicked.connect(self._on_copy)
+        layout.addWidget(self.copy_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
         # 删除按钮单独触发当前记录的删除信号
         self.delete_btn = QPushButton("删除")
@@ -59,6 +69,10 @@ class HistoryItemWidget(QWidget):
         style.polish(self)
         self.update()
 
+    def _on_copy(self):
+        """发出复制当前记录的信号。"""
+        self.copy_requested.emit(self.index)
+
     def _on_delete(self):
         """发出删除当前记录的信号。"""
         self.deleted.emit(self.index)
@@ -75,6 +89,7 @@ class HistoryListWidget(QScrollArea):
 
     item_clicked = pyqtSignal(int)
     item_deleted = pyqtSignal(int)
+    item_copy_requested = pyqtSignal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -109,6 +124,7 @@ class HistoryListWidget(QScrollArea):
             row = HistoryItemWidget(index, text)
             row.clicked.connect(self.item_clicked.emit)
             row.deleted.connect(self.item_deleted.emit)
+            row.copy_requested.connect(self.item_copy_requested.emit)
             self._layout.insertWidget(index, row)
             self._rows.append(row)
 
