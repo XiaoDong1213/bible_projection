@@ -52,6 +52,23 @@ class HistoryItemWidget(QWidget):
         self.delete_btn.clicked.connect(self._on_delete)
         layout.addWidget(self.delete_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
+        # 两个操作按钮使用完全相同的控件级尺寸和基础样式。
+        action_style = """
+        QPushButton {
+            min-width: 56px;
+            max-width: 56px;
+            min-height: 28px;
+            max-height: 28px;
+            padding: 0;
+            margin: 0;
+            border: 1px solid #3A4558;
+            border-radius: 6px;
+            font-size: 12px;
+        }
+        """
+        self.copy_btn.setStyleSheet(action_style)
+        self.delete_btn.setStyleSheet(action_style)
+
     def set_index(self, index):
         """更新记录对应的索引。"""
         self.index = index
