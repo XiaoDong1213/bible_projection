@@ -34,8 +34,7 @@ class HistoryItemWidget(QWidget):
 
         self.copy_btn = QPushButton("复制")
         self.copy_btn.setObjectName("historyCopyButton")
-        self.copy_btn.setMinimumWidth(56)
-        self.copy_btn.setFixedHeight(28)
+        self.copy_btn.setFixedSize(56, 28)
         self.copy_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.copy_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -45,8 +44,7 @@ class HistoryItemWidget(QWidget):
 
         self.delete_btn = QPushButton("删除")
         self.delete_btn.setObjectName("historyDeleteButton")
-        self.delete_btn.setMinimumWidth(56)
-        self.delete_btn.setFixedHeight(28)
+        self.delete_btn.setFixedSize(56, 28)
         self.delete_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.delete_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
