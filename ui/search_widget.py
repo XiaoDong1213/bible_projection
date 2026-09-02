@@ -155,6 +155,20 @@ class SearchWidget(QWidget):
             return 0
 
     def _convert_book(self, book):
+        max_chapter = self._chapter_count(book)
+        # 单章书卷直接锁定第1章，省去重复输入章节号
+        if max_chapter == 1:
+            self.state.selected_book = book
+            self.state.stage = "verse"
+            self.state.space_mode = False
+            self.state.converted_book = True
+            self._set_text(f"{book} 1:")
+            self.result_list.clear()
+            self._resize_result_area()
+            self._update_hint(f"已识别为 {book}　·　仅有1章　·　请输入节号")
+            self.search_input.setFocus()
+            return
+
         self.state.selected_book = book
         self.state.stage = "chapter"
         self.state.space_mode = False
