@@ -6,7 +6,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 
 class HistoryItemWidget(QWidget):
-    """单条历史记录及其删除操作。"""
+    """单条历史记录及其操作按钮。"""
 
     deleted = pyqtSignal(int)
     clicked = pyqtSignal(int)
@@ -29,21 +29,25 @@ class HistoryItemWidget(QWidget):
         self.label = QLabel(text)
         self.label.setObjectName("historyText")
         self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         layout.addWidget(self.label, 1)
 
         self.copy_btn = QPushButton("复制")
         self.copy_btn.setObjectName("historyCopyButton")
-        self.copy_btn.setFixedSize(48, 28)
+        self.copy_btn.setMinimumWidth(56)
+        self.copy_btn.setFixedHeight(28)
+        self.copy_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.copy_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.copy_btn.setToolTip("复制这条历史记录的简称引用")
         self.copy_btn.clicked.connect(self._on_copy)
         layout.addWidget(self.copy_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        # 删除按钮单独触发当前记录的删除信号
         self.delete_btn = QPushButton("删除")
         self.delete_btn.setObjectName("historyDeleteButton")
-        self.delete_btn.setFixedSize(48, 28)
+        self.delete_btn.setMinimumWidth(56)
+        self.delete_btn.setFixedHeight(28)
+        self.delete_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.delete_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.delete_btn.setToolTip("删除这条历史记录")
@@ -140,7 +144,7 @@ class HistoryListWidget(QScrollArea):
             row.set_selected(i == self._selected)
 
     def selected_index(self):
-        """返回当前选中记录的索引。"""
+        """返回当前选中历史记录的索引。"""
         return self._selected
 
     def clear(self):
