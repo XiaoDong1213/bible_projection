@@ -240,18 +240,30 @@ QListWidget::item:selected {
     color: #E8EDF5;
     background: transparent;
 }
-#historyDeleteButton {
+#historyCopyButton, #historyDeleteButton {
     background: transparent;
     color: #93A0B4;
     border: 1px solid #3A4558;
     border-radius: 6px;
     font-size: 12px;
     padding: 0;
+    min-width: 56px;
+    max-width: 56px;
+    min-height: 28px;
+    max-height: 28px;
+}
+#historyCopyButton:hover, #historyDeleteButton:hover {
+    background: #283142;
+    color: #FFFFFF;
+    border: 1px solid #3B82F6;
 }
 #historyDeleteButton:hover {
     background: #EF4444;
+    border-color: #EF4444;
+}
+#historyCopyButton:pressed {
+    background: #1D4ED8;
     color: #FFFFFF;
-    border: 1px solid #EF4444;
 }
 #historyDeleteButton:pressed {
     background: #DC2626;
@@ -530,81 +542,4 @@ QLineEdit {
 }
 QLineEdit:focus {
     border-color: #3B82F6;
-}
-
-/* 搜索输入框默认跟随主题；弹层自身还会再套一层 search_panel_style */
-#searchInput {
-    background: #1F2633;
-    color: #E8EDF5;
-    border: 1px solid #2A3344;
-    border-radius: 8px;
-    padding: 10px 14px;
-    font-size: 15px;
-}
-#searchInput:focus {
-    border-color: #3B82F6;
-}
-
-/* ---------- Preview ---------- */
-#previewHost {
-    background: #0B0E14;
-}
-#previewView {
-    background: #07090D;
-    border: none;
-}
-
-QSplitter::handle {
-    background: #2A3344;
-    width: 1px;
-}
-
-QScrollBar:vertical {
-    background: transparent;
-    width: 10px;
-    margin: 2px;
-}
-QScrollBar::handle:vertical {
-    background: #3A4558;
-    border-radius: 5px;
-    min-height: 28px;
-}
-QScrollBar::handle:vertical:hover {
-    background: #4B5568;
-}
-QScrollBar::add-line:vertical,
-QScrollBar::sub-line:vertical,
-QScrollBar::add-page:vertical,
-QScrollBar::sub-page:vertical {
-    height: 0;
-    background: none;
-}
-
-QScrollBar:horizontal {
-    background: transparent;
-    height: 10px;
-    margin: 2px;
-}
-QScrollBar::handle:horizontal {
-    background: #3A4558;
-    border-radius: 5px;
-    min-width: 28px;
-}
-QScrollBar::handle:horizontal:hover {
-    background: #4B5568;
-}
-QScrollBar::add-line:horizontal,
-QScrollBar::sub-line:horizontal,
-QScrollBar::add-page:horizontal,
-QScrollBar::sub-page:horizontal {
-    width: 0;
-    background: none;
-}
-
-QToolTip {
-    background: #181D27;
-    color: #E8EDF5;
-    border: 1px solid #2A3344;
-    padding: 6px 8px;
-    border-radius: 6px;
 }
