@@ -1,6 +1,7 @@
 # 经文显示核心控件
 # 提词器式滚动：QTextDocument + 浮点偏移绘制，避免滚动条整像素台阶
 import os
+import re
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PyQt6.QtCore import (
     Qt, QTimer, QElapsedTimer, pyqtSignal, QPropertyAnimation, QEasingCurve,
@@ -129,7 +130,7 @@ class ScriptureDisplay(QWidget):
         self._bg_pixmap_path = None
         self._bg_scaled = None
         self._bg_scaled_size = None
-        self.line_spacing = 160
+        self.line_spacing = 140
         self.margin_left = 60
         self.margin_right = 60
         self.title_font_family = "微软雅黑"
@@ -326,26 +327,45 @@ class ScriptureDisplay(QWidget):
             f'font-family:&quot;{self.font_family}&quot;;">{safe}</span>'
         )
 
+    def _format_scripture_text(self, text):
+        """给标点做轻量视觉压缩，并让行尾标点具备悬挂空间。"""
+        punctuation = set("，。！？；：、．，。！？；：、）】》」』”’％%")
+        escaped = str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        parts = re.split(r"([，。！？；：、．，。！？；：、）】》」』”’％%])", escaped)
+        result = []
+        for part in parts:
+            if not part:
+                continue
+            if part in punctuation:
+                result.append(
+                    f'<span style="font-size:88%;letter-spacing:-0.08em;">{part}</span>'
+                )
+            else:
+                result.append(part)
+        return "".join(result)
+
     def _render_scripture(self):
         fs = self._px(self.font_size)
-        top = max(10, int(fs * 0.35))
-        bottom = max(12, int(fs * 0.45))
+        top = max(10, int(fs * 0.30))
+        bottom = max(12, int(fs * 0.38))
+        # 经文采用紧凑行距；标点单独压缩，减少标点后的视觉空白。
+        line_spacing = max(115, min(145, int(self.line_spacing * 0.86)))
         html = (
             f"<div style='padding-top:{top}px;padding-bottom:{bottom}px;margin:0;"
-            f"line-height:{self.line_spacing}%;text-align:justify;'>"
+            f"line-height:{line_spacing}%;text-align:left;'>"
         )
         rows = [self._verse_row(row) for row in self.verses]
         if self.verse_segmentation:
             html += "".join(
                 f"<p style='margin:0 0 {self._px(1)}px 0;padding:0;"
-                f"text-align:justify;line-height:{self.line_spacing}%;'>"
-                f"{self._verse_html(ch, n, t)}</p>"
+                f"text-align:left;line-height:{line_spacing}%;'>"
+                f"{self._verse_html(ch, n, self._format_scripture_text(t))}</p>"
                 for ch, n, t in rows
             )
         else:
             html += (
-                "<p style='margin:0;padding:0;white-space:normal;text-align:justify;'>"
-                + " ".join(self._verse_html(ch, n, t) for ch, n, t in rows)
+                "<p style='margin:0;padding:0;white-space:normal;text-align:left;'>"
+                + " ".join(self._verse_html(ch, n, self._format_scripture_text(t)) for ch, n, t in rows)
                 + "</p>"
             )
         self.text_display.set_html(html + "</div>")
