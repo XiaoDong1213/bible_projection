@@ -418,8 +418,28 @@ class SearchWidget(QWidget):
             self._update_hint_for_stage()
             return
 
-        if re.search(r"-\s*$", value):
-            self._update_hint("请输入结束节，例如 3:16-18")
+        # 输入“章:开始节-”而不填写结束节时，默认显示到本章最后一节。
+        trailing_range = bool(re.search(r"-\s*$", value))
+        if trailing_range:
+            range_value = re.sub(r"-\s*$", "", value).strip()
+            range_match = re.fullmatch(r"(\d+)\s*[:.]\s*(\d+)", range_value)
+            if range_match:
+                chapter, verse = map(int, range_match.groups())
+                max_chapter = self._chapter_count(book)
+                if not 1 <= chapter <= max_chapter:
+                    self._update_hint(f"章节超出范围　·　本书最多 {max_chapter} 章")
+                    return
+                max_verse = self._verse_count(book, chapter)
+                if not 1 <= verse <= max_verse:
+                    self._update_hint(f"第 {chapter} 章最多 {max_verse} 节")
+                    return
+                selection = ScriptureSelection.single_chapter(
+                    book, chapter, verse, max_verse, max_verse=max_verse
+                )
+                self._add_selection_item(selection)
+                self._update_hint(f"已选第 {chapter} 章第 {verse} 节至末节　·　Enter 确认投影")
+                return
+            self._update_hint("请输入开始节，例如 3:16-　·　不填写结束节将显示到本章末节")
             self._resize_result_area()
             return
 
