@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
+from PyQt6.QtCore import Qt
 
 from config import AppConfig
 from bible_database import BibleDatabase
