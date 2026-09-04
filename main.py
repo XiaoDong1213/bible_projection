@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
 
 from config import AppConfig
 from bible_database import BibleDatabase
@@ -46,6 +46,12 @@ def main():
     config = AppConfig()
     db = BibleDatabase()
     window = MainWindow(db, config)
+
+    # 0：暂停/继续自动滚动。使用窗口快捷键，不改动搜索框的输入逻辑。
+    pause_shortcut = QShortcut(QKeySequence(Qt.Key.Key_0), window)
+    pause_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+    pause_shortcut.activated.connect(window._toggle_scroll_pause)
+
     window.show()
     sys.exit(app.exec())
 
