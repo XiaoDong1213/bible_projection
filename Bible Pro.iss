@@ -7,6 +7,7 @@
 #define MyAppExeName "Bible Pro.exe"
 #define MyAppSourceDir "C:\Users\XiaoDong\Documents\GitHub\bible_projection\dist\Bible Pro"
 #define MyAppIcon "C:\Users\XiaoDong\Documents\GitHub\bible_projection\icon.ico"
+#define MyAppUserModelId "XiaoDong.BibleProjection"
 
 [Setup]
 AppId={{8B1BF115-C8D9-46A1-B711-01928676DCF0}
@@ -24,7 +25,7 @@ SolidCompression=yes
 WizardStyle=modern dynamic
 
 [Languages]
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "chinesesimplified"; MessagesFile: "compiler:\Languages\ChineseSimplified.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -35,8 +36,8 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "{#MyAppSourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "config.ini,config.json,settings.ini,settings.json,history.ini,history.json"
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; AppUserModelID: "{#MyAppUserModelId}"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; AppUserModelID: "{#MyAppUserModelId}"; Tasks: desktopicon
 
 [Code]
 procedure DeleteUserData;
