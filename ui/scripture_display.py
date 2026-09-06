@@ -187,9 +187,15 @@ class ScriptureDisplay(QWidget):
         self._update_viewport_margins()
 
     def _scroll_to_top(self):
+        if self.scroll_speed > 0 or self.scroll_timer.isActive():
+            self.set_scroll_speed(0)
+            self.scroll_finished.emit()
         self.set_scroll_position(0)
 
     def _scroll_to_bottom(self):
+        if self.scroll_speed > 0 or self.scroll_timer.isActive():
+            self.set_scroll_speed(0)
+            self.scroll_finished.emit()
         self.set_scroll_position(self.max_scroll())
 
     def layout_scale(self):
