@@ -1,11 +1,10 @@
 import html
-import sqlite3
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QPushButton, QRadioButton, QScrollArea,
-    QSizePolicy, QVBoxLayout, QWidget,
+    QButtonGroup, QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel,
+    QLineEdit, QListWidget, QListWidgetItem, QPushButton, QRadioButton,
+    QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 
@@ -21,8 +20,8 @@ def search_scripture(db, keywords, fuzzy=True, match_all=True, books=None, limit
     verse_col = db._quote(db.verse_col)
     text_col = db._quote(db.text_col)
 
-    params = []
     conditions = []
+    params = []
     for term in terms:
         if fuzzy:
             conditions.append(f"{text_col} LIKE ?")
@@ -30,34 +29,30 @@ def search_scripture(db, keywords, fuzzy=True, match_all=True, books=None, limit
         else:
             conditions.append(f"instr({text_col}, ?) > 0")
             params.append(term)
+    where = f"({' AND ' if match_all else ' OR '.join(conditions)})" if False else ""
     joiner = " AND " if match_all else " OR "
     where = f"({joiner.join(conditions)})"
 
     if books:
-        values = []
-        for book in books:
-            values.append(db.book_meta.get(book, {}).get("id", book))
+        values = [db.book_meta.get(book, {}).get("id", book) for book in books]
         placeholders = ",".join("?" for _ in values)
         where += f" AND {book_col} IN ({placeholders})"
         params.extend(values)
 
     count_sql = f"SELECT COUNT(*) FROM {table} WHERE {where}"
     total = int(db.conn.execute(count_sql, params).fetchone()[0])
-
     select_sql = (
         f"SELECT {book_col} AS raw_book, {chapter_col} AS chapter, "
         f"{verse_col} AS verse, {text_col} AS text "
-        f"FROM {table} WHERE {where} "
-        f"ORDER BY rowid LIMIT ? OFFSET ?"
+        f"FROM {table} WHERE {where} ORDER BY rowid LIMIT ? OFFSET ?"
     )
     rows = db.conn.execute(select_sql, params + [int(limit), int(offset)]).fetchall()
     id_to_name = {str(v.get("id")).strip(): k for k, v in db.book_meta.items() if v.get("id") is not None}
     results = []
     for row in rows:
         raw_book = str(row["raw_book"])
-        book = id_to_name.get(raw_book.strip(), raw_book)
         results.append({
-            "book": book,
+            "book": id_to_name.get(raw_book.strip(), raw_book),
             "chapter": int(row["chapter"]),
             "verse": int(row["verse"]),
             "text": str(row["text"]),
@@ -194,7 +189,6 @@ class ScriptureSearchWidget(QWidget):
     result_activated = pyqtSignal(object)
     result_project_requested = pyqtSignal(object)
     close_requested = pyqtSignal()
-
     PAGE_SIZE = 10
 
     def __init__(self, db, config=None, parent=None, theme="dark"):
@@ -241,24 +235,33 @@ class ScriptureSearchWidget(QWidget):
         self.search_input.setPlaceholderText("输入经文关键词")
         self.search_input.returnPressed.connect(self.search)
         condition.addWidget(self.search_input)
+
         mode_row = QHBoxLayout()
         mode_row.addWidget(QLabel("匹配方式"))
         self.fuzzy_radio = QRadioButton("模糊")
         self.exact_radio = QRadioButton("精确")
         self.fuzzy_radio.setChecked(True)
+        self.match_group = QButtonGroup(self)
+        self.match_group.addButton(self.fuzzy_radio)
+        self.match_group.addButton(self.exact_radio)
         mode_row.addWidget(self.fuzzy_radio)
         mode_row.addWidget(self.exact_radio)
         mode_row.addStretch(1)
         condition.addLayout(mode_row)
+
         keyword_row = QHBoxLayout()
         keyword_row.addWidget(QLabel("多关键词"))
         self.all_radio = QRadioButton("同时包含")
         self.any_radio = QRadioButton("任意包含")
         self.all_radio.setChecked(True)
+        self.keyword_group = QButtonGroup(self)
+        self.keyword_group.addButton(self.all_radio)
+        self.keyword_group.addButton(self.any_radio)
         keyword_row.addWidget(self.all_radio)
         keyword_row.addWidget(self.any_radio)
         keyword_row.addStretch(1)
         condition.addLayout(keyword_row)
+
         scope_row = QHBoxLayout()
         scope_row.addWidget(QLabel("搜索范围"))
         self.scope_btn = QPushButton("全部书卷")
