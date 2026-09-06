@@ -7,7 +7,7 @@ from PyQt6.QtCore import (
     pyqtProperty,
 )
 from PyQt6.QtGui import (
-    QFont, QColor, QPixmap, QFontMetrics, QPainter, QTextDocument,
+    QFont, QColor, QPixmap, QFontMetrics, QPainter, QTextDocument, QShortcut, QKeySequence,
 )
 
 
@@ -160,6 +160,13 @@ class ScriptureDisplay(QWidget):
         self.scroll_timer.timeout.connect(self._auto_scroll)
         self._apply_refresh_interval()
         self._init_ui()
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._home_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Home), self)
+        self._home_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._home_shortcut.activated.connect(self._scroll_to_top)
+        self._end_shortcut = QShortcut(QKeySequence(Qt.Key.Key_End), self)
+        self._end_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._end_shortcut.activated.connect(self._scroll_to_bottom)
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -178,6 +185,12 @@ class ScriptureDisplay(QWidget):
         self.footer_label.show()
         self._update_footer_style()
         self._update_viewport_margins()
+
+    def _scroll_to_top(self):
+        self.set_scroll_position(0)
+
+    def _scroll_to_bottom(self):
+        self.set_scroll_position(self.max_scroll())
 
     def layout_scale(self):
         if self._reference_size:
