@@ -9,6 +9,7 @@ from PyQt6.QtCore import Qt
 from config import AppConfig
 from bible_database import BibleDatabase
 from main_window import MainWindow
+from scripture_search_integration import install_scripture_search
 
 
 # 设置 Windows 应用标识，确保任务栏图标正确关联
@@ -47,6 +48,9 @@ def main():
     config = AppConfig()
     db = BibleDatabase()
     window = MainWindow(db, config)
+
+    # 独立经文全文搜索：不改动原有书卷/章节搜索逻辑。
+    install_scripture_search(window)
 
     # 0：暂停/继续自动滚动。使用窗口快捷键，不改动搜索框的输入逻辑。
     pause_shortcut = QShortcut(QKeySequence(Qt.Key.Key_0), window)
