@@ -1,10 +1,68 @@
+import html
+import sqlite3
+
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QTextDocument
 from PyQt6.QtWidgets import (
     QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QPushButton, QRadioButton, QScrollArea,
-    QSizePolicy, QVBoxLayout, QWidget, QComboBox, QCheckBox,
+    QSizePolicy, QVBoxLayout, QWidget,
 )
+
+
+def search_scripture(db, keywords, fuzzy=True, match_all=True, books=None, limit=10, offset=0):
+    """使用 SQL 分页查询经文，避免把整本圣经加载到 Python。"""
+    terms = [str(k).strip() for k in keywords if str(k).strip()]
+    if not terms:
+        return 0, []
+
+    table = db._quote(db.verse_table)
+    book_col = db._quote(db.book_col)
+    chapter_col = db._quote(db.chapter_col)
+    verse_col = db._quote(db.verse_col)
+    text_col = db._quote(db.text_col)
+
+    params = []
+    conditions = []
+    for term in terms:
+        if fuzzy:
+            conditions.append(f"{text_col} LIKE ?")
+            params.append(f"%{term}%")
+        else:
+            conditions.append(f"instr({text_col}, ?) > 0")
+            params.append(term)
+    joiner = " AND " if match_all else " OR "
+    where = f"({joiner.join(conditions)})"
+
+    if books:
+        values = []
+        for book in books:
+            values.append(db.book_meta.get(book, {}).get("id", book))
+        placeholders = ",".join("?" for _ in values)
+        where += f" AND {book_col} IN ({placeholders})"
+        params.extend(values)
+
+    count_sql = f"SELECT COUNT(*) FROM {table} WHERE {where}"
+    total = int(db.conn.execute(count_sql, params).fetchone()[0])
+
+    select_sql = (
+        f"SELECT {book_col} AS raw_book, {chapter_col} AS chapter, "
+        f"{verse_col} AS verse, {text_col} AS text "
+        f"FROM {table} WHERE {where} "
+        f"ORDER BY rowid LIMIT ? OFFSET ?"
+    )
+    rows = db.conn.execute(select_sql, params + [int(limit), int(offset)]).fetchall()
+    id_to_name = {str(v.get("id")).strip(): k for k, v in db.book_meta.items() if v.get("id") is not None}
+    results = []
+    for row in rows:
+        raw_book = str(row["raw_book"])
+        book = id_to_name.get(raw_book.strip(), raw_book)
+        results.append({
+            "book": book,
+            "chapter": int(row["chapter"]),
+            "verse": int(row["verse"]),
+            "text": str(row["text"]),
+        })
+    return total, results
 
 
 class BookScopeDialog(QDialog):
@@ -23,7 +81,6 @@ class BookScopeDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 14)
         root.setSpacing(10)
-
         self.filter_input = QLineEdit()
         self.filter_input.setPlaceholderText("搜索书卷")
         self.filter_input.textChanged.connect(self._filter_books)
@@ -51,17 +108,12 @@ class BookScopeDialog(QDialog):
                 item = QListWidgetItem(f"{book}  ({short})")
                 item.setData(Qt.ItemDataRole.UserRole, book)
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                item.setCheckState(
-                    Qt.CheckState.Checked if book in self.selected else Qt.CheckState.Unchecked
-                )
+                item.setCheckState(Qt.CheckState.Checked if book in self.selected else Qt.CheckState.Unchecked)
                 lst.addItem(item)
             box.addWidget(lst, 1)
             columns.addLayout(box, 1)
         root.addLayout(columns, 1)
-
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok
-        )
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok)
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText("确定")
         buttons.accepted.connect(self.accept)
@@ -102,11 +154,9 @@ class ScriptureResultWidget(QFrame):
         self.setObjectName("scriptureSearchResult")
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
-
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 10, 12, 10)
         root.setSpacing(6)
-
         top = QHBoxLayout()
         title = QPushButton(f"{result['book']} {result['chapter']}:{result['verse']}")
         title.setObjectName("scriptureResultTitle")
@@ -114,28 +164,22 @@ class ScriptureResultWidget(QFrame):
         title.setCursor(Qt.CursorShape.PointingHandCursor)
         title.clicked.connect(lambda: self.activated.emit(self.result))
         top.addWidget(title, 1)
-
         copy_btn = QPushButton("复制")
         copy_btn.setObjectName("scriptureResultAction")
         copy_btn.clicked.connect(lambda: self.copy_requested.emit(self.result))
         top.addWidget(copy_btn)
-
         project_btn = QPushButton("投影")
         project_btn.setObjectName("scriptureResultAction")
         project_btn.clicked.connect(lambda: self.project_requested.emit(self.result))
         top.addWidget(project_btn)
         root.addLayout(top)
-
         text = QLabel(self._highlight(result["text"], keywords))
         text.setTextFormat(Qt.TextFormat.RichText)
         text.setWordWrap(True)
-        text.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         root.addWidget(text)
 
     @staticmethod
     def _highlight(text, keywords):
-        escaped = QTextDocument().toPlainText()  # keep Qt rich-text escaping isolated below
-        import html
         safe = html.escape(str(text))
         terms = sorted({str(k).strip() for k in keywords if str(k).strip()}, key=len, reverse=True)
         for term in terms:
@@ -174,7 +218,6 @@ class ScriptureSearchWidget(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 14, 14, 12)
         root.setSpacing(10)
-
         header = QHBoxLayout()
         title = QLabel("经文搜索")
         title.setObjectName("scriptureSearchTitle")
@@ -184,11 +227,9 @@ class ScriptureSearchWidget(QWidget):
         close.clicked.connect(self.close_requested.emit)
         header.addWidget(close)
         root.addLayout(header)
-
         self.condition_toggle = QPushButton("搜索条件  ▲")
         self.condition_toggle.setObjectName("searchConditionToggle")
         self.condition_toggle.setFlat(True)
-        self.condition_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         self.condition_toggle.clicked.connect(self._toggle_conditions)
         root.addWidget(self.condition_toggle)
 
@@ -196,12 +237,10 @@ class ScriptureSearchWidget(QWidget):
         condition = QVBoxLayout(self.condition_box)
         condition.setContentsMargins(0, 0, 0, 0)
         condition.setSpacing(8)
-
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("输入经文关键词")
         self.search_input.returnPressed.connect(self.search)
         condition.addWidget(self.search_input)
-
         mode_row = QHBoxLayout()
         mode_row.addWidget(QLabel("匹配方式"))
         self.fuzzy_radio = QRadioButton("模糊")
@@ -211,7 +250,6 @@ class ScriptureSearchWidget(QWidget):
         mode_row.addWidget(self.exact_radio)
         mode_row.addStretch(1)
         condition.addLayout(mode_row)
-
         keyword_row = QHBoxLayout()
         keyword_row.addWidget(QLabel("多关键词"))
         self.all_radio = QRadioButton("同时包含")
@@ -221,20 +259,16 @@ class ScriptureSearchWidget(QWidget):
         keyword_row.addWidget(self.any_radio)
         keyword_row.addStretch(1)
         condition.addLayout(keyword_row)
-
         scope_row = QHBoxLayout()
         scope_row.addWidget(QLabel("搜索范围"))
         self.scope_btn = QPushButton("全部书卷")
-        self.scope_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.scope_btn.clicked.connect(self._choose_scope)
         scope_row.addWidget(self.scope_btn, 1)
         condition.addLayout(scope_row)
-
         search_btn = QPushButton("搜索")
         search_btn.setObjectName("scriptureSearchButton")
         search_btn.clicked.connect(self.search)
         condition.addWidget(search_btn)
-
         history_label = QLabel("最近搜索")
         history_label.setObjectName("searchHistoryLabel")
         condition.addWidget(history_label)
@@ -243,13 +277,11 @@ class ScriptureSearchWidget(QWidget):
         self.history_list.itemClicked.connect(self._use_history)
         condition.addWidget(self.history_list)
         self._refresh_history()
-
         root.addWidget(self.condition_box)
 
         self.result_header = QLabel("搜索结果")
         self.result_header.setObjectName("scriptureResultHeader")
         root.addWidget(self.result_header)
-
         self.result_scroll = QScrollArea()
         self.result_scroll.setWidgetResizable(True)
         self.result_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -257,10 +289,8 @@ class ScriptureSearchWidget(QWidget):
         self.result_layout = QVBoxLayout(self.result_container)
         self.result_layout.setContentsMargins(0, 0, 0, 0)
         self.result_layout.setSpacing(8)
-        self.result_layout.addStretch(1)
         self.result_scroll.setWidget(self.result_container)
         root.addWidget(self.result_scroll, 1)
-
         pager = QHBoxLayout()
         self.prev_btn = QPushButton("‹")
         self.next_btn = QPushButton("›")
@@ -286,7 +316,8 @@ class ScriptureSearchWidget(QWidget):
             self._update_scope_text()
 
     def _update_scope_text(self):
-        if not self.selected_books or len(self.selected_books) == len(self.db.get_books("all")):
+        all_count = len(self.db.get_books("all"))
+        if not self.selected_books or len(self.selected_books) == all_count:
             self.scope_btn.setText("全部书卷")
         elif len(self.selected_books) == 1:
             self.scope_btn.setText(next(iter(self.selected_books)))
@@ -304,13 +335,9 @@ class ScriptureSearchWidget(QWidget):
             return
         self._remember_search(self.search_input.text().strip())
         self.page = 0
-        self.total, self.results = self.db.search_scripture(
-            keywords=keywords,
-            fuzzy=self.fuzzy_radio.isChecked(),
-            match_all=self.all_radio.isChecked(),
-            books=self.selected_books or None,
-            limit=self.PAGE_SIZE,
-            offset=0,
+        self.total, self.results = search_scripture(
+            self.db, keywords, self.fuzzy_radio.isChecked(), self.all_radio.isChecked(),
+            self.selected_books or None, self.PAGE_SIZE, 0,
         )
         self._render_results(keywords)
         self._toggle_conditions_closed()
@@ -354,13 +381,9 @@ class ScriptureSearchWidget(QWidget):
             return
         max_page = max(1, (self.total + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
         self.page = max(0, min(page, max_page - 1))
-        _, self.results = self.db.search_scripture(
-            keywords=keywords,
-            fuzzy=self.fuzzy_radio.isChecked(),
-            match_all=self.all_radio.isChecked(),
-            books=self.selected_books or None,
-            limit=self.PAGE_SIZE,
-            offset=self.page * self.PAGE_SIZE,
+        _, self.results = search_scripture(
+            self.db, keywords, self.fuzzy_radio.isChecked(), self.all_radio.isChecked(),
+            self.selected_books or None, self.PAGE_SIZE, self.page * self.PAGE_SIZE,
         )
         self._render_results(keywords)
 
