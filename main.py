@@ -48,6 +48,21 @@ def main():
     db = BibleDatabase()
     window = MainWindow(db, config)
 
+    # Home / End 使用应用级快捷键，避免焦点位于搜索框、数字框、列表等子控件时被控件自身截获。
+    # 关闭 ScriptureDisplay 内部原有的同键快捷键，统一由主窗口处理。
+    if hasattr(window.scripture_display, "_home_shortcut"):
+        window.scripture_display._home_shortcut.setEnabled(False)
+    if hasattr(window.scripture_display, "_end_shortcut"):
+        window.scripture_display._end_shortcut.setEnabled(False)
+
+    home_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Home), window)
+    home_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+    home_shortcut.activated.connect(window.scripture_display._scroll_to_top)
+
+    end_shortcut = QShortcut(QKeySequence(Qt.Key.Key_End), window)
+    end_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+    end_shortcut.activated.connect(window.scripture_display._scroll_to_bottom)
+
     # 0：暂停/继续自动滚动。使用窗口快捷键，不改动搜索框的输入逻辑。
     pause_shortcut = QShortcut(QKeySequence(Qt.Key.Key_0), window)
     pause_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
