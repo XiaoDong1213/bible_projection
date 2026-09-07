@@ -28,6 +28,7 @@ def _set_windows_app_id():
 
 def main():
     """初始化应用、数据库和主窗口。"""
+    # 必须在 QApplication / 主窗口创建前设置，避免 Windows 按默认进程身份生成任务栏图标。
     _set_windows_app_id()
 
     # 统一工作目录，确保打包后的 QSS 相对资源路径仍然有效。
@@ -41,12 +42,19 @@ def main():
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+
+    # 应用、主窗口统一使用同一个 icon.ico，避免窗口图标和任务栏图标不一致。
     icon_path = app_root / "icon.ico"
-    if icon_path.exists():
-        app.setWindowIcon(QIcon(str(icon_path)))
+    app_icon = QIcon(str(icon_path)) if icon_path.exists() else QIcon()
+    if not app_icon.isNull():
+        app.setWindowIcon(app_icon)
+
     config = AppConfig()
     db = BibleDatabase()
     window = MainWindow(db, config)
+
+    if not app_icon.isNull():
+        window.setWindowIcon(app_icon)
 
     # Home / End 使用应用级快捷键，避免焦点位于搜索框、数字框、列表等子控件时被控件自身截获。
     # 关闭 ScriptureDisplay 内部原有的同键快捷键，统一由主窗口处理。
