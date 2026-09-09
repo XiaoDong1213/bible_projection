@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QToolBar, QPushButton, QLabel, QDialog, QFormLayout,
     QHBoxLayout, QVBoxLayout, QSpinBox, QFontComboBox, QColorDialog,
     QFileDialog, QLineEdit, QDialogButtonBox, QWidget, QSizePolicy,
-    QTabWidget,
+    QTabWidget, QGroupBox,
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QIcon, QPixmap
@@ -197,69 +197,68 @@ class DisplaySettingsDialog(QDialog):
         root.addWidget(buttons)
 
     def _localize_color_dialog(self, dialog):
-        """将 Qt 颜色选择器中的常见英文界面文字替换为中文。"""
-        replacements = {
-            "OK": "确定",
-            "Ok": "确定",
-            "Cancel": "取消",
-            "&OK": "确定",
-            "&Cancel": "取消",
-            "Add to Custom Colors": "添加到自定义颜色",
-            "Pick Screen Color": "屏幕取色",
-            "Basic colors": "基本颜色",
-            "Custom colors": "自定义颜色",
+        """将 Qt 颜色选择器中常见的英文界面统一改为中文。"""
+        dialog.setWindowTitle("选择颜色")
+        translations = {
+            "ok": "确定",
+            "cancel": "取消",
+            "reset": "重置",
+            "add to custom colors": "添加到自定义颜色",
+            "pick screen color": "拾取屏幕颜色",
+            "color name": "颜色名称",
+            "basic colors": "基本颜色",
+            "custom colors": "自定义颜色",
+            "hue": "色相",
+            "saturation": "饱和度",
+            "value": "明度",
+            "red": "红",
+            "green": "绿",
+            "blue": "蓝",
         }
-
-        for widget in dialog.findChildren(QPushButton):
-            text = widget.text().strip()
-            if text in replacements:
-                widget.setText(replacements[text])
-
-        # 某些 Qt 版本使用 QDialogButtonBox 保存确定/取消按钮。
-        for box in dialog.findChildren(QDialogButtonBox):
-            ok_button = box.button(QDialogButtonBox.StandardButton.Ok)
-            cancel_button = box.button(QDialogButtonBox.StandardButton.Cancel)
-            if ok_button:
-                ok_button.setText("确定")
-            if cancel_button:
-                cancel_button.setText("取消")
-
-        for widget in dialog.findChildren(QLabel):
-            text = widget.text().strip()
-            if text in replacements:
-                widget.setText(replacements[text])
+        for widget in dialog.findChildren(QWidget):
+            text = ""
+            if isinstance(widget, QPushButton):
+                text = widget.text().strip()
+            elif isinstance(widget, QLabel):
+                text = widget.text().strip().rstrip(":")
+            elif isinstance(widget, QGroupBox):
+                text = widget.title().strip()
+            if not text:
+                continue
+            translated = translations.get(text.lower())
+            if not translated:
+                continue
+            if isinstance(widget, QPushButton):
+                widget.setText(translated)
+            elif isinstance(widget, QLabel):
+                widget.setText(translated)
+            elif isinstance(widget, QGroupBox):
+                widget.setTitle(translated)
 
     def _choose_color(self, key, button):
         current = self.settings.get(key, "#FFFFFF")
-        color = QColor(current)
-        if not color.isValid():
-            color = QColor("#FFFFFF")
-
-        # 不使用 QColorDialog.getColor()，改用实例对话框，才能在 exec 前处理中文界面。
-        dialog = QColorDialog(color, self)
-        dialog.setWindowTitle("选择颜色")
+        dialog = QColorDialog(QColor(current), self)
+        dialog.setOption(QColorDialog.ColorDialogOption.DontUseNativeDialog, True)
         self._localize_color_dialog(dialog)
-
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            selected = dialog.selectedColor()
-            if selected.isValid():
-                value = selected.name(QColor.NameFormat.HexRgb)
+            color = dialog.currentColor()
+            if color.isValid():
+                value = color.name().upper()
                 self.settings[key] = value
                 self._set_color_button(button, value)
 
     def _set_color_button(self, button, color):
-        """用图标显示纯色块，绕开应用 QSS 对 QPushButton 背景色的覆盖。"""
+        """用真正的颜色图标做预览，完全绕开应用级 QSS 对按钮背景的覆盖。"""
         qcolor = QColor(color)
         if not qcolor.isValid():
             qcolor = QColor("#FFFFFF")
-
-        # 颜色块直接绘制进 QIcon，QSS 无法覆盖图标，因此不会再出现“颜色被一层东西挡住”。
-        size = 18
-        pixmap = QPixmap(size, size)
+            color = qcolor.name().upper()
+        pixmap = QPixmap(30, 18)
         pixmap.fill(qcolor)
         button.setIcon(QIcon(pixmap))
-        button.setIconSize(QSize(size, size))
-        button.setToolTip(f"当前颜色：{qcolor.name().upper()}\n点击选择颜色")
+        button.setIconSize(QSize(30, 18))
+        button.setText(str(color).upper())
+        button.setToolTip(f"当前颜色：{str(color).upper()}，点击修改")
 
     def _choose_bg(self):
         dialog = QFileDialog(self, "选择背景图片")
