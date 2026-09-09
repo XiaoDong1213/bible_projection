@@ -128,17 +128,21 @@ def _display_auto_scroll(self):
 
 def _dialog_build_ui(self):
     _ORIGINAL_DIALOG_BUILD_UI(self)
-    # 标题间距不再作为用户设置项，保留内部字段以兼容旧配置。
+    # 标题间距不再作为用户设置项。保留控件对象但隐藏整行，
+    # 避免旧配置兼容逻辑访问已被删除的 Qt 对象导致崩溃。
     spacing = getattr(self, "title_spacing", None)
     if spacing is not None:
+        spacing.hide()
         form = spacing.parentWidget().layout() if spacing.parentWidget() else None
-        if form is not None and hasattr(form, "removeRow"):
-            form.removeRow(spacing)
+        if form is not None and hasattr(form, "labelForField"):
+            label = form.labelForField(spacing)
+            if label is not None:
+                label.hide()
 
 
 def _dialog_load_settings(self):
     _ORIGINAL_DIALOG_LOAD_SETTINGS(self)
-    # 统一刷新颜色按钮，确保打开显示设置时能看到当前颜色预览。
+    # 打开显示设置时同步刷新所有颜色按钮的预览。
     color_fields = [
         ("font_color", "font_color_btn"),
         ("title_color", "title_color_btn"),
