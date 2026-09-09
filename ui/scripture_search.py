@@ -132,8 +132,8 @@ class BookScopeDialog(QDialog):
         item.setData(Qt.ItemDataRole.UserRole + 2, bool(checked))
         book = str(item.data(Qt.ItemDataRole.UserRole) or "")
         short = str(item.data(Qt.ItemDataRole.UserRole + 1) or "")
-        prefix = "✓" if checked else "○"
-        item.setText(f"{prefix}   {book}  ·  {short}")
+        item.setText(f"{book}  ·  {short}")
+        item.setData(Qt.ItemDataRole.UserRole + 3, bool(checked))
 
     def _toggle_book(self, item):
         checked = not bool(item.data(Qt.ItemDataRole.UserRole + 2))
@@ -172,13 +172,24 @@ class BookScopeDialog(QDialog):
         QPushButton#scopeAction {{ background:{t['control']}; color:{t['text_muted']}; border:1px solid {t['border']}; border-radius:7px; padding:0 12px; min-width:72px; min-height:32px; }}
         QPushButton#scopeAction:hover {{ background:{t['control_hover']}; color:{t['text']}; border-color:{t['border_strong']}; }}
         QListWidget#scopeBookList {{ background:{t['surface_sunken']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:9px; padding:5px; outline:none; }}
-        QListWidget#scopeBookList::item {{ min-height:38px; padding:6px 8px; border-radius:7px; color:{t['text']}; font-size:13px; }}
-        QListWidget#scopeBookList::item:hover {{ background:{t['control_hover']}; }}
+        QListWidget#scopeBookList::item {{ background:{t['control']}; min-height:38px; padding:6px 10px; margin:2px 0; border:1px solid {t['border']}; border-radius:7px; color:{t['text']}; font-size:13px; }}
+        QListWidget#scopeBookList::item:hover {{ background:{t['control_hover']}; border-color:{t['border_strong']}; }}
+        QListWidget#scopeBookList::item:selected {{ background:{t['accent_soft']}; color:{t['accent_text']}; border:1px solid {t['accent']}; }}
         QDialogButtonBox QPushButton {{ min-width:80px; min-height:34px; border-radius:8px; background:{t['control']}; color:{t['text']}; border:1px solid {t['border']}; padding:0 14px; }}
         QDialogButtonBox QPushButton:hover {{ background:{t['control_hover']}; }}
         QDialogButtonBox QPushButton[text="确定"] {{ background:{t['accent']}; color:#FFFFFF; border-color:{t['accent']}; font-weight:600; }}
         QDialogButtonBox QPushButton[text="确定"]:hover {{ background:{t['accent_hover']}; }}
         """)
+        self._refresh_selection_style()
+
+    def _refresh_selection_style(self):
+        """用整行高亮表达选中状态，不显示圈/对勾。"""
+        for lst in self._lists.values():
+            for i in range(lst.count()):
+                item = lst.item(i)
+                item.setSelected(False)
+                if bool(item.data(Qt.ItemDataRole.UserRole + 2)):
+                    item.setSelected(True)
 
 
 class ScriptureResultWidget(QFrame):
@@ -231,7 +242,7 @@ class ScriptureResultWidget(QFrame):
             safe_term = html.escape(term)
             safe = safe.replace(
                 safe_term,
-                f'<span style="background-color:{t["accent_soft"]}; color:{t["accent_text"]};">{safe_term}</span>'
+                f'<span style="background-color:{t["accent"]}; color:#FFFFFF; font-weight:700; padding:1px 2px;">{safe_term}</span>'
             )
         return safe
 
@@ -370,7 +381,9 @@ class ScriptureSearchWidget(QWidget):
         self.history_list = QListWidget()
         self.history_list.setObjectName("scriptureHistoryList")
         self.history_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
-        self.history_list.setMaximumHeight(128)
+        self.history_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.history_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.history_list.setFixedHeight(10 * 40 + 6)
         condition.addWidget(self.history_list)
         self._refresh_history()
         root.addWidget(self.condition_box)
@@ -473,7 +486,6 @@ class ScriptureSearchWidget(QWidget):
             empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
             empty_hint = QLabel("换一个关键词试试，或扩大搜索范围")
             empty_hint.setObjectName("scriptureEmptyHint")
-            empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
             empty_layout.addWidget(empty_icon)
             empty_layout.addWidget(empty_title)
             empty_layout.addWidget(empty_hint)
@@ -615,11 +627,12 @@ class ScriptureSearchWidget(QWidget):
         QPushButton#historyClearButton {{ background:transparent; color:{t['text_muted']}; border:none; padding:2px 4px; font-size:11px; }}
         QPushButton#historyClearButton:hover:enabled {{ color:{t['accent']}; }}
         QPushButton#historyClearButton:disabled {{ color:{t['text_faint']}; }}
-        QListWidget#scriptureHistoryList {{ background:transparent; border:none; color:{t['text']}; outline:none; padding:0; }}
-        QListWidget#scriptureHistoryList::item {{ background:{t['control']}; border:1px solid transparent; border-radius:7px; margin:2px 0; padding:0; }}
+        QListWidget#scriptureHistoryList {{ background:{t['surface_sunken']}; border:1px solid {t['border']}; border-radius:9px; color:{t['text']}; outline:none; padding:4px; }}
+        QListWidget#scriptureHistoryList::item {{ background:{t['control']}; border:1px solid {t['border']}; border-radius:7px; margin:2px 0; padding:0; }}
+        QListWidget#scriptureHistoryList::item:hover {{ background:{t['control_hover']}; border-color:{t['border_strong']}; }}
         QWidget#scriptureHistoryRow {{ background:transparent; }}
-        QPushButton#historyUseButton {{ background:transparent; color:{t['text_muted']}; border:none; padding:5px 0; text-align:left; font-size:12px; min-height:30px; }}
-        QPushButton#historyUseButton:hover {{ color:{t['text']}; }}
+        QPushButton#historyUseButton {{ background:transparent; color:{t['text']}; border:none; padding:5px 0; text-align:left; font-size:12px; min-height:30px; }}
+        QPushButton#historyUseButton:hover {{ color:{t['accent']}; }}
         QPushButton#historyDeleteButton {{ background:transparent; color:{t['text_faint']}; border:none; border-radius:7px; font-size:15px; padding:0; }}
         QPushButton#historyDeleteButton:hover {{ background:{t['control_hover']}; color:{t['text']}; }}
         QLabel#scriptureResultHeader {{ color:{t['text']}; font-size:13px; font-weight:600; }}
