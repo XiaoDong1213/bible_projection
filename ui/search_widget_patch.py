@@ -1,6 +1,7 @@
 from PyQt6.QtCore import Qt
 
 from .search_widget import SearchWidget
+from . import arrow_navigation_patch
 
 
 def _on_special_key(self, key):
@@ -54,3 +55,4 @@ def _on_special_key(self, key):
 
 
 SearchWidget._on_special_key = _on_special_key
+arrow_navigation_patch.install(__import__("main_window").MainWindow)
