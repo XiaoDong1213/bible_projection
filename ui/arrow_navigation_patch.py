@@ -5,12 +5,8 @@ from PyQt6.QtWidgets import QApplication
 from .selection import ScriptureSelection
 
 
-def _logical_end(db, book, chapter, verse):
-    """返回物理节所属逻辑单位的结束节号。
-
-    get_verse_display_info 当前返回 (label, text)，逻辑起止范围需要
-    从 label 解析，兼容普通节号和连续节号。
-    """
+def _logical_range(db, book, chapter, verse):
+    """返回物理节所属逻辑单位的起止节号。"""
     label, _text = db.get_verse_display_info(book, chapter, verse)
     text = str(label or "").strip()
     if "-" in text:
@@ -26,9 +22,24 @@ def _logical_end(db, book, chapter, verse):
     return value, value
 
 
-def _logical_start(db, book, chapter, verse):
-    """返回物理节所属逻辑单位的起始/结束节号。"""
-    return _logical_end(db, book, chapter, verse)
+def _next_logical_start(db, book, chapter, verse):
+    """取得当前逻辑单位之后的下一个逻辑单位起点。"""
+    _start, end = _logical_range(db, book, chapter, verse)
+    candidate = end + 1
+    max_v = db.get_verse_count(book, chapter)
+    if candidate > max_v:
+        return None
+    start, _end = _logical_range(db, book, chapter, candidate)
+    return start
+
+
+def _previous_logical_range(db, book, chapter, verse):
+    """取得当前逻辑单位之前的逻辑单位范围。"""
+    start, _end = _logical_range(db, book, chapter, verse)
+    candidate = start - 1
+    if candidate < 1:
+        return None
+    return _logical_range(db, book, chapter, candidate)
 
 
 def _restore_scroll(window, scroll_y):
@@ -47,97 +58,119 @@ def _current_scroll(window):
         return 0.0
 
 
+def _load_and_restore(self, selection, scroll_y):
+    self._load_selection(selection)
+    self.nav_panel.sync_from_selection(self.current_selection)
+    _restore_scroll(self, scroll_y)
+
+
 def _add_verse_end(self):
+    """右键：向后移动一个逻辑经文单位。"""
     selection = self._simple_selection_or_none()
     if selection is None:
         return
     scroll_y = _current_scroll(self)
     span = selection.spans[0]
-    _start, logical_end = _logical_end(self.db, selection.book, span.chapter, span.end)
-    max_v = self.db.get_verse_count(selection.book, span.chapter)
-    next_verse = logical_end + 1
-    if next_verse > max_v:
+    next_start = _next_logical_start(self.db, selection.book, span.chapter, span.end)
+    if next_start is None:
         return
-    self._load_selection(
+    _load_and_restore(
+        self,
         ScriptureSelection.single_chapter(
-            selection.book, span.chapter, span.start, next_verse
-        )
+            selection.book, span.chapter, span.start, next_start
+        ),
+        scroll_y,
     )
-    self.nav_panel.sync_from_selection(self.current_selection)
-    _restore_scroll(self, scroll_y)
 
 
 def _remove_verse_end(self):
+    """左键：向前移动一个逻辑经文单位，而不是把当前节直接卡死。"""
     selection = self._simple_selection_or_none()
     if selection is None:
         return
     scroll_y = _current_scroll(self)
     span = selection.spans[0]
-    logical_start, _logical_end_value = _logical_end(
+    current_start, current_end = _logical_range(
         self.db, selection.book, span.chapter, span.end
     )
-    if span.end <= span.start:
-        return
-    new_end = logical_start
-    if new_end < span.start:
-        return
-    self._load_selection(
-        ScriptureSelection.single_chapter(
-            selection.book, span.chapter, span.start, new_end
+
+    # 末端包含多个逻辑单位时，只移除最末端的整个逻辑单位。
+    if current_start > span.start:
+        new_end = current_start - 1
+        _prev_start, prev_end = _logical_range(
+            self.db, selection.book, span.chapter, new_end
         )
+        new_end = prev_end
+        if new_end < span.start:
+            return
+        target_start = span.start
+    else:
+        # 当前只选中了一个逻辑单位：左键直接跳到前一个逻辑单位。
+        previous = _previous_logical_range(
+            self.db, selection.book, span.chapter, current_start
+        )
+        if previous is None:
+            return
+        target_start, new_end = previous
+
+    _load_and_restore(
+        self,
+        ScriptureSelection.single_chapter(
+            selection.book, span.chapter, target_start, new_end
+        ),
+        scroll_y,
     )
-    self.nav_panel.sync_from_selection(self.current_selection)
-    _restore_scroll(self, scroll_y)
 
 
 def _add_verse_start(self):
+    """Ctrl+右：向前端扩展一个逻辑经文单位。"""
     selection = self._simple_selection_or_none()
     if selection is None:
         return
     scroll_y = _current_scroll(self)
     span = selection.spans[0]
-    logical_start, _logical_end_value = _logical_start(
+    previous = _previous_logical_range(
         self.db, selection.book, span.chapter, span.start
     )
-    previous_verse = logical_start - 1
-    if previous_verse < 1:
+    if previous is None:
         return
-    _prev_start, _prev_end = _logical_start(
-        self.db, selection.book, span.chapter, previous_verse
-    )
-    self._load_selection(
+    prev_start, _prev_end = previous
+    _load_and_restore(
+        self,
         ScriptureSelection.single_chapter(
-            selection.book, span.chapter, _prev_start, span.end
-        )
+            selection.book, span.chapter, prev_start, span.end
+        ),
+        scroll_y,
     )
-    self.nav_panel.sync_from_selection(self.current_selection)
-    _restore_scroll(self, scroll_y)
 
 
 def _remove_verse_start(self):
+    """Ctrl+左：从前端移除一个逻辑经文单位。"""
     selection = self._simple_selection_or_none()
     if selection is None:
         return
     scroll_y = _current_scroll(self)
     span = selection.spans[0]
-    logical_start, logical_end = _logical_start(
+    start, end = _logical_range(
         self.db, selection.book, span.chapter, span.start
     )
-    if logical_start >= span.end:
+    if end >= span.end:
         return
-    new_start = logical_end + 1
+    new_start = end + 1
+    new_start, _new_end = _logical_range(
+        self.db, selection.book, span.chapter, new_start
+    )
     if new_start > span.end:
         return
-    self._load_selection(
+    _load_and_restore(
+        self,
         ScriptureSelection.single_chapter(
             selection.book, span.chapter, new_start, span.end
-        )
+        ),
+        scroll_y,
     )
-    self.nav_panel.sync_from_selection(self.current_selection)
-    _restore_scroll(self, scroll_y)
 
 
-# 安装到 MainWindow，避免改动主窗口的大块业务代码。
 def install(MainWindow):
     MainWindow._add_verse_end = _add_verse_end
     MainWindow._remove_verse_end = _remove_verse_end
