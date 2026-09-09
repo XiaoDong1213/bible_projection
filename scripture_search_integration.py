@@ -1,53 +1,59 @@
-from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtWidgets import QApplication, QPushButton
+from PyQt6.QtWidgets import QPushButton
 
-from ui.scripture_search import ScriptureSearchWidget
+from ui.scripture_search import ScriptureSearchDialog
 from ui.selection import ScriptureSelection
 
 
 def install_scripture_search(window):
     """把独立经文搜索接入现有主窗口，不修改原书卷章节搜索。"""
-    window._scripture_search_widget = None
+    window._scripture_search_dialog = None
 
     button = QPushButton("经文搜索")
     button.setObjectName("scriptureSearchToolbarButton")
-    button.setCursor(Qt.CursorShape.PointingHandCursor)
+    button.setCursor(window.cursor().shape())
     button.setToolTip("搜索整本圣经经文  Ctrl+F")
     button.clicked.connect(lambda: _toggle(window))
     window.toolbar.addWidget(button)
     window.scripture_search_button = button
 
     shortcut = QShortcut(QKeySequence("Ctrl+F"), window)
-    shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+    shortcut.setContext(QShortcut.Context.WindowShortcut)
     shortcut.activated.connect(lambda: _toggle(window))
     window._scripture_search_shortcut = shortcut
 
 
 def _toggle(window):
-    widget = window._scripture_search_widget
-    if widget is not None and widget.isVisible():
-        widget.close()
+    dialog = window._scripture_search_dialog
+    if dialog is not None and dialog.isVisible():
+        dialog.activateWindow()
+        dialog.raise_()
+        dialog.input.setFocus()
         return
 
-    widget = ScriptureSearchWidget(
-        window.db, window.config, window, theme=window.theme
-    )
-    window._scripture_search_widget = widget
-    widget.result_activated.connect(lambda result: _activate(window, result))
-    widget.result_project_requested.connect(lambda result: _project(window, result))
-    widget.close_requested.connect(widget.close)
+    history = []
+    if getattr(window, "config", None) is not None:
+        try:
+            history = window.config.load_scripture_search_history()
+        except Exception:
+            history = []
 
-    width = widget.width()
-    height = max(480, window.height() - window.toolbar.height() - 18)
-    widget.resize(width, height)
-    global_pos = window.mapToGlobal(
-        QPoint(window.width() - width - 8, window.toolbar.height() + 4)
+    dialog = ScriptureSearchDialog(
+        window.db,
+        on_select=lambda result: _activate(window, result),
+        history=history,
+        theme=window.theme,
+        parent=window,
     )
-    widget.move(global_pos)
-    widget.show()
-    widget.raise_()
-    widget.search_input.setFocus()
+    window._scripture_search_dialog = dialog
+    dialog.setWindowTitle("经文搜索")
+    dialog.setMinimumSize(720, 560)
+    dialog.resize(720, max(560, min(window.height() - 80, 760)))
+    dialog.setModal(False)
+    dialog.show()
+    dialog.raise_()
+    dialog.activateWindow()
+    dialog.input.setFocus()
 
 
 def _selection_from_result(window, result):
@@ -57,6 +63,15 @@ def _selection_from_result(window, result):
     max_verse = window.db.get_verse_count(book, chapter)
     if not max_verse:
         return None
+
+    # “13~14”这类逻辑节的主节是13，14只是连接标记。
+    label = str(result.get("verse_label", ""))
+    if "~" in label:
+        try:
+            verse = int(label.split("~", 1)[0])
+        except (TypeError, ValueError):
+            pass
+
     verse = max(1, min(verse, max_verse))
     return ScriptureSelection.single_chapter(
         book, chapter, verse, verse, max_verse=max_verse
@@ -70,18 +85,8 @@ def _activate(window, result):
     window._load_selection(selection)
     window.nav_panel.add_selection_to_history(selection)
     window.nav_panel.sync_from_selection(selection)
-    if window._scripture_search_widget is not None:
-        window._scripture_search_widget.raise_()
 
-
-def _project(window, result):
-    selection = _selection_from_result(window, result)
-    if selection is None:
-        return
-    window._load_selection(selection)
-    window.nav_panel.add_selection_to_history(selection)
-    window.nav_panel.sync_from_selection(selection)
-    if not window.extension_window or not window.extension_window.isVisible():
-        window._show_extension()
-    if window._scripture_search_widget is not None:
-        window._scripture_search_widget.raise_()
+    dialog = getattr(window, "_scripture_search_dialog", None)
+    if dialog is not None:
+        dialog.raise_()
+        dialog.activateWindow()
