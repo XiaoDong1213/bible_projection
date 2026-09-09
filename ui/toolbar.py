@@ -241,7 +241,6 @@ class DisplaySettingsDialog(QDialog):
         root.addWidget(buttons)
 
     def _localize_color_dialog(self, dialog):
-        """中文化非原生 QColorDialog 的界面。"""
         translations = {
             "ok": "确定", "cancel": "取消", "reset": "重置",
             "add to custom colors": "添加到自定义颜色",
@@ -251,7 +250,6 @@ class DisplaySettingsDialog(QDialog):
             "saturation": "饱和度", "value": "明度", "red": "红",
             "green": "绿", "blue": "蓝", "alpha": "透明度",
         }
-
         for widget in dialog.findChildren(QWidget):
             candidates = []
             if isinstance(widget, QPushButton):
@@ -260,7 +258,6 @@ class DisplaySettingsDialog(QDialog):
                 candidates.append(("text", widget.text()))
             elif isinstance(widget, QGroupBox):
                 candidates.append(("title", widget.title()))
-
             for attr, raw in candidates:
                 key = raw.strip().rstrip(":").lower()
                 translated = translations.get(key)
@@ -461,8 +458,16 @@ class ToolBarWidget(QToolBar):
         blocked = self.topmost_btn.blockSignals(True)
         self.topmost_btn.setChecked(settings.get("extension_topmost", True))
         self.topmost_btn.blockSignals(blocked)
+
+        raw_titles = settings.get("show_scripture_titles", False)
+        if isinstance(raw_titles, str):
+            show_titles = raw_titles.strip().lower() in {"true", "1", "yes", "on"}
+        else:
+            show_titles = bool(raw_titles)
+        self.settings["show_scripture_titles"] = show_titles
+
         blocked = self.show_titles_btn.blockSignals(True)
-        self.show_titles_btn.setChecked(bool(settings.get("show_scripture_titles", False)))
+        self.show_titles_btn.setChecked(show_titles)
         self.show_titles_btn.blockSignals(blocked)
         self._update_theme_button()
 
