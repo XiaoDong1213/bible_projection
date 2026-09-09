@@ -16,9 +16,13 @@ from .themes import search_panel_style
 
 
 class SearchLineEdit(QLineEdit):
-    """转发搜索框需要单独处理的按键。"""
+    """转发搜索框需要单独处理的按键，并阻止非法简拼字符输入。"""
 
     special_key = pyqtSignal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.book_prefix_validator = None
 
     def keyPressEvent(self, event):
         key = event.key()
@@ -34,6 +38,14 @@ class SearchLineEdit(QLineEdit):
             self.special_key.emit(key)
             event.accept()
             return
+
+        # 书卷简拼阶段只允许输入仍然可能组成合法简拼的字母。
+        # 在这里拦截，字符不会先进入输入框，因此不会出现“输进去后再清除”的闪烁。
+        if self.book_prefix_validator and event.text() and event.text().isalpha():
+            if not self.book_prefix_validator(event.text()):
+                event.accept()
+                return
+
         super().keyPressEvent(event)
 
 
@@ -53,6 +65,7 @@ class SearchWidget(QWidget):
         self.state = SearchState()
         self._scroll_anim = None
         self._theme = theme if theme in ("dark", "light") else "dark"
+        self._last_valid_book_text = ""
 
         self.setObjectName("searchPanel")
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Popup)
@@ -69,6 +82,7 @@ class SearchWidget(QWidget):
         self.search_input.setMinimumHeight(48)
         self.search_input.setPlaceholderText("输入书卷简拼、章节或同章节号")
         self.search_input.setClearButtonEnabled(False)
+        self.search_input.book_prefix_validator = self._validate_book_prefix_input
         self.search_input.textEdited.connect(self._on_text_edited)
         self.search_input.special_key.connect(self._on_special_key)
         layout.addWidget(self.search_input)
@@ -103,6 +117,7 @@ class SearchWidget(QWidget):
         super().showEvent(event)
         self.state = SearchState()
         self.result_list.clear()
+        self._last_valid_book_text = ""
         self._resize_result_area()
         self._update_hint(self.DEFAULT_HINT)
         self.apply_theme(self._theme)
@@ -273,6 +288,7 @@ class SearchWidget(QWidget):
             new_text, new_pos = self._apply_char_delete(text, pos, key, edit)
             self._set_text(new_text, cursor=new_pos)
             self._refresh_book_state(self.search_input.text())
+            self._last_valid_book_text = self.search_input.text()
             self.search_input.setFocus()
             return
 
@@ -326,9 +342,36 @@ class SearchWidget(QWidget):
         self._set_text("")
         self.state = SearchState()
         self.result_list.clear()
+        self._last_valid_book_text = ""
         self._resize_result_area()
         self._refresh_book_state("")
         self.search_input.setFocus()
+
+    def _validate_book_prefix_input(self, inserted_text):
+        """判断即将输入的字母是否仍可能组成合法书卷简拼。"""
+        if self.state.stage != "book":
+            return True
+        if not inserted_text or not inserted_text.isalpha():
+            return True
+
+        edit = self.search_input
+        current = edit.text()
+        start = edit.selectionStart()
+        if start < 0:
+            start = edit.cursorPosition()
+        selected = edit.selectedText() if edit.hasSelectedText() else ""
+        if edit.hasSelectedText():
+            candidate = current[:start] + inserted_text + current[start + len(selected):]
+        else:
+            pos = edit.cursorPosition()
+            candidate = current[:pos] + inserted_text + current[pos:]
+
+        candidate = candidate.strip()
+        if not candidate:
+            return True
+        if not re.fullmatch(r"[A-Za-z]+", candidate):
+            return True
+        return bool(self.matcher.candidates(candidate))
 
     def _refresh_book_state(self, text):
         self.state.stage = "book"
@@ -338,6 +381,7 @@ class SearchWidget(QWidget):
         self.result_list.clear()
         query = text.strip()
         if not query:
+            self._last_valid_book_text = ""
             self._update_hint(self.DEFAULT_HINT)
             return
         if re.fullmatch(r"[A-Za-z]+", query):
@@ -351,6 +395,7 @@ class SearchWidget(QWidget):
             if candidates:
                 self._show_candidates(candidates)
                 self._update_hint("↑↓ 选择书卷　·　Space 确认当前项　·　Enter 确认")
+                self._last_valid_book_text = text
                 return
             if len(query) == 1:
                 first = [b for b in self.db.book_names if self.matcher.code(b)[:1] == query.lower()]
@@ -396,7 +441,18 @@ class SearchWidget(QWidget):
             if clean != text:
                 self._set_text(clean)
                 text = clean
+
+            query = text.strip()
+            # 粘贴、输入法等绕过 keyPressEvent 的情况也必须拦截。
+            # 如果新的书卷前缀已经不可能匹配任何简拼，则恢复到最后一个合法值。
+            if re.fullmatch(r"[A-Za-z]+", query) and not self.matcher.candidates(query):
+                self._set_text(self._last_valid_book_text)
+                self._refresh_book_state(self._last_valid_book_text)
+                return
+
             self._refresh_book_state(text)
+            if self.state.stage == "book":
+                self._last_valid_book_text = text
             return
         book = self.state.selected_book
         if not book:
@@ -521,44 +577,29 @@ class SearchWidget(QWidget):
 
     def _on_item_clicked(self, item):
         data = item.data(Qt.ItemDataRole.UserRole)
-        if not data:
-            return
         if isinstance(data, ScriptureSelection):
-            self.search_triggered.emit(data)
-            self.close_requested.emit()
+            self._confirm_selection(data)
             return
-        if isinstance(data, tuple) and len(data) == 4 and data[2] is not None:
-            selection = ScriptureSelection.from_legacy(*data)
-            self.search_triggered.emit(selection)
-            self.close_requested.emit()
-            return
-        book = data[0] if isinstance(data, tuple) else data
-        self._convert_book(book)
+        if data:
+            self._convert_book(data)
 
-    def _on_confirm(self):
-        if self.state.confirming:
-            return
-        self.state.confirming = True
-        try:
-            parsed = self._parse(self.search_input.text())
-            if parsed:
-                self.search_triggered.emit(parsed)
-                self.close_requested.emit()
-            elif self.state.stage == "book" and self.result_list.count():
-                self._select_current_book()
-            else:
-                current = self.result_list.currentItem()
-                if current and isinstance(current.data(Qt.ItemDataRole.UserRole), ScriptureSelection):
-                    self.search_triggered.emit(current.data(Qt.ItemDataRole.UserRole))
-                    self.close_requested.emit()
-                else:
-                    self._update_hint("请输入有效的书卷或同章节范围（跨章/跳节用左侧）")
-        finally:
-            self.state.confirming = False
+    def _confirm_selection(self, selection):
+        self.search_triggered.emit(selection)
+        self.close_requested.emit()
 
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            self._on_confirm()
+            item = self.result_list.currentItem()
+            if item:
+                data = item.data(Qt.ItemDataRole.UserRole)
+                if isinstance(data, ScriptureSelection):
+                    self._confirm_selection(data)
+                elif data:
+                    self._convert_book(data)
+            elif self.state.selected_book:
+                selection = self._parse(self.search_input.text())
+                if selection:
+                    self._confirm_selection(selection)
             event.accept()
             return
         super().keyPressEvent(event)
