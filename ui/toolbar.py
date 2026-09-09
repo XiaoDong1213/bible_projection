@@ -6,8 +6,70 @@ from PyQt6.QtWidgets import (
     QFileDialog, QLineEdit, QDialogButtonBox, QWidget, QSizePolicy,
     QTabWidget, QGroupBox,
 )
-from PyQt6.QtCore import Qt, QSize, pyqtSignal
-from PyQt6.QtGui import QFont, QColor, QIcon, QPixmap
+from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer
+from PyQt6.QtGui import QFont, QColor, QPainter, QPen
+
+
+class ColorPreview(QWidget):
+    """显示设置里的整条颜色预览条。
+
+    不使用 QPushButton/QSS，避免被应用全局样式覆盖。
+    整个颜色条都可点击，中央显示颜色名称和十六进制值。
+    """
+
+    clicked = pyqtSignal()
+
+    COLOR_NAMES = {
+        "#000000": "黑色", "#FFFFFF": "白色", "#FF0000": "红色",
+        "#00FF00": "绿色", "#0000FF": "蓝色", "#FFFF00": "黄色",
+        "#00FFFF": "青色", "#FF00FF": "洋红色", "#808080": "灰色",
+        "#800000": "栗色", "#008000": "深绿色", "#000080": "藏青色",
+        "#808000": "橄榄色", "#800080": "紫色", "#008080": "水鸭色",
+        "#C0C0C0": "银色", "#FFA500": "橙色", "#FFC0CB": "粉色",
+        "#87CEEB": "天蓝色", "#ADD8E6": "浅蓝色", "#90EE90": "浅绿色",
+        "#FFFFE0": "浅黄色", "#D3D3D3": "浅灰色", "#A9A9A9": "深灰色",
+    }
+
+    def __init__(self, color="#FFFFFF", parent=None):
+        super().__init__(parent)
+        self._color = QColor(color)
+        if not self._color.isValid():
+            self._color = QColor("#FFFFFF")
+        self.setMinimumHeight(34)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("点击选择颜色")
+
+    def set_color(self, color):
+        qcolor = QColor(color)
+        if not qcolor.isValid():
+            qcolor = QColor("#FFFFFF")
+        self._color = qcolor
+        self.update()
+
+    def color(self):
+        return self._color
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = self.rect().adjusted(1, 1, -1, -1)
+
+        painter.setPen(QPen(self._color.darker(115), 1))
+        painter.setBrush(self._color)
+        painter.drawRoundedRect(rect, 5, 5)
+
+        hex_value = self._color.name().upper()
+        name = self.COLOR_NAMES.get(hex_value, "自定义颜色")
+        text = f"{name}  {hex_value}"
+        text_color = QColor("#000000" if self._color.lightness() > 160 else "#FFFFFF")
+        painter.setPen(text_color)
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
 
 
 class DisplaySettingsDialog(QDialog):
@@ -59,7 +121,7 @@ class DisplaySettingsDialog(QDialog):
         self.font_size = QSpinBox()
         self.font_size.setRange(12, 300)
         self.font_size.setSuffix(" px")
-        self.font_color_btn = QPushButton("正文颜色")
+        self.font_color_btn = ColorPreview("#FFFFFF")
         body_form.addRow("正文字体", self.font_combo)
         body_form.addRow("正文字号", self.font_size)
         body_form.addRow("正文颜色", self.font_color_btn)
@@ -74,13 +136,12 @@ class DisplaySettingsDialog(QDialog):
         self.title_size = QSpinBox()
         self.title_size.setRange(12, 300)
         self.title_size.setSuffix(" px")
-        self.title_color_btn = QPushButton("标题颜色")
+        self.title_color_btn = ColorPreview("#FFFFFF")
         title_form.addRow("标题字体", self.title_font_combo)
         title_form.addRow("标题字号", self.title_size)
         title_form.addRow("标题颜色", self.title_color_btn)
         text_tabs.addTab(title_page, "标题")
 
-        # 小标题：沿用其他文字设置页面的统一结构，仅提供字体、字号、颜色。
         scripture_title_page = QWidget()
         scripture_title_form = QFormLayout(scripture_title_page)
         scripture_title_form.setContentsMargins(20, 20, 20, 20)
@@ -90,7 +151,7 @@ class DisplaySettingsDialog(QDialog):
         self.scripture_title_size = QSpinBox()
         self.scripture_title_size.setRange(10, 200)
         self.scripture_title_size.setSuffix(" px")
-        self.scripture_title_color_btn = QPushButton("小标题颜色")
+        self.scripture_title_color_btn = ColorPreview("#87CEEB")
         scripture_title_form.addRow("小标题字体", self.scripture_title_font_combo)
         scripture_title_form.addRow("小标题字号", self.scripture_title_size)
         scripture_title_form.addRow("小标题颜色", self.scripture_title_color_btn)
@@ -105,7 +166,7 @@ class DisplaySettingsDialog(QDialog):
         self.verse_size = QSpinBox()
         self.verse_size.setRange(10, 200)
         self.verse_size.setSuffix(" px")
-        self.verse_color_btn = QPushButton("节号颜色")
+        self.verse_color_btn = ColorPreview("#FFFFFF")
         verse_form.addRow("节号字体", self.verse_font_combo)
         verse_form.addRow("节号字号", self.verse_size)
         verse_form.addRow("节号颜色", self.verse_color_btn)
@@ -120,7 +181,7 @@ class DisplaySettingsDialog(QDialog):
         self.footer_size = QSpinBox()
         self.footer_size.setRange(10, 100)
         self.footer_size.setSuffix(" px")
-        self.footer_color_btn = QPushButton("底注颜色")
+        self.footer_color_btn = ColorPreview("#FFFFFF")
         footer_form.addRow("底注字体", self.footer_font_combo)
         footer_form.addRow("底注字号", self.footer_size)
         footer_form.addRow("底注颜色", self.footer_color_btn)
@@ -156,7 +217,7 @@ class DisplaySettingsDialog(QDialog):
         bg_layout.setContentsMargins(20, 20, 20, 20)
         bg_layout.setHorizontalSpacing(18)
         bg_layout.setVerticalSpacing(14)
-        self.bg_color_btn = QPushButton("背景颜色")
+        self.bg_color_btn = ColorPreview("#FFFFFF")
         self.bg_image = QLineEdit()
         self.bg_image.setReadOnly(True)
         self.bg_image.setPlaceholderText("未选择背景图片")
@@ -184,7 +245,7 @@ class DisplaySettingsDialog(QDialog):
             ("bg_color", "bg_color_btn"),
         ]:
             getattr(self, attr).clicked.connect(
-                lambda _=False, k=key, a=attr: self._choose_color(k, getattr(self, a))
+                lambda k=key, a=attr: self._choose_color(k, getattr(self, a))
             )
 
         buttons = QDialogButtonBox(
@@ -197,49 +258,42 @@ class DisplaySettingsDialog(QDialog):
         root.addWidget(buttons)
 
     def _localize_color_dialog(self, dialog):
-        """将 Qt 颜色选择器中常见的英文界面统一改为中文。"""
-        dialog.setWindowTitle("选择颜色")
+        """中文化非原生 QColorDialog 的界面。"""
         translations = {
-            "ok": "确定",
-            "cancel": "取消",
-            "reset": "重置",
+            "ok": "确定", "cancel": "取消", "reset": "重置",
             "add to custom colors": "添加到自定义颜色",
             "pick screen color": "拾取屏幕颜色",
-            "color name": "颜色名称",
-            "basic colors": "基本颜色",
-            "custom colors": "自定义颜色",
-            "hue": "色相",
-            "saturation": "饱和度",
-            "value": "明度",
-            "red": "红",
-            "green": "绿",
-            "blue": "蓝",
+            "color name": "颜色名称", "basic colors": "基本颜色",
+            "custom colors": "自定义颜色", "hue": "色相",
+            "saturation": "饱和度", "value": "明度", "red": "红",
+            "green": "绿", "blue": "蓝", "alpha": "透明度",
         }
+
         for widget in dialog.findChildren(QWidget):
-            text = ""
+            candidates = []
             if isinstance(widget, QPushButton):
-                text = widget.text().strip()
+                candidates.append(("text", widget.text()))
             elif isinstance(widget, QLabel):
-                text = widget.text().strip().rstrip(":")
+                candidates.append(("text", widget.text()))
             elif isinstance(widget, QGroupBox):
-                text = widget.title().strip()
-            if not text:
-                continue
-            translated = translations.get(text.lower())
-            if not translated:
-                continue
-            if isinstance(widget, QPushButton):
-                widget.setText(translated)
-            elif isinstance(widget, QLabel):
-                widget.setText(translated)
-            elif isinstance(widget, QGroupBox):
-                widget.setTitle(translated)
+                candidates.append(("title", widget.title()))
+
+            for attr, raw in candidates:
+                key = raw.strip().rstrip(":").lower()
+                translated = translations.get(key)
+                if not translated:
+                    continue
+                if attr == "text":
+                    widget.setText(translated)
+                else:
+                    widget.setTitle(translated)
 
     def _choose_color(self, key, button):
         current = self.settings.get(key, "#FFFFFF")
         dialog = QColorDialog(QColor(current), self)
         dialog.setOption(QColorDialog.ColorDialogOption.DontUseNativeDialog, True)
-        self._localize_color_dialog(dialog)
+        dialog.setWindowTitle("选择颜色")
+        QTimer.singleShot(0, lambda: self._localize_color_dialog(dialog))
         if dialog.exec() == QDialog.DialogCode.Accepted:
             color = dialog.currentColor()
             if color.isValid():
@@ -248,17 +302,11 @@ class DisplaySettingsDialog(QDialog):
                 self._set_color_button(button, value)
 
     def _set_color_button(self, button, color):
-        """用真正的颜色图标做预览，完全绕开应用级 QSS 对按钮背景的覆盖。"""
+        button.set_color(color)
         qcolor = QColor(color)
-        if not qcolor.isValid():
-            qcolor = QColor("#FFFFFF")
-            color = qcolor.name().upper()
-        pixmap = QPixmap(30, 18)
-        pixmap.fill(qcolor)
-        button.setIcon(QIcon(pixmap))
-        button.setIconSize(QSize(30, 18))
-        button.setText(str(color).upper())
-        button.setToolTip(f"当前颜色：{str(color).upper()}，点击修改")
+        if qcolor.isValid():
+            name = ColorPreview.COLOR_NAMES.get(qcolor.name().upper(), "自定义颜色")
+            button.setToolTip(f"当前颜色：{name} {qcolor.name().upper()}，点击修改")
 
     def _choose_bg(self):
         dialog = QFileDialog(self, "选择背景图片")
