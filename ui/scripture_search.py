@@ -57,7 +57,7 @@ class BookScopeDialog(QDialog):
         super().__init__(parent)
         self.db = db
         self.selected = set(selected or [])
-        self.theme = theme
+        self.theme = theme if theme in ("dark", "light") else "dark"
         self._lists = {}
         self.setObjectName("scriptureScopeDialog")
         self.setWindowTitle("选择搜索范围")
@@ -231,7 +231,7 @@ class ScriptureSearchWidget(QWidget):
         super().__init__(parent)
         self.db = db
         self.config = config
-        self.theme = theme
+        self.theme = theme if theme in ("dark", "light") else "dark"
         self.page = 0
         self.total = 0
         self.results = []
@@ -549,7 +549,7 @@ class ScriptureSearchWidget(QWidget):
     @staticmethod
     def _history_row_size():
         from PyQt6.QtCore import QSize
-        return QSize(0, 34)
+        return QSize(0, 40)
 
     def _use_history_text(self, text):
         self.search_input.setText(text)
@@ -602,13 +602,14 @@ class ScriptureSearchWidget(QWidget):
         QListWidget#scriptureHistoryList {{ background:transparent; border:none; color:{t['text']}; outline:none; padding:0; }}
         QListWidget#scriptureHistoryList::item {{ background:{t['control']}; border:1px solid transparent; border-radius:7px; margin:2px 0; padding:0; }}
         QWidget#scriptureHistoryRow {{ background:transparent; }}
-        QPushButton#historyUseButton {{ background:transparent; color:{t['text_muted']}; border:none; padding:5px 0; text-align:left; font-size:12px; }}
+        QPushButton#historyUseButton {{ background:transparent; color:{t['text_muted']}; border:none; padding:5px 0; text-align:left; font-size:12px; min-height:30px; }}
         QPushButton#historyUseButton:hover {{ color:{t['text']}; }}
         QPushButton#historyDeleteButton {{ background:transparent; color:{t['text_faint']}; border:none; border-radius:7px; font-size:15px; padding:0; }}
         QPushButton#historyDeleteButton:hover {{ background:{t['control_hover']}; color:{t['text']}; }}
         QLabel#scriptureResultHeader {{ color:{t['text']}; font-size:13px; font-weight:600; }}
         QLabel#scriptureResultHint {{ color:{t['text_faint']}; font-size:11px; }}
-        QScrollArea#scriptureResultScroll {{ background:transparent; border:none; }}
+        QScrollArea#scriptureResultScroll {{ background:{t['surface_raised']}; border:none; }}
+        QScrollArea#scriptureResultScroll QWidget {{ background:transparent; }}
         QWidget#scriptureResultContainer {{ background:transparent; }}
         QFrame#scriptureSearchResult {{ background:{t['surface']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:10px; }}
         QFrame#scriptureSearchResult:hover {{ background:{t['control']}; border-color:{t['border_strong']}; }}
@@ -633,8 +634,8 @@ class ScriptureSearchWidget(QWidget):
         """)
 
     def apply_theme(self, theme):
-        self.theme = theme
-        self.setProperty("theme", theme)
+        self.theme = theme if theme in ("dark", "light") else "dark"
+        self.setProperty("theme", self.theme)
         self._apply_style()
         self.style().unpolish(self)
         self.style().polish(self)
