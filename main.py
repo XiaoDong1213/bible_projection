@@ -11,6 +11,7 @@ from bible_database import BibleDatabase
 from main_window import MainWindow
 from scripture_search_integration import install_scripture_search
 from feature_flags import ENABLE_SCRIPTURE_SEARCH
+from ui import scripture_title_render_patch  # noqa: F401 - 安装经文小标题渲染修复
 
 
 # 设置 Windows 应用标识，确保任务栏图标正确关联
