@@ -73,8 +73,6 @@ class DisplaySettingsDialog(QDialog):
         title_form.setHorizontalSpacing(18)
         title_form.setVerticalSpacing(12)
 
-        self.show_scripture_titles = QCheckBox("显示经文小标题")
-        self.show_scripture_titles.setToolTip("在对应经文之前显示数据库中的经文小标题")
         self.title_font_combo = QFontComboBox()
         self.title_size = QSpinBox()
         self.title_size.setRange(12, 300)
@@ -84,7 +82,6 @@ class DisplaySettingsDialog(QDialog):
         self.title_spacing.setRange(0, 100)
         self.title_spacing.setSuffix(" px")
 
-        title_form.addRow("功能开关", self.show_scripture_titles)
         title_form.addRow("标题字体", self.title_font_combo)
         title_form.addRow("标题字号", self.title_size)
         title_form.addRow("标题颜色", self.title_color_btn)
@@ -235,7 +232,6 @@ class DisplaySettingsDialog(QDialog):
 
     def _load_settings(self):
         s = self.settings
-        self.show_scripture_titles.setChecked(bool(s.get("show_scripture_titles", False)))
         self.font_combo.setCurrentFont(QFont(s.get("font_family", "微软雅黑")))
         self.font_size.setValue(int(s.get("font_size", 24)))
         self.title_font_combo.setCurrentFont(QFont(s.get("title_font_family", "微软雅黑")))
@@ -262,7 +258,6 @@ class DisplaySettingsDialog(QDialog):
     def get_settings(self):
         s = dict(self.settings)
         s.update({
-            "show_scripture_titles": self.show_scripture_titles.isChecked(),
             "font_family": self.font_combo.currentFont().family(),
             "font_size": self.font_size.value(),
             "title_font_family": self.title_font_combo.currentFont().family(),
@@ -326,6 +321,14 @@ class ToolBarWidget(QToolBar):
         self.clear_btn.clicked.connect(self.clear_requested)
         self.addWidget(self.clear_btn)
 
+        self.show_titles_btn = QCheckBox("小标题")
+        self.show_titles_btn.setObjectName("showTitlesBtn")
+        self.show_titles_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.show_titles_btn.setMinimumHeight(30)
+        self.show_titles_btn.setToolTip("显示 / 隐藏经文小标题")
+        self.show_titles_btn.toggled.connect(self._toggle_scripture_titles)
+        self.addWidget(self.show_titles_btn)
+
         self.addSeparator()
 
         scroll_wrap = QWidget()
@@ -375,7 +378,14 @@ class ToolBarWidget(QToolBar):
         blocked = self.topmost_btn.blockSignals(True)
         self.topmost_btn.setChecked(settings.get("extension_topmost", True))
         self.topmost_btn.blockSignals(blocked)
+        blocked = self.show_titles_btn.blockSignals(True)
+        self.show_titles_btn.setChecked(bool(settings.get("show_scripture_titles", False)))
+        self.show_titles_btn.blockSignals(blocked)
         self._update_theme_button()
+
+    def _toggle_scripture_titles(self, checked):
+        self.settings["show_scripture_titles"] = bool(checked)
+        self.settings_changed.emit(dict(self.settings))
 
     def _open_settings(self):
         dialog = DisplaySettingsDialog(self.settings, self.window())
