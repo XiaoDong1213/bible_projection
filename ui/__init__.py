@@ -9,6 +9,9 @@ from .search_widget_space_fix import SearchWidget
 from .navigation_panel import NavigationPanel
 from .toolbar import ToolBarWidget
 from .extension_window import ExtensionWindow
+from .logical_selection_patch import install_logical_selection_patch
+
+install_logical_selection_patch()
 
 
 # 经文搜索面板采用延迟导入，避免 ui 包初始化阶段产生循环导入。
