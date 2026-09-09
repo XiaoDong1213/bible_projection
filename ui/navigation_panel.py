@@ -408,7 +408,7 @@ class NavigationPanel(QWidget):
             clamp=False,
         )
 
-        start_cross_max = self._set_verse_spin_limit(
+        self._set_verse_spin_limit(
             self.cross_start_v, book, self.cross_start_ch.value(), clamp=True
         )
         end_cross_max = self._set_verse_spin_limit(
@@ -475,9 +475,7 @@ class NavigationPanel(QWidget):
 
     def _on_skip_chapter_changed(self, chapter):
         if self.selected_book and not self._history_updating:
-            max_v = self._set_verse_spin_limit if False else max(
-                1, self.db.get_verse_count(self.selected_book, int(chapter))
-            )
+            max_v = max(1, self.db.get_verse_count(self.selected_book, int(chapter)))
             self.skip_hint.setText(f"本章 {max_v} 节　·　例 16-18 20")
 
     def sync_selection(self, book, chapter, start, end):
