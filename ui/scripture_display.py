@@ -136,6 +136,8 @@ class ScriptureDisplay(QWidget):
         self.title_color = QColor("#87CEEB")
         self.title_size = 36
         self.title_min_size = 12
+        self.title_spacing = 12
+        self.show_scripture_titles = False
         self.verse_num_color = QColor("#FFD700")
         self.verse_num_size = 24
         self.verse_num_font_family = "微软雅黑"
@@ -325,13 +327,25 @@ class ScriptureDisplay(QWidget):
             self._render_scripture()
             self.set_scroll_fraction(old)
 
+    def set_scripture_titles(self, enabled):
+        enabled = bool(enabled)
+        if self.show_scripture_titles == enabled:
+            return
+        old = self.scroll_fraction()
+        self.show_scripture_titles = enabled
+        if self.verses:
+            self._render_scripture()
+            self.set_scroll_fraction(old)
+
     def _verse_row(self, row):
-        """兼容 (verse, text) 与 (chapter, verse, text)。"""
+        """兼容旧数据与带小标题的数据行。"""
         if row is None:
-            return None, None, ""
+            return None, None, "", []
+        if len(row) >= 4:
+            return row[0], row[1], row[2], list(row[3] or [])
         if len(row) >= 3:
-            return row[0], row[1], row[2]
-        return None, row[0], row[1]
+            return row[0], row[1], row[2], []
+        return None, row[0], row[1], []
 
     def _verse_html(self, chapter, n, t):
         safe = str(t).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -345,6 +359,22 @@ class ScriptureDisplay(QWidget):
             f'font-family:&quot;{self.font_family}&quot;;">{safe}</span>'
         )
 
+    def _title_html(self, text):
+        safe = str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        fs = self._px(self.title_size)
+        spacing = self._px(self.title_spacing)
+        return (
+            f'<p style="margin:0 0 {spacing}px 0;padding:0;line-height:{self.line_spacing}%;">'
+            f'<span style="color:{self.title_color.name()};font-size:{fs}px;'
+            f'font-family:&quot;{self.title_font_family}&quot;;font-weight:bold;">{safe}</span></p>'
+        )
+
+    def _verse_block_html(self, chapter, n, t):
+        return (
+            f"<p style='margin:0;padding:0;text-align:justify;"
+            f"line-height:{self.line_spacing}%;'>{self._verse_html(chapter, n, t)}</p>"
+        )
+
     def _render_scripture(self):
         fs = self._px(self.font_size)
         top = max(10, int(fs * 0.35))
@@ -354,17 +384,20 @@ class ScriptureDisplay(QWidget):
             f"line-height:{self.line_spacing}%;text-align:justify;'>"
         )
         rows = [self._verse_row(row) for row in self.verses]
-        if self.verse_segmentation:
-            html += "".join(
-                f"<p style='margin:0 0 {self._px(1)}px 0;padding:0;"
-                f"text-align:justify;line-height:{self.line_spacing}%;'>"
-                f"{self._verse_html(ch, n, t)}</p>"
-                for ch, n, t in rows
-            )
+
+        # 开启小标题后强制逐节成块，确保标题始终位于所属节之前；关闭时保留原有排版。
+        if self.show_scripture_titles or self.verse_segmentation:
+            blocks = []
+            for ch, n, t, titles in rows:
+                if self.show_scripture_titles:
+                    for subtitle in titles:
+                        blocks.append(self._title_html(subtitle))
+                blocks.append(self._verse_block_html(ch, n, t))
+            html += "".join(blocks)
         else:
             html += (
                 "<p style='margin:0;padding:0;white-space:normal;text-align:justify;'>"
-                + " ".join(self._verse_html(ch, n, t) for ch, n, t in rows)
+                + " ".join(self._verse_html(ch, n, t) for ch, n, t, _titles in rows)
                 + "</p>"
             )
         self.text_display.set_html(html + "</div>")
@@ -438,7 +471,6 @@ class ScriptureDisplay(QWidget):
         return self.text_display.max_scroll()
 
     def get_scroll_anchor(self):
-        # 改为比例锚点，重排后恢复相对位置
         return self.scroll_fraction()
 
     def set_scroll_anchor(self, anchor):
@@ -447,7 +479,6 @@ class ScriptureDisplay(QWidget):
         except (TypeError, ValueError):
             return
         if a > 1.0:
-            # 兼容旧字符位置：尽量落到文档顶部附近
             a = 0.0
         self.set_scroll_fraction(a)
 
@@ -471,7 +502,6 @@ class ScriptureDisplay(QWidget):
         self._scroll_anim.start()
 
     def set_scroll_speed(self, speed):
-        # 与工具栏 0–9 档对齐；按像素/秒计速，定时器跟屏幕刷新率
         self.scroll_speed = max(0, min(9, int(speed)))
         if self.scroll_speed == 0:
             self.scroll_timer.stop()
@@ -571,6 +601,7 @@ class ScriptureDisplay(QWidget):
             ("font_size", "font_size"),
             ("line_spacing", "line_spacing"),
             ("title_size", "title_size"),
+            ("title_spacing", "title_spacing"),
             ("verse_num_size", "verse_num_size"),
             ("footer_height", "footer_height"),
             ("footer_size", "footer_size"),
@@ -618,12 +649,14 @@ class ScriptureDisplay(QWidget):
                 pass
         if "footer_text" in settings:
             self.footer_text = settings["footer_text"]
+        if "show_scripture_titles" in settings:
+            self.show_scripture_titles = bool(settings["show_scripture_titles"])
 
         self._update_footer_style()
         self._update_viewport_margins()
 
         if "verse_segmentation" in settings:
-            self.set_verse_segmentation(bool(settings["verse_segmentation"]))
+            self.verse_segmentation = bool(settings["verse_segmentation"])
 
         if self._title_text:
             self._set_adaptive_title(self._title_text)
