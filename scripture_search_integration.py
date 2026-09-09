@@ -2,6 +2,13 @@ from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import QPushButton
 
+from ui import scripture_search as _scripture_search
+from ui.scripture_result_compat import ScriptureResultWidget
+
+# 当前经文搜索模块已经移除了旧版结果卡片；旧版侧边面板仍需要它。
+# 在加载 legacy 面板前提供兼容实现，避免改动当前搜索逻辑。
+_scripture_search.ScriptureResultWidget = ScriptureResultWidget
+
 from ui.scripture_search_legacy import ScriptureSearchWidget
 from ui.selection import ScriptureSelection
 
