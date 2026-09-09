@@ -60,6 +60,8 @@ def _current_scroll(window):
 
 def _load_and_restore(self, selection, scroll_y):
     self._load_selection(selection)
+    # 方向键产生的选择也必须进入历史记录，否则左侧历史仍停留在旧节。
+    self.nav_panel.add_selection_to_history(self.current_selection)
     self.nav_panel.sync_from_selection(self.current_selection)
     _restore_scroll(self, scroll_y)
 
@@ -84,13 +86,13 @@ def _add_verse_end(self):
 
 
 def _remove_verse_end(self):
-    """左键：向前移动一个逻辑经文单位，而不是把当前节直接卡死。"""
+    """左键：向前移动一个逻辑经文单位。"""
     selection = self._simple_selection_or_none()
     if selection is None:
         return
     scroll_y = _current_scroll(self)
     span = selection.spans[0]
-    current_start, current_end = _logical_range(
+    current_start, _current_end = _logical_range(
         self.db, selection.book, span.chapter, span.end
     )
 
