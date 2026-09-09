@@ -10,8 +10,10 @@ from .navigation_panel import NavigationPanel
 from .toolbar import ToolBarWidget
 from .extension_window import ExtensionWindow
 from .logical_selection_patch import install_logical_selection_patch
+from .title_sync_patch import install_title_sync_patch
 
 install_logical_selection_patch()
+install_title_sync_patch()
 
 
 # 经文搜索面板采用延迟导入，避免 ui 包初始化阶段产生循环导入。
