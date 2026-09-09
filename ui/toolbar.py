@@ -1,4 +1,3 @@
-# ui/toolbar.py
 # 顶部工具栏：分组布局 + 速度下拉（冷蓝控制台）
 
 from PyQt6.QtWidgets import (
@@ -193,16 +192,27 @@ class DisplaySettingsDialog(QDialog):
             )
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("确定")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
 
     def _choose_color(self, key, button):
         current = self.settings.get(key, "#FFFFFF")
-        color = QColorDialog.getColor(QColor(current), self, "选择颜色")
-        if color.isValid():
-            self.settings[key] = color.name()
-            self._set_color_button(button, color.name())
+        dialog = QColorDialog(QColor(current), self)
+        dialog.setWindowTitle("选择颜色")
+        ok_button = dialog.button(QDialogButtonBox.StandardButton.Ok)
+        cancel_button = dialog.button(QDialogButtonBox.StandardButton.Cancel)
+        if ok_button:
+            ok_button.setText("确定")
+        if cancel_button:
+            cancel_button.setText("取消")
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            color = dialog.currentColor()
+            if color.isValid():
+                self.settings[key] = color.name()
+                self._set_color_button(button, color.name())
 
     def _set_color_button(self, button, color):
         button.setStyleSheet(
@@ -210,11 +220,21 @@ class DisplaySettingsDialog(QDialog):
         )
 
     def _choose_bg(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "选择背景图片", "", "图片文件 (*.png *.jpg *.jpeg *.bmp *.webp)"
-        )
-        if path:
-            self.bg_image.setText(path)
+        dialog = QFileDialog(self, "选择背景图片")
+        dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+        dialog.setNameFilter("图片文件 (*.png *.jpg *.jpeg *.bmp *.webp)")
+        dialog.setWindowTitle("选择背景图片")
+        buttons = dialog.findChildren(QPushButton)
+        for button in buttons:
+            text = button.text().strip().lower()
+            if text in {"open", "&open"}:
+                button.setText("打开")
+            elif text in {"cancel", "&cancel"}:
+                button.setText("取消")
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            paths = dialog.selectedFiles()
+            if paths:
+                self.bg_image.setText(paths[0])
 
     def _clear_bg(self):
         self.bg_image.clear()
@@ -278,137 +298,3 @@ class ToolBarWidget(QToolBar):
     footer_triggered = pyqtSignal()
     theme_changed = pyqtSignal(str)
     topmost_toggled = pyqtSignal(bool)
-    scroll_up = pyqtSignal()
-    scroll_down = pyqtSignal()
-    clear_requested = pyqtSignal()
-
-    SPEED_LABELS = ["暂停"] + [f"{i}档" for i in range(1, 10)]
-
-    def __init__(self, parent=None):
-        super().__init__("主工具栏", parent)
-        self.setMovable(False)
-        self.setIconSize(QSize(18, 18))
-        self.setFloatable(False)
-        self.theme = "dark"
-        self.settings = {}
-        self._speed = 0
-
-        self.extend_btn = QPushButton("扩展显示  F12")
-        self.extend_btn.setObjectName("extendBtn")
-        self.extend_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.extend_btn.clicked.connect(self.extend_toggled)
-        self.addWidget(self.extend_btn)
-
-        self.topmost_btn = QPushButton("置顶")
-        self.topmost_btn.setObjectName("topmostBtn")
-        self.topmost_btn.setCheckable(True)
-        self.topmost_btn.setChecked(True)
-        self.topmost_btn.setEnabled(False)
-        self.topmost_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.topmost_btn.setToolTip("扩展窗口始终置顶")
-        self.topmost_btn.toggled.connect(self.topmost_toggled)
-        self.addWidget(self.topmost_btn)
-
-        self.clear_btn = QPushButton("清屏")
-        self.clear_btn.setObjectName("clearBtn")
-        self.clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.clear_btn.setToolTip("清空预览与扩展屏经文")
-        self.clear_btn.clicked.connect(self.clear_requested)
-        self.addWidget(self.clear_btn)
-
-        self.show_titles_btn = QPushButton("小标题")
-        self.show_titles_btn.setObjectName("showTitlesBtn")
-        self.show_titles_btn.setCheckable(True)
-        self.show_titles_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.show_titles_btn.setMinimumHeight(30)
-        self.show_titles_btn.setToolTip("显示 / 隐藏经文小标题")
-        self.show_titles_btn.toggled.connect(self._toggle_scripture_titles)
-        self.addWidget(self.show_titles_btn)
-
-        self.addSeparator()
-
-        scroll_wrap = QWidget()
-        scroll_layout = QHBoxLayout(scroll_wrap)
-        scroll_layout.setContentsMargins(0, 0, 0, 0)
-        scroll_layout.setSpacing(8)
-        scroll_layout.addWidget(QLabel("速度"))
-        self.speed_buttons = []
-        for speed, text in [(0, "暂停")] + [(i, f"{i}档") for i in range(1, 10)]:
-            btn = QPushButton(text)
-            btn.setObjectName("speedBtn")
-            btn.setCheckable(True)
-            btn.setAutoExclusive(False)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setMinimumHeight(30)
-            btn.setToolTip("暂停自动滚动" if speed == 0 else f"自动滚动 {speed} 档")
-            btn.setProperty("speedValue", speed)
-            btn.clicked.connect(lambda checked=False, s=speed: self._set_speed(s))
-            self.speed_buttons.append(btn)
-            scroll_layout.addWidget(btn)
-        self.addWidget(scroll_wrap)
-        self._set_speed(0)
-
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self.addWidget(spacer)
-        self.addSeparator()
-
-        self.settings_btn = QPushButton("显示设置")
-        self.settings_btn.setObjectName("settingsBtn")
-        self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.settings_btn.clicked.connect(self._open_settings)
-        self.addWidget(self.settings_btn)
-
-        self.theme_btn = QPushButton("亮色")
-        self.theme_btn.setObjectName("themeBtn")
-        self.theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.theme_btn.setToolTip("切换亮色 / 暗色主题")
-        self.theme_btn.clicked.connect(self._toggle_theme)
-        self.addWidget(self.theme_btn)
-
-    def load_settings(self, settings):
-        self.settings = dict(settings)
-        self.theme = settings.get("theme", "dark")
-        blocked = self.topmost_btn.blockSignals(True)
-        self.topmost_btn.setChecked(settings.get("extension_topmost", True))
-        self.topmost_btn.blockSignals(blocked)
-        blocked = self.show_titles_btn.blockSignals(True)
-        self.show_titles_btn.setChecked(bool(settings.get("show_scripture_titles", False)))
-        self.show_titles_btn.blockSignals(blocked)
-        self._update_theme_button()
-
-    def _toggle_scripture_titles(self, checked):
-        self.settings["show_scripture_titles"] = bool(checked)
-        self.settings_changed.emit(dict(self.settings))
-
-    def _open_settings(self):
-        dialog = DisplaySettingsDialog(self.settings, self.window())
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.settings = dialog.get_settings()
-            self.settings_changed.emit(self.settings)
-
-    def _set_speed(self, speed):
-        speed = max(0, min(9, int(speed)))
-        self._speed = speed
-        for i, btn in enumerate(self.speed_buttons):
-            btn.setChecked(i == speed)
-        self.scroll_speed_changed.emit(speed)
-
-    def current_speed(self):
-        return self._speed
-
-    def _toggle_theme(self):
-        self.theme = "light" if self.theme == "dark" else "dark"
-        self._update_theme_button()
-        self.theme_changed.emit(self.theme)
-
-    def _update_theme_button(self):
-        self.theme_btn.setText("暗色" if self.theme == "light" else "亮色")
-
-    def set_extend_active(self, active):
-        if active:
-            self.extend_btn.setText("关闭扩展  Esc")
-            self.topmost_btn.setEnabled(True)
-        else:
-            self.extend_btn.setText("扩展显示  F12")
-            self.topmost_btn.setEnabled(False)
