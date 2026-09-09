@@ -6,6 +6,10 @@ from PyQt6.QtWidgets import QFormLayout, QFontComboBox, QPushButton, QSpinBox, Q
 from .scripture_display import ScriptureDisplay
 from .toolbar import DisplaySettingsDialog
 from config import AppConfig
+import ui.themes as _themes
+
+# Qt QSS 的 font-family 使用单一字体名更稳定；原来的 CSS fallback 列表会在部分 Qt 版本触发样式解析警告。
+_themes.FONT_FAMILY = '"Microsoft YaHei UI"'
 
 
 def _color_name(value, fallback="#87CEEB"):
