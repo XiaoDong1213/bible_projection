@@ -47,6 +47,7 @@ def search_scripture(db, keywords, fuzzy=True, match_all=True, books=None, limit
     id_to_name = {str(v.get("id")).strip(): k for k, v in db.book_meta.items() if v.get("id") is not None}
     return total, [{
         "book": id_to_name.get(str(row["raw_book"]).strip(), str(row["raw_book"])),
+        "short": db._short_name(id_to_name.get(str(row["raw_book"]).strip(), str(row["raw_book"]))),
         "chapter": int(row["chapter"]), "verse": int(row["verse"]), "text": str(row["text"]),
     } for row in rows]
 
@@ -72,7 +73,7 @@ class BookScopeDialog(QDialog):
         heading = QLabel("选择搜索范围")
         heading.setObjectName("scopeDialogTitle")
         root.addWidget(heading)
-        hint = QLabel("选择需要参与搜索的书卷；不选择时默认搜索全部书卷。")
+        hint = QLabel("点击书卷即可选择或取消选择。")
         hint.setObjectName("scopeDialogHint")
         root.addWidget(hint)
         self.filter_input = QLineEdit()
@@ -108,12 +109,13 @@ class BookScopeDialog(QDialog):
             lst = QListWidget()
             lst.setObjectName("scopeBookList")
             lst.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+            lst.itemClicked.connect(self._toggle_book)
             self._lists[category] = lst
             for book, short in self.db.get_books(category):
-                item = QListWidgetItem(f"{book}  ·  {short}")
+                item = QListWidgetItem()
                 item.setData(Qt.ItemDataRole.UserRole, book)
-                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                item.setCheckState(Qt.CheckState.Checked if book in self.selected else Qt.CheckState.Unchecked)
+                item.setData(Qt.ItemDataRole.UserRole + 1, short)
+                self._set_item_checked(item, book in self.selected)
                 lst.addItem(item)
             box.addWidget(lst, 1)
             columns.addLayout(box, 1)
@@ -125,10 +127,21 @@ class BookScopeDialog(QDialog):
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
 
+    @staticmethod
+    def _set_item_checked(item, checked):
+        item.setData(Qt.ItemDataRole.UserRole + 2, bool(checked))
+        book = str(item.data(Qt.ItemDataRole.UserRole) or "")
+        short = str(item.data(Qt.ItemDataRole.UserRole + 1) or "")
+        prefix = "✓" if checked else "○"
+        item.setText(f"{prefix}   {book}  ·  {short}")
+
+    def _toggle_book(self, item):
+        checked = not bool(item.data(Qt.ItemDataRole.UserRole + 2))
+        self._set_item_checked(item, checked)
+
     def _set_all(self, category, checked):
-        state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
         for i in range(self._lists[category].count()):
-            self._lists[category].item(i).setCheckState(state)
+            self._set_item_checked(self._lists[category].item(i), checked)
 
     def _filter_books(self, text):
         q = text.strip().lower()
@@ -143,7 +156,7 @@ class BookScopeDialog(QDialog):
         for lst in self._lists.values():
             for i in range(lst.count()):
                 item = lst.item(i)
-                if item.checkState() == Qt.CheckState.Checked:
+                if bool(item.data(Qt.ItemDataRole.UserRole + 2)):
                     result.add(str(item.data(Qt.ItemDataRole.UserRole)))
         return result
 
@@ -159,7 +172,7 @@ class BookScopeDialog(QDialog):
         QPushButton#scopeAction {{ background:{t['control']}; color:{t['text_muted']}; border:1px solid {t['border']}; border-radius:7px; padding:0 12px; min-width:72px; min-height:32px; }}
         QPushButton#scopeAction:hover {{ background:{t['control_hover']}; color:{t['text']}; border-color:{t['border_strong']}; }}
         QListWidget#scopeBookList {{ background:{t['surface_sunken']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:9px; padding:5px; outline:none; }}
-        QListWidget#scopeBookList::item {{ padding:7px 8px; border-radius:6px; color:{t['text']}; }}
+        QListWidget#scopeBookList::item {{ min-height:38px; padding:6px 8px; border-radius:7px; color:{t['text']}; font-size:13px; }}
         QListWidget#scopeBookList::item:hover {{ background:{t['control_hover']}; }}
         QDialogButtonBox QPushButton {{ min-width:80px; min-height:34px; border-radius:8px; background:{t['control']}; color:{t['text']}; border:1px solid {t['border']}; padding:0 14px; }}
         QDialogButtonBox QPushButton:hover {{ background:{t['control_hover']}; }}
@@ -173,9 +186,11 @@ class ScriptureResultWidget(QFrame):
     copy_requested = pyqtSignal(object)
     project_requested = pyqtSignal(object)
 
-    def __init__(self, result, keywords, parent=None):
+    def __init__(self, result, keywords, theme="dark", parent=None):
         super().__init__(parent)
         self.result = result
+        self.keywords = keywords
+        self.theme = theme
         self.setObjectName("scriptureSearchResult")
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
@@ -184,7 +199,7 @@ class ScriptureResultWidget(QFrame):
         root.setSpacing(8)
         top = QHBoxLayout()
         top.setSpacing(8)
-        title = QPushButton(f"{result['book']} {result['chapter']}:{result['verse']}")
+        title = QPushButton(f"{result['short']} {result['chapter']}:{result['verse']}")
         title.setObjectName("scriptureResultTitle")
         title.setFlat(True)
         title.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -201,22 +216,23 @@ class ScriptureResultWidget(QFrame):
         project_btn.clicked.connect(lambda: self.project_requested.emit(self.result))
         top.addWidget(project_btn)
         root.addLayout(top)
-        meta = QLabel(f"{result['book']}  ·  第 {result['chapter']} 章  ·  第 {result['verse']} 节")
-        meta.setObjectName("scriptureResultMeta")
-        root.addWidget(meta)
-        text = QLabel(self._highlight(result["text"], keywords))
+        text = QLabel(self._highlight(result["text"], keywords, theme))
         text.setObjectName("scriptureResultText")
         text.setTextFormat(Qt.TextFormat.RichText)
         text.setWordWrap(True)
         root.addWidget(text)
 
     @staticmethod
-    def _highlight(text, keywords):
+    def _highlight(text, keywords, theme):
+        t = theme_tokens(theme)
         safe = html.escape(str(text))
         terms = sorted({str(k).strip() for k in keywords if str(k).strip()}, key=len, reverse=True)
         for term in terms:
             safe_term = html.escape(term)
-            safe = safe.replace(safe_term, f"<mark>{safe_term}</mark>")
+            safe = safe.replace(
+                safe_term,
+                f'<span style="background-color:{t["accent_soft"]}; color:{t["accent_text"]};">{safe_term}</span>'
+            )
         return safe
 
 
@@ -236,7 +252,7 @@ class ScriptureSearchWidget(QWidget):
         self.total = 0
         self.results = []
         self.selected_books = set()
-        self.history = config.load_scripture_search_history() if config else []
+        self.history = (config.load_scripture_search_history() if config else [])[:10]
         self.setObjectName("scriptureSearchPanel")
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
@@ -464,7 +480,7 @@ class ScriptureSearchWidget(QWidget):
             self.result_layout.addWidget(empty_box)
         else:
             for result in self.results:
-                card = ScriptureResultWidget(result, keywords)
+                card = ScriptureResultWidget(result, keywords, self.theme)
                 card.activated.connect(self._activate_result)
                 card.copy_requested.connect(self._copy_result)
                 card.project_requested.connect(self.result_project_requested.emit)
@@ -522,7 +538,7 @@ class ScriptureSearchWidget(QWidget):
     def _refresh_history(self):
         self.history_list.clear()
         self.clear_history_btn.setEnabled(bool(self.history))
-        for text in self.history:
+        for text in self.history[:10]:
             item = QListWidgetItem()
             item.setSizeHint(self._history_row_size())
             self.history_list.addItem(item)
@@ -615,9 +631,7 @@ class ScriptureSearchWidget(QWidget):
         QFrame#scriptureSearchResult:hover {{ background:{t['control']}; border-color:{t['border_strong']}; }}
         QPushButton#scriptureResultTitle {{ background:transparent; color:{t['text']}; border:none; padding:0; text-align:left; font-size:15px; font-weight:600; }}
         QPushButton#scriptureResultTitle:hover {{ color:{t['accent']}; }}
-        QLabel#scriptureResultMeta {{ color:{t['text_faint']}; font-size:11px; }}
         QLabel#scriptureResultText {{ color:{t['text']}; font-size:14px; }}
-        QLabel#scriptureResultText mark {{ background:{t['accent_soft']}; color:{t['accent_text']}; padding:1px 2px; border-radius:3px; }}
         QPushButton#scriptureResultAction {{ background:transparent; color:{t['text_muted']}; border:1px solid {t['border']}; border-radius:7px; min-width:44px; min-height:28px; padding:0 8px; font-size:11px; }}
         QPushButton#scriptureResultAction:hover {{ background:{t['accent_soft']}; color:{t['accent_text']}; border-color:{t['accent']}; }}
         QPushButton#scripturePagerButton {{ background:{t['control']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:8px; font-size:20px; }}
@@ -639,3 +653,5 @@ class ScriptureSearchWidget(QWidget):
         self._apply_style()
         self.style().unpolish(self)
         self.style().polish(self)
+        if self.results:
+            self._render_results(self._keywords())
