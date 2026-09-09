@@ -11,24 +11,9 @@ from PyQt6.QtGui import QFont, QColor, QPainter, QPen
 
 
 class ColorPreview(QWidget):
-    """显示设置里的整条颜色预览条。
-
-    不使用 QPushButton/QSS，避免被应用全局样式覆盖。
-    整个颜色条都可点击，中央显示颜色名称和十六进制值。
-    """
+    """显示设置里的整条颜色预览条，仅显示 HEX 色号。"""
 
     clicked = pyqtSignal()
-
-    COLOR_NAMES = {
-        "#000000": "黑色", "#FFFFFF": "白色", "#FF0000": "红色",
-        "#00FF00": "绿色", "#0000FF": "蓝色", "#FFFF00": "黄色",
-        "#00FFFF": "青色", "#FF00FF": "洋红色", "#808080": "灰色",
-        "#800000": "栗色", "#008000": "深绿色", "#000080": "藏青色",
-        "#808000": "橄榄色", "#800080": "紫色", "#008080": "水鸭色",
-        "#C0C0C0": "银色", "#FFA500": "橙色", "#FFC0CB": "粉色",
-        "#87CEEB": "天蓝色", "#ADD8E6": "浅蓝色", "#90EE90": "浅绿色",
-        "#FFFFE0": "浅黄色", "#D3D3D3": "浅灰色", "#A9A9A9": "深灰色",
-    }
 
     def __init__(self, color="#FFFFFF", parent=None):
         super().__init__(parent)
@@ -65,11 +50,9 @@ class ColorPreview(QWidget):
         painter.drawRoundedRect(rect, 5, 5)
 
         hex_value = self._color.name().upper()
-        name = self.COLOR_NAMES.get(hex_value, "自定义颜色")
-        text = f"{name}  {hex_value}"
         text_color = QColor("#000000" if self._color.lightness() > 160 else "#FFFFFF")
         painter.setPen(text_color)
-        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, hex_value)
 
 
 class DisplaySettingsDialog(QDialog):
@@ -305,8 +288,7 @@ class DisplaySettingsDialog(QDialog):
         button.set_color(color)
         qcolor = QColor(color)
         if qcolor.isValid():
-            name = ColorPreview.COLOR_NAMES.get(qcolor.name().upper(), "自定义颜色")
-            button.setToolTip(f"当前颜色：{name} {qcolor.name().upper()}，点击修改")
+            button.setToolTip(f"当前颜色：{qcolor.name().upper()}，点击修改")
 
     def _choose_bg(self):
         dialog = QFileDialog(self, "选择背景图片")
