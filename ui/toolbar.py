@@ -181,53 +181,29 @@ class DisplaySettingsDialog(QDialog):
             ("footer_color", "footer_color_btn"),
             ("bg_color", "bg_color_btn"),
         ]:
-            getattr(self, attr).clicked.connect(
-                lambda checked=False, k=key: self._choose_color(k)
-            )
+            getattr(self, attr).clicked.connect(lambda _=False, k=key, a=attr: self._choose_color(k, getattr(self, a)))
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok |
-            QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("确认")
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
 
-    def _set_color_button(self, button, color):
-        color = QColor(color)
-        button.setText(color.name())
-        text = "black" if color.lightness() > 128 else "white"
-        button.setStyleSheet(
-            f"background:{color.name()};color:{text};padding:8px 12px;"
-            f"border-radius:6px;border:1px solid rgba(127,127,127,0.35);font-weight:600;"
-        )
-
-    def _choose_color(self, key):
-        color = QColorDialog.getColor(QColor(self.settings.get(key, "#FFFFFF")), self)
+    def _choose_color(self, key, button):
+        current = self.settings.get(key, "#FFFFFF")
+        color = QColorDialog.getColor(QColor(current), self, "选择颜色")
         if color.isValid():
-            self.settings[key] = color
-            mapping = {
-                "font_color": "font_color_btn",
-                "title_color": "title_color_btn",
-                "verse_num_color": "verse_color_btn",
-                "footer_color": "footer_color_btn",
-                "bg_color": "bg_color_btn",
-            }
-            self._set_color_button(getattr(self, mapping[key]), color)
+            self.settings[key] = color.name()
+            self._set_color_button(button, color.name())
+
+    def _set_color_button(self, button, color):
+        button.setStyleSheet(f"background:{color};color:{'#000000' if QColor(color).lightness() > 160 else '#FFFFFF'};")
 
     def _choose_bg(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "选择背景图片", "",
-            "图片文件 (*.png *.jpg *.jpeg *.bmp *.gif)"
-        )
+        path, _ = QFileDialog.getOpenFileName(self, "选择背景图片", "", "图片文件 (*.png *.jpg *.jpeg *.bmp *.webp)")
         if path:
-            self.settings["bg_image"] = path
             self.bg_image.setText(path)
 
     def _clear_bg(self):
-        self.settings["bg_image"] = ""
         self.bg_image.clear()
 
     def _load_settings(self):
@@ -244,8 +220,8 @@ class DisplaySettingsDialog(QDialog):
         self.line_spacing.setValue(int(s.get("line_spacing", 160)))
         self.margin.setValue(int(s.get("margin", 60)))
         self.footer_height.setValue(int(s.get("footer_height", 45)))
-        self.footer_text.setText(s.get("footer_text", ""))
-        self.bg_image.setText(s.get("bg_image", ""))
+        self.footer_text.setText(str(s.get("footer_text", "")))
+        self.bg_image.setText(str(s.get("bg_image", "") or ""))
         for key, attr in [
             ("font_color", "font_color_btn"),
             ("title_color", "title_color_btn"),
@@ -321,8 +297,9 @@ class ToolBarWidget(QToolBar):
         self.clear_btn.clicked.connect(self.clear_requested)
         self.addWidget(self.clear_btn)
 
-        self.show_titles_btn = QCheckBox("小标题")
+        self.show_titles_btn = QPushButton("小标题")
         self.show_titles_btn.setObjectName("showTitlesBtn")
+        self.show_titles_btn.setCheckable(True)
         self.show_titles_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.show_titles_btn.setMinimumHeight(30)
         self.show_titles_btn.setToolTip("显示 / 隐藏经文小标题")
