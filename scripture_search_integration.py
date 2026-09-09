@@ -11,7 +11,8 @@ from ui.themes import THEMES, theme_tokens
 for _tokens in THEMES.values():
     _tokens.setdefault("text_disabled", _tokens.get("text_faint", _tokens["text_muted"]))
 
-_scripture_search.ScriptureResultWidget = ScriptureResultWidget
+# 运行时向旧搜索模块注入兼容结果组件；使用 setattr 避免静态类型检查将其视为未知模块属性。
+setattr(_scripture_search, "ScriptureResultWidget", ScriptureResultWidget)
 
 from ui.scripture_search_legacy import ScriptureSearchWidget
 from ui.selection import ScriptureSelection
