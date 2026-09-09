@@ -65,11 +65,11 @@ def _selection_from_result(window, result):
     if not max_verse:
         return None
 
-    # “13~14”这类逻辑节的主节是13，14只是连接标记。
+    # “13-14”这类逻辑节的主节是13，14只是连接标记。
     label = str(result.get("verse_label", ""))
-    if "~" in label:
+    if "-" in label:
         try:
-            verse = int(label.split("~", 1)[0])
+            verse = int(label.split("-", 1)[0])
         except (TypeError, ValueError):
             pass
 
