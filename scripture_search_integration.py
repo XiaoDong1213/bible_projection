@@ -68,11 +68,17 @@ def _toggle(window):
     widget.close_requested.connect(widget.close)
     _polish_search_panel(widget)
 
-    width = widget.width()
+    # 经文搜索面板由原来的 720px 缩小为 480px（缩小 1/3）。
+    # 显式解除旧面板的固定宽度限制，避免 resize() 被 setFixedWidth(720) 拒绝。
+    panel_width = 480
+    widget.setMinimumWidth(0)
+    widget.setMaximumWidth(panel_width)
+    widget.setFixedWidth(panel_width)
+
     height = max(480, window.height() - window.toolbar.height() - 18)
-    widget.resize(width, height)
+    widget.resize(panel_width, height)
     global_pos = window.mapToGlobal(
-        QPoint(window.width() - width - 8, window.toolbar.height() + 4)
+        QPoint(window.width() - panel_width - 8, window.toolbar.height() + 4)
     )
     widget.move(global_pos)
     widget.show()
