@@ -380,7 +380,8 @@ class ScriptureSearchWidget(QWidget):
         QPushButton#scriptureSearchButton {{ background:{t['accent']}; color:#FFFFFF; border:1px solid {t['accent']}; border-radius:9px; min-width:82px; min-height:44px; font-size:14px; font-weight:600; }}
         QPushButton#scriptureSearchButton:hover {{ background:{t['accent_hover']}; }}
         QLabel#conditionLabel {{ color:{t['text_muted']}; font-size:12px; }}
-        QRadioButton#searchOption {{ background:{t['control']}; color:{t['text_muted']}; border:1px solid {t['border']}; border-radius:8px; padding:6px 10px; font-size:12px; min-height:18px; }}
+        QRadioButton#searchOption {{ background:{t['control']}; color:{t['text_muted']}; border:1px solid {t['border']}; border-radius:8px; padding:7px 12px; spacing:0px; font-size:12px; min-height:18px; }}
+        QRadioButton#searchOption::indicator {{ width:0px; height:0px; margin:0px; padding:0px; }}
         QRadioButton#searchOption:checked {{ background:{t['accent_soft']}; color:{t['text']}; border-color:{t['accent']}; }}
         QPushButton#scriptureScopeButton {{ background:{t['control']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:8px; min-height:34px; padding:0 12px; text-align:left; }}
         QPushButton#scriptureScopeButton:hover {{ background:{t['control_hover']}; border-color:{t['border_strong']}; }}
