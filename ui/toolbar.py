@@ -2,10 +2,10 @@
 # 顶部工具栏：分组布局 + 速度下拉（冷蓝控制台）
 
 from PyQt6.QtWidgets import (
-    QToolBar, QPushButton, QLabel, QDialog, QFormLayout, QGroupBox,
+    QToolBar, QPushButton, QLabel, QDialog, QFormLayout,
     QHBoxLayout, QVBoxLayout, QSpinBox, QFontComboBox, QColorDialog,
     QFileDialog, QLineEdit, QDialogButtonBox, QWidget, QSizePolicy,
-    QTabWidget,
+    QTabWidget, QCheckBox,
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
@@ -22,7 +22,6 @@ class DisplaySettingsDialog(QDialog):
         self._build_ui()
         self._load_settings()
 
-        # 根据当前屏幕自动适配大小，但不强行压缩到很小
         screen = self.screen()
         if screen:
             available = screen.availableGeometry()
@@ -39,16 +38,10 @@ class DisplaySettingsDialog(QDialog):
         root.setContentsMargins(16, 16, 16, 12)
         root.setSpacing(12)
 
-        # =====================================================
-        # 一级标签页
-        # =====================================================
         tabs = QTabWidget()
         tabs.setObjectName("settingsTabs")
         tabs.setDocumentMode(True)
 
-        # =====================================================
-        # 文字设置：二级标签页
-        # =====================================================
         text_page = QWidget()
         text_root = QVBoxLayout(text_page)
         text_root.setContentsMargins(8, 8, 8, 8)
@@ -58,7 +51,6 @@ class DisplaySettingsDialog(QDialog):
         text_tabs.setObjectName("settingsSubTabs")
         text_tabs.setDocumentMode(True)
 
-        # ---------- 正文 ----------
         body_page = QWidget()
         body_form = QFormLayout(body_page)
         body_form.setContentsMargins(20, 20, 20, 20)
@@ -70,31 +62,35 @@ class DisplaySettingsDialog(QDialog):
         self.font_size.setRange(12, 300)
         self.font_size.setSuffix(" px")
         self.font_color_btn = QPushButton("正文颜色")
-
         body_form.addRow("正文字体", self.font_combo)
         body_form.addRow("正文字号", self.font_size)
         body_form.addRow("正文颜色", self.font_color_btn)
         text_tabs.addTab(body_page, "正文")
 
-        # ---------- 标题 ----------
         title_page = QWidget()
         title_form = QFormLayout(title_page)
         title_form.setContentsMargins(20, 20, 20, 20)
         title_form.setHorizontalSpacing(18)
         title_form.setVerticalSpacing(12)
 
+        self.show_scripture_titles = QCheckBox("显示经文小标题")
+        self.show_scripture_titles.setToolTip("在对应经文之前显示数据库中的经文小标题")
         self.title_font_combo = QFontComboBox()
         self.title_size = QSpinBox()
         self.title_size.setRange(12, 300)
         self.title_size.setSuffix(" px")
         self.title_color_btn = QPushButton("标题颜色")
+        self.title_spacing = QSpinBox()
+        self.title_spacing.setRange(0, 100)
+        self.title_spacing.setSuffix(" px")
 
+        title_form.addRow("功能开关", self.show_scripture_titles)
         title_form.addRow("标题字体", self.title_font_combo)
         title_form.addRow("标题字号", self.title_size)
         title_form.addRow("标题颜色", self.title_color_btn)
+        title_form.addRow("标题间距", self.title_spacing)
         text_tabs.addTab(title_page, "标题")
 
-        # ---------- 节号 ----------
         verse_page = QWidget()
         verse_form = QFormLayout(verse_page)
         verse_form.setContentsMargins(20, 20, 20, 20)
@@ -106,13 +102,11 @@ class DisplaySettingsDialog(QDialog):
         self.verse_size.setRange(10, 200)
         self.verse_size.setSuffix(" px")
         self.verse_color_btn = QPushButton("节号颜色")
-
         verse_form.addRow("节号字体", self.verse_font_combo)
         verse_form.addRow("节号字号", self.verse_size)
         verse_form.addRow("节号颜色", self.verse_color_btn)
         text_tabs.addTab(verse_page, "节号")
 
-        # ---------- 底注 ----------
         footer_page = QWidget()
         footer_form = QFormLayout(footer_page)
         footer_form.setContentsMargins(20, 20, 20, 20)
@@ -124,7 +118,6 @@ class DisplaySettingsDialog(QDialog):
         self.footer_size.setRange(10, 100)
         self.footer_size.setSuffix(" px")
         self.footer_color_btn = QPushButton("底注颜色")
-
         footer_form.addRow("底注字体", self.footer_font_combo)
         footer_form.addRow("底注字号", self.footer_size)
         footer_form.addRow("底注颜色", self.footer_color_btn)
@@ -133,9 +126,6 @@ class DisplaySettingsDialog(QDialog):
         text_root.addWidget(text_tabs)
         tabs.addTab(text_page, "文字设置")
 
-        # =====================================================
-        # 布局与底注
-        # =====================================================
         layout_page = QWidget()
         lf = QFormLayout(layout_page)
         lf.setContentsMargins(20, 20, 20, 20)
@@ -160,9 +150,6 @@ class DisplaySettingsDialog(QDialog):
         lf.addRow("底注文字", self.footer_text)
         tabs.addTab(layout_page, "布局与底注")
 
-        # =====================================================
-        # 背景
-        # =====================================================
         bg_page = QWidget()
         bg_layout = QFormLayout(bg_page)
         bg_layout.setContentsMargins(20, 20, 20, 20)
@@ -187,9 +174,6 @@ class DisplaySettingsDialog(QDialog):
 
         root.addWidget(tabs, 1)
 
-        # =====================================================
-        # 信号
-        # =====================================================
         bg_choose.clicked.connect(self._choose_bg)
         bg_clear.clicked.connect(self._clear_bg)
 
@@ -204,19 +188,12 @@ class DisplaySettingsDialog(QDialog):
                 lambda checked=False, k=key: self._choose_color(k)
             )
 
-        # =====================================================
-        # 确认 / 取消
-        # =====================================================
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok |
             QDialogButtonBox.StandardButton.Cancel
         )
-        buttons.button(
-            QDialogButtonBox.StandardButton.Ok
-        ).setText("确认")
-        buttons.button(
-            QDialogButtonBox.StandardButton.Cancel
-        ).setText("取消")
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("确认")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
@@ -231,9 +208,7 @@ class DisplaySettingsDialog(QDialog):
         )
 
     def _choose_color(self, key):
-        color = QColorDialog.getColor(
-            QColor(self.settings.get(key, "#FFFFFF")), self
-        )
+        color = QColorDialog.getColor(QColor(self.settings.get(key, "#FFFFFF")), self)
         if color.isValid():
             self.settings[key] = color
             mapping = {
@@ -260,21 +235,15 @@ class DisplaySettingsDialog(QDialog):
 
     def _load_settings(self):
         s = self.settings
-        self.font_combo.setCurrentFont(
-            QFont(s.get("font_family", "微软雅黑"))
-        )
+        self.show_scripture_titles.setChecked(bool(s.get("show_scripture_titles", False)))
+        self.font_combo.setCurrentFont(QFont(s.get("font_family", "微软雅黑")))
         self.font_size.setValue(int(s.get("font_size", 24)))
-        self.title_font_combo.setCurrentFont(
-            QFont(s.get("title_font_family", "微软雅黑"))
-        )
+        self.title_font_combo.setCurrentFont(QFont(s.get("title_font_family", "微软雅黑")))
         self.title_size.setValue(int(s.get("title_size", 36)))
-        self.verse_font_combo.setCurrentFont(
-            QFont(s.get("verse_num_font_family", "微软雅黑"))
-        )
+        self.title_spacing.setValue(int(s.get("title_spacing", 12)))
+        self.verse_font_combo.setCurrentFont(QFont(s.get("verse_num_font_family", "微软雅黑")))
         self.verse_size.setValue(int(s.get("verse_num_size", 24)))
-        self.footer_font_combo.setCurrentFont(
-            QFont(s.get("footer_font_family", "微软雅黑"))
-        )
+        self.footer_font_combo.setCurrentFont(QFont(s.get("footer_font_family", "微软雅黑")))
         self.footer_size.setValue(int(s.get("footer_size", 14)))
         self.line_spacing.setValue(int(s.get("line_spacing", 160)))
         self.margin.setValue(int(s.get("margin", 60)))
@@ -288,29 +257,27 @@ class DisplaySettingsDialog(QDialog):
             ("footer_color", "footer_color_btn"),
             ("bg_color", "bg_color_btn"),
         ]:
-            self._set_color_button(
-                getattr(self, attr), s.get(key, "#FFFFFF")
-            )
+            self._set_color_button(getattr(self, attr), s.get(key, "#FFFFFF"))
 
     def get_settings(self):
         s = dict(self.settings)
-        s.update(
-            {
-                "font_family": self.font_combo.currentFont().family(),
-                "font_size": self.font_size.value(),
-                "title_font_family": self.title_font_combo.currentFont().family(),
-                "title_size": self.title_size.value(),
-                "verse_num_font_family": self.verse_font_combo.currentFont().family(),
-                "verse_num_size": self.verse_size.value(),
-                "footer_font_family": self.footer_font_combo.currentFont().family(),
-                "footer_size": self.footer_size.value(),
-                "line_spacing": self.line_spacing.value(),
-                "margin": self.margin.value(),
-                "footer_height": self.footer_height.value(),
-                "footer_text": self.footer_text.text(),
-                "bg_image": self.bg_image.text(),
-            }
-        )
+        s.update({
+            "show_scripture_titles": self.show_scripture_titles.isChecked(),
+            "font_family": self.font_combo.currentFont().family(),
+            "font_size": self.font_size.value(),
+            "title_font_family": self.title_font_combo.currentFont().family(),
+            "title_size": self.title_size.value(),
+            "title_spacing": self.title_spacing.value(),
+            "verse_num_font_family": self.verse_font_combo.currentFont().family(),
+            "verse_num_size": self.verse_size.value(),
+            "footer_font_family": self.footer_font_combo.currentFont().family(),
+            "footer_size": self.footer_size.value(),
+            "line_spacing": self.line_spacing.value(),
+            "margin": self.margin.value(),
+            "footer_height": self.footer_height.value(),
+            "footer_text": self.footer_text.text(),
+            "bg_image": self.bg_image.text(),
+        })
         return s
 
 
