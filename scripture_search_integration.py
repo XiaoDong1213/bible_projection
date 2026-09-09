@@ -39,7 +39,7 @@ def _polish_search_panel(widget):
     """只调整旧搜索面板的视觉层，不触碰搜索逻辑。"""
     t = theme_tokens(widget.theme)
 
-    # 匹配方式恢复为旧版的无圆点选择样式，四个选项高度统一、垂直居中。
+    # 匹配方式保持旧版的无圆点选择样式，四个选项高度统一。
     radio_style = f"""
         QRadioButton {{
             background:{t['control']}; color:{t['text_muted']};
@@ -67,11 +67,22 @@ def _polish_search_panel(widget):
         radio.setStyleSheet(radio_style)
         radio.setFixedHeight(32)
 
+    # 搜索框和“搜索”按钮强制使用完全相同的高度，避免 Qt 默认 sizeHint
+    # 受字体、边框和平台样式影响而出现视觉高低不一致。
+    search_button = widget.findChild(QPushButton, "scriptureSearchButton")
+    if search_button is not None:
+        search_button.setFixedHeight(44)
+        search_button.setFixedWidth(82)
+
+    search_input = widget.findChild(type(widget.search_input), "scriptureSearchInput")
+    if search_input is not None:
+        search_input.setFixedHeight(44)
+
     # 结果区域统一内边距和卡片间距，避免第一项、最后一项看起来贴边。
     widget.result_layout.setContentsMargins(0, 4, 4, 6)
     widget.result_layout.setSpacing(10)
 
-    # 最近搜索行也统一节奏，避免和结果卡片的视觉密度冲突。
+    # 最近搜索行也统一节奏。
     widget.history_layout.setContentsMargins(4, 4, 4, 4)
     widget.history_layout.setSpacing(5)
 
