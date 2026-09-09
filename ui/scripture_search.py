@@ -99,7 +99,8 @@ class BookScopeDialog(QDialog):
         self._lists = {}
         self.setObjectName("scriptureScopeDialog")
         self.setWindowTitle("选择搜索范围")
-        self.setFixedSize(640, 560)
+        # 与经文搜索面板保持一致的宽度。
+        self.setFixedSize(720, 560)
         self._build_ui()
         self._apply_style()
 
