@@ -117,8 +117,30 @@ class BibleDatabase:
         q = self._normalize_code(query)
         if not q:
             return []
+
+        # 已有完整编码时直接返回，避免继续进行模糊匹配。
         if q in self.book_codes:
             return [self.book_codes[q]]
+
+        # 英文/数字输入代表简拼或数字编号：只允许“前缀匹配”。
+        # 例如“smx”是“撒母耳记下”的合法简拼；“smejx”不是合法简拼，
+        # 即使它包含/接近完整拼音，也不能通过模糊匹配命中。
+        if re.fullmatch(r"[a-z0-9]+", q):
+            prefix_results = []
+            for book in self.book_names:
+                codes = [code for code, target in self.book_codes.items() if target == book]
+                pinyin = self._normalize_code(self.book_meta.get(book, {}).get("pinyin", ""))
+                short_name = self._short_name(book).lower()
+                if (
+                    pinyin.startswith(q)
+                    or any(code.startswith(q) for code in codes)
+                    or short_name.startswith(q)
+                ):
+                    if book not in prefix_results:
+                        prefix_results.append(book)
+            return prefix_results
+
+        # 中文书名/简称仍保留模糊搜索能力。
         prefix_results = []
         fuzzy_results = []
         for book in self.book_names:
@@ -135,8 +157,6 @@ class BibleDatabase:
             is_fuzzy = (
                 q in book_name
                 or q in short_name
-                or (pinyin and q in pinyin)
-                or any(q in code for code in codes)
             )
             if is_prefix and book not in prefix_results:
                 prefix_results.append(book)
