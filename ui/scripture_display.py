@@ -115,7 +115,6 @@ class ScriptureDisplay(QWidget):
     # 自动滚动到达底部时通知外层，便于把速度 UI 同步回「暂停」
     scroll_finished = pyqtSignal()
 
-    # 旧逻辑：每 30ms 滚 N 像素 → 折算成像素/秒，档位手感保持接近
     _TICK_MS_LEGACY = 30.0
 
     def __init__(self, parent=None):
@@ -177,7 +176,6 @@ class ScriptureDisplay(QWidget):
         self.title_bar = QLabel("")
         self.title_bar.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(self.title_bar)
-        # 兼容旧引用名 text_display → 提词器正文
         self.text_display = ScriptureBody()
         self.text_display.scroll_changed.connect(self._on_body_scroll_changed)
         layout.addWidget(self.text_display, 1)
@@ -275,7 +273,6 @@ class ScriptureDisplay(QWidget):
         self.update()
 
     def set_from_selection(self, selection, verses):
-        """按 ScriptureSelection 更新标题与经文。"""
         self.set_scripture(
             selection.book,
             selection.primary_chapter,
@@ -287,7 +284,6 @@ class ScriptureDisplay(QWidget):
         )
 
     def clear_scripture(self):
-        """清空标题与经文内容。"""
         self.verses = []
         self._show_chapter_nums = False
         self._set_adaptive_title("")
@@ -338,7 +334,6 @@ class ScriptureDisplay(QWidget):
             self.set_scroll_fraction(old)
 
     def _verse_row(self, row):
-        """兼容旧数据与带小标题的数据行。"""
         if row is None:
             return None, None, "", []
         if len(row) >= 4:
@@ -385,15 +380,16 @@ class ScriptureDisplay(QWidget):
         )
         rows = [self._verse_row(row) for row in self.verses]
 
-        # 开启小标题后强制逐节成块，确保标题始终位于所属节之前；关闭时保留原有排版。
-        if self.show_scripture_titles or self.verse_segmentation:
+        # 小标题只是插入到对应经文前的显示节点，不参与分节；没有标题的经文保持原有连续排版。
+        if self.show_scripture_titles:
             blocks = []
             for ch, n, t, titles in rows:
-                if self.show_scripture_titles:
-                    for subtitle in titles:
-                        blocks.append(self._title_html(subtitle))
+                for subtitle in titles:
+                    blocks.append(self._title_html(subtitle))
                 blocks.append(self._verse_block_html(ch, n, t))
             html += "".join(blocks)
+        elif self.verse_segmentation:
+            html += "".join(self._verse_block_html(ch, n, t) for ch, n, t, _titles in rows)
         else:
             html += (
                 "<p style='margin:0;padding:0;white-space:normal;text-align:justify;'>"
@@ -448,246 +444,88 @@ class ScriptureDisplay(QWidget):
         self._update_overlay_geometry()
 
     def _on_body_scroll_changed(self, value):
-        self.scroll_changed.emit(int(round(float(value))))
+        self.scroll_changed.emit(int(round(value)))
 
-    def scroll_fraction(self):
-        return self.text_display.scroll_fraction()
-
-    def set_scroll_fraction(self, fraction):
-        self.text_display.set_scroll_fraction(fraction)
-
-    def set_scroll_position(self, value):
-        self.text_display.set_scroll_y(value)
-
-    def force_scroll_to(self, value):
-        self.text_display.set_scroll_y(value)
-        self.text_display.update()
-        self.update()
-
-    def get_scroll_y(self):
+    def scroll_position(self):
         return self.text_display.scroll_y()
 
     def max_scroll(self):
         return self.text_display.max_scroll()
 
-    def get_scroll_anchor(self):
-        return self.scroll_fraction()
+    def scroll_fraction(self):
+        return self.text_display.scroll_fraction()
 
-    def set_scroll_anchor(self, anchor):
-        try:
-            a = float(anchor)
-        except (TypeError, ValueError):
-            return
-        if a > 1.0:
-            a = 0.0
-        self.set_scroll_fraction(a)
-
-    def _get_anim_y(self):
-        return self.text_display.scroll_y()
-
-    def _set_anim_y(self, value):
+    def set_scroll_position(self, value):
         self.text_display.set_scroll_y(value)
 
-    anim_scroll_y = pyqtProperty(float, _get_anim_y, _set_anim_y)
-
-    def _smooth_to(self, target, duration=120):
-        target = max(0.0, min(float(target), self.text_display.max_scroll()))
-        if self._scroll_anim:
-            self._scroll_anim.stop()
-        self._scroll_anim = QPropertyAnimation(self, b"anim_scroll_y", self)
-        self._scroll_anim.setDuration(duration)
-        self._scroll_anim.setStartValue(self.text_display.scroll_y())
-        self._scroll_anim.setEndValue(target)
-        self._scroll_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._scroll_anim.start()
+    def set_scroll_fraction(self, fraction):
+        self.text_display.set_scroll_fraction(fraction)
 
     def set_scroll_speed(self, speed):
-        self.scroll_speed = max(0, min(9, int(speed)))
-        if self.scroll_speed == 0:
+        try:
+            speed = max(0, min(9, int(speed)))
+        except (TypeError, ValueError):
+            speed = 0
+        self.scroll_speed = speed
+        if speed <= 0:
             self.scroll_timer.stop()
+            self._scroll_clock.invalidate()
             return
-        self._hook_screen_changes()
         self._apply_refresh_interval()
         self._scroll_clock.restart()
         if not self.scroll_timer.isActive():
             self.scroll_timer.start()
 
-    def _scroll_px_per_sec(self):
-        if self.scroll_speed <= 0:
-            return 0.0
-        return float(self.scroll_speed) * (1000.0 / self._TICK_MS_LEGACY)
-
-    def _detect_refresh_hz(self):
-        screen = self.screen()
-        if screen is None:
-            win = self.window()
-            if win is not None:
-                screen = win.screen()
-        hz = 60.0
-        if screen is not None:
-            try:
-                hz = float(screen.refreshRate())
-            except Exception:
-                hz = 60.0
-        if hz < 30.0:
-            hz = 60.0
-        elif hz > 240.0:
-            hz = 240.0
-        return hz
-
     def _apply_refresh_interval(self):
-        self._refresh_hz = self._detect_refresh_hz()
-        interval = max(1, int(round(1000.0 / self._refresh_hz)))
+        interval = max(8, int(round(1000.0 / self._refresh_hz)))
         self.scroll_timer.setInterval(interval)
 
-    def _hook_screen_changes(self):
-        if self._screen_hooked:
-            return
-        win = self.window()
-        handle = win.windowHandle() if win is not None else None
-        if handle is None:
-            return
-        handle.screenChanged.connect(self._on_screen_changed)
-        self._screen_hooked = True
-
-    def _on_screen_changed(self, _screen):
-        was_running = self.scroll_timer.isActive() and self.scroll_speed > 0
-        self._apply_refresh_interval()
-        if was_running:
-            self._scroll_clock.restart()
-            self.scroll_timer.start()
-
-    def showEvent(self, event):
-        super().showEvent(event)
-        self._hook_screen_changes()
-        self._apply_refresh_interval()
-
     def _auto_scroll(self):
-        body = self.text_display
-        if body.scroll_y() >= body.max_scroll() - 0.05:
-            self.scroll_timer.stop()
-            self.scroll_speed = 0
-            body.set_scroll_y(body.max_scroll())
-            self.scroll_finished.emit()
+        if self.scroll_speed <= 0:
             return
-
-        elapsed_ms = self._scroll_clock.restart()
-        if elapsed_ms <= 0:
-            elapsed_ms = self.scroll_timer.interval()
-        dt = min(float(elapsed_ms), 100.0) / 1000.0
-        body.set_scroll_y(body.scroll_y() + self._scroll_px_per_sec() * dt)
-        if body.scroll_y() >= body.max_scroll() - 0.05:
-            self.scroll_timer.stop()
-            self.scroll_speed = 0
-            body.set_scroll_y(body.max_scroll())
+        if not self._scroll_clock.isValid():
+            self._scroll_clock.start()
+            return
+        elapsed_ms = max(0, self._scroll_clock.restart())
+        delta = elapsed_ms * self.scroll_speed / self._TICK_MS_LEGACY
+        current = self.scroll_position()
+        target = min(self.max_scroll(), current + delta)
+        self.set_scroll_position(target)
+        if target >= self.max_scroll() - 0.5:
+            self.set_scroll_speed(0)
             self.scroll_finished.emit()
-
-    def scroll_by(self, delta):
-        self._smooth_to(self.text_display.scroll_y() + float(delta))
-
-    def wheelEvent(self, event):
-        steps = event.angleDelta().y() / 120.0
-        self._smooth_to(self.text_display.scroll_y() - steps * 120.0, 90)
-        event.accept()
 
     def apply_settings(self, settings):
-        str_keys = (
-            ("font_family", "font_family"),
-            ("title_font_family", "title_font_family"),
-            ("verse_num_font_family", "verse_num_font_family"),
-            ("footer_font_family", "footer_font_family"),
-        )
-        int_keys = (
-            ("font_size", "font_size"),
-            ("line_spacing", "line_spacing"),
-            ("title_size", "title_size"),
-            ("title_spacing", "title_spacing"),
-            ("verse_num_size", "verse_num_size"),
-            ("footer_height", "footer_height"),
-            ("footer_size", "footer_size"),
-        )
-        for attr, key in str_keys:
-            if key in settings:
-                try:
-                    setattr(self, attr, str(settings[key]))
-                except Exception:
-                    pass
-        for attr, key in int_keys:
-            if key in settings:
-                try:
-                    setattr(self, attr, int(settings[key]))
-                except Exception:
-                    pass
-        for attr, key in (
-            ("font_color", "font_color"),
-            ("verse_num_color", "verse_num_color"),
-            ("title_color", "title_color"),
-            ("bg_color", "bg_color"),
-            ("footer_color", "footer_color"),
-        ):
-            if key in settings:
-                setattr(self, attr, QColor(settings[key]))
-
-        new_bg = settings.get("bg_image", self.bg_image) or None
-        if new_bg != self.bg_image:
-            self.bg_image = new_bg
-            self._bg_pixmap = None
-            self._bg_pixmap_path = None
-            self._bg_scaled = None
-            self._bg_scaled_size = None
-        elif "bg_image" in settings and not settings.get("bg_image"):
-            self.bg_image = None
-            self._bg_pixmap = None
-            self._bg_pixmap_path = None
-            self._bg_scaled = None
-            self._bg_scaled_size = None
-
-        if "margin" in settings:
-            try:
-                self.margin_left = self.margin_right = int(settings["margin"])
-            except Exception:
-                pass
-        if "footer_text" in settings:
-            self.footer_text = settings["footer_text"]
-        if "show_scripture_titles" in settings:
-            self.show_scripture_titles = bool(settings["show_scripture_titles"])
-
+        self.font_family = settings.get("font_family", self.font_family)
+        self.font_size = int(settings.get("font_size", self.font_size))
+        self.font_color = QColor(settings.get("font_color", self.font_color.name()))
+        self.bg_color = QColor(settings.get("bg_color", self.bg_color.name()))
+        self.bg_image = settings.get("bg_image", self.bg_image)
+        self.line_spacing = int(settings.get("line_spacing", self.line_spacing))
+        self.margin_left = int(settings.get("margin", self.margin_left))
+        self.margin_right = int(settings.get("margin", self.margin_right))
+        self.title_font_family = settings.get("title_font_family", self.title_font_family)
+        self.title_color = QColor(settings.get("title_color", self.title_color.name()))
+        self.title_size = int(settings.get("title_size", self.title_size))
+        self.title_spacing = int(settings.get("title_spacing", self.title_spacing))
+        self.show_scripture_titles = bool(settings.get("show_scripture_titles", self.show_scripture_titles))
+        self.verse_num_font_family = settings.get("verse_num_font_family", self.verse_num_font_family)
+        self.verse_num_size = int(settings.get("verse_num_size", self.verse_num_size))
+        self.verse_num_color = QColor(settings.get("verse_num_color", self.verse_num_color.name()))
+        self.footer_font_family = settings.get("footer_font_family", self.footer_font_family)
+        self.footer_size = int(settings.get("footer_size", self.footer_size))
+        self.footer_color = QColor(settings.get("footer_color", self.footer_color.name()))
+        self.footer_text = settings.get("footer_text", self.footer_text)
+        self.footer_height = int(settings.get("footer_height", self.footer_height))
+        self._refresh_layout_metrics()
         self._update_footer_style()
-        self._update_viewport_margins()
-
-        if "verse_segmentation" in settings:
-            self.verse_segmentation = bool(settings["verse_segmentation"])
-
-        if self._title_text:
-            self._set_adaptive_title(self._title_text)
-        if self.verses:
-            old = self.scroll_fraction()
-            self._render_scripture()
-            self.set_scroll_fraction(old)
         self.update()
 
-    def _update_overlay_geometry(self):
-        fh = self._px(self.footer_height)
-        self.footer_label.setGeometry(0, max(0, self.height() - fh), self.width(), fh)
-        self.title_bar.raise_()
-        self.footer_label.raise_()
+    def set_title(self, title):
+        self._set_adaptive_title(title)
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._bg_scaled = None
-        self._bg_scaled_size = None
-        if self._reference_size is None:
-            if self._title_text:
-                self._set_adaptive_title(self._title_text)
-            self._update_viewport_margins()
-            if self.verses:
-                old = self.scroll_fraction()
-                self._render_scripture()
-                self.set_scroll_fraction(old)
-            self._update_footer_style()
-        else:
-            if self._title_text:
-                self._set_adaptive_title(self._title_text)
-            self._update_viewport_margins()
-            self._fit_document_width()
-        self._update_overlay_geometry()
+    def _update_overlay_geometry(self):
+        if not self.footer_label:
+            return
+        h = self._px(self.footer_height)
+        self.footer_label.setGeometry(0, max(0, self.height() - h), self.width(), h)
