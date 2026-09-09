@@ -40,14 +40,12 @@ def _polish_search_panel(widget):
     """只调整旧搜索面板的尺寸与布局，不覆盖主题样式。"""
     # 主题颜色统一由 ScriptureSearchWidget._apply_style() 管理。
     # 这里不要再给子控件设置独立 stylesheet，否则主题切换后会残留旧主题颜色。
-    for radio in (widget.fuzzy_radio, widget.exact_radio, widget.all_radio, widget.any_radio):
-        radio.setFixedHeight(32)
-
+    # 单选按钮的高度由面板样式统一控制，不在这里覆盖，避免出现高度不一致。
     search_button = widget.findChild(QPushButton, "scriptureSearchButton")
     if search_button is not None:
-        search_button.setFixedSize(82, 40)
+        search_button.setFixedSize(82, 44)
 
-    widget.search_input.setFixedHeight(40)
+    widget.search_input.setFixedHeight(44)
 
     # 恢复历史版本的结果节奏：容器 0/4/4/0，卡片之间 8px。
     widget.result_layout.setContentsMargins(0, 4, 4, 0)
