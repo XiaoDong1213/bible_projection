@@ -184,8 +184,9 @@ class BookScopeDialog(QDialog):
         item.setSelected(checked)
 
     def _toggle_book(self, item):
-        checked = not bool(item.data(Qt.ItemDataRole.UserRole + 2))
-        self._set_item_checked(item, checked)
+        # MultiSelection 已经在 itemClicked 时更新了选中状态，
+        # 这里直接同步内部状态，避免再反转一次导致“点了却没高亮”。
+        self._set_item_checked(item, item.isSelected())
 
     def _set_all(self, category, checked):
         for i in range(self._lists[category].count()):
@@ -197,7 +198,8 @@ class BookScopeDialog(QDialog):
             for i in range(lst.count()):
                 item = lst.item(i)
                 book = str(item.data(Qt.ItemDataRole.UserRole) or "")
-                item.setHidden(bool(q) and q not in book.lower())
+                short = str(item.data(Qt.ItemDataRole.UserRole + 1) or "")
+                item.setHidden(bool(q) and q not in book.lower() and q not in short.lower())
 
     def selected_books(self):
         result = set()
@@ -212,8 +214,7 @@ class BookScopeDialog(QDialog):
         t = theme_tokens(self.theme)
         self.setStyleSheet(f"""
         QDialog#scriptureScopeDialog {{
-            background:{t['surface_raised']};
-            color:{t['text']};
+            background:{t['surface_raised']}; color:{t['text']};
         }}
         QLabel#scopeDialogTitle {{
             color:{t['text']}; font-size:18px; font-weight:600;
@@ -290,7 +291,7 @@ class ScriptureResultWidget(QFrame):
 
         top = QHBoxLayout()
         top.setSpacing(8)
-        title = QPushButton(f"{result['short']} {result['chapter']}:{result['verse']}")
+        title = QPushButton(f"{result['book']} {result['chapter']}:{result['verse']}")
         title.setObjectName("scriptureResultTitle")
         title.setFlat(True)
         title.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -471,8 +472,6 @@ class ScriptureSearchWidget(QWidget):
         history_head.addWidget(self.clear_history_btn)
         condition.addLayout(history_head)
 
-        # 历史记录改为独立滚动区域：不再用 QListWidget + setItemWidget，
-        # 避免外层列表高度、item 高度和内部 QWidget 高度互相挤压导致显示不全。
         self.history_scroll = QScrollArea()
         self.history_scroll.setObjectName("scriptureHistoryScroll")
         self.history_scroll.setWidgetResizable(True)
@@ -702,9 +701,6 @@ class ScriptureSearchWidget(QWidget):
             delete_btn.clicked.connect(lambda _, value=text: self._delete_history(value))
             layout.addWidget(delete_btn)
             self.history_layout.addWidget(row)
-
-        self.history_container.adjustSize()
-        self.history_scroll.verticalScrollBar().setValue(0)
 
     def _use_history_text(self, text):
         self.search_input.setText(text)
