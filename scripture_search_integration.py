@@ -10,6 +10,15 @@ def install_scripture_search(window):
     """把独立经文搜索接入现有主窗口，不修改原书卷章节搜索。"""
     window._scripture_search_widget = None
 
+    # 置顶、清屏、小标题统一尺寸，保持三个功能按钮视觉一致。
+    for attr in ("topmost_btn", "clear_btn", "show_titles_btn"):
+        button = getattr(window.toolbar, attr, None)
+        if button is not None:
+            button.setFixedSize(72, 30)
+
+    # 显示设置 / 亮色之后单独分组，经文搜索作为最后一个独立入口。
+    window.toolbar.addSeparator()
+
     button = QPushButton("经文搜索")
     button.setObjectName("scriptureSearchToolbarButton")
     button.setCursor(Qt.CursorShape.PointingHandCursor)
