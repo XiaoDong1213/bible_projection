@@ -72,6 +72,8 @@ class MainWindow(QMainWindow):
             self.preview_host.apply_theme(tokens)
         if hasattr(self, "search_widget") and self.search_widget is not None:
             self.search_widget.apply_theme(self.theme)
+        if hasattr(self, "_scripture_search_widget") and self._scripture_search_widget is not None:
+            self._scripture_search_widget.apply_theme(self.theme)
 
     def _create_toolbar(self):
         self.toolbar = ToolBarWidget()
