@@ -75,13 +75,9 @@ class DisplaySettingsDialog(QDialog):
         self.title_size.setRange(12, 300)
         self.title_size.setSuffix(" px")
         self.title_color_btn = QPushButton("标题颜色")
-        self.title_spacing = QSpinBox()
-        self.title_spacing.setRange(0, 100)
-        self.title_spacing.setSuffix(" px")
         title_form.addRow("标题字体", self.title_font_combo)
         title_form.addRow("标题字号", self.title_size)
         title_form.addRow("标题颜色", self.title_color_btn)
-        title_form.addRow("标题间距", self.title_spacing)
         text_tabs.addTab(title_page, "标题")
 
         # 小标题：沿用其他文字设置页面的统一结构，仅提供字体、字号、颜色。
@@ -245,7 +241,6 @@ class DisplaySettingsDialog(QDialog):
         self.font_size.setValue(int(s.get("font_size", 24)))
         self.title_font_combo.setCurrentFont(QFont(s.get("title_font_family", "微软雅黑")))
         self.title_size.setValue(int(s.get("title_size", 36)))
-        self.title_spacing.setValue(int(s.get("title_spacing", 12)))
         self.scripture_title_font_combo.setCurrentFont(QFont(s.get("scripture_title_font_family", "微软雅黑")))
         self.scripture_title_size.setValue(int(s.get("scripture_title_size", 30)))
         self.verse_font_combo.setCurrentFont(QFont(s.get("verse_num_font_family", "微软雅黑")))
@@ -274,7 +269,6 @@ class DisplaySettingsDialog(QDialog):
             "font_size": self.font_size.value(),
             "title_font_family": self.title_font_combo.currentFont().family(),
             "title_size": self.title_size.value(),
-            "title_spacing": self.title_spacing.value(),
             "scripture_title_font_family": self.scripture_title_font_combo.currentFont().family(),
             "scripture_title_size": self.scripture_title_size.value(),
             "scripture_title_color": self.settings.get("scripture_title_color", "#87CEEB"),
@@ -298,3 +292,137 @@ class ToolBarWidget(QToolBar):
     footer_triggered = pyqtSignal()
     theme_changed = pyqtSignal(str)
     topmost_toggled = pyqtSignal(bool)
+    scroll_up = pyqtSignal()
+    scroll_down = pyqtSignal()
+    clear_requested = pyqtSignal()
+
+    SPEED_LABELS = ["暂停"] + [f"{i}档" for i in range(1, 10)]
+
+    def __init__(self, parent=None):
+        super().__init__("主工具栏", parent)
+        self.setMovable(False)
+        self.setIconSize(QSize(18, 18))
+        self.setFloatable(False)
+        self.theme = "dark"
+        self.settings = {}
+        self._speed = 0
+
+        self.extend_btn = QPushButton("扩展显示  F12")
+        self.extend_btn.setObjectName("extendBtn")
+        self.extend_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.extend_btn.clicked.connect(self.extend_toggled)
+        self.addWidget(self.extend_btn)
+
+        self.topmost_btn = QPushButton("置顶")
+        self.topmost_btn.setObjectName("topmostBtn")
+        self.topmost_btn.setCheckable(True)
+        self.topmost_btn.setChecked(True)
+        self.topmost_btn.setEnabled(False)
+        self.topmost_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.topmost_btn.setToolTip("扩展窗口始终置顶")
+        self.topmost_btn.toggled.connect(self.topmost_toggled)
+        self.addWidget(self.topmost_btn)
+
+        self.clear_btn = QPushButton("清屏")
+        self.clear_btn.setObjectName("clearBtn")
+        self.clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_btn.setToolTip("清空预览与扩展屏经文")
+        self.clear_btn.clicked.connect(self.clear_requested)
+        self.addWidget(self.clear_btn)
+
+        self.show_titles_btn = QPushButton("小标题")
+        self.show_titles_btn.setObjectName("showTitlesBtn")
+        self.show_titles_btn.setCheckable(True)
+        self.show_titles_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.show_titles_btn.setMinimumHeight(30)
+        self.show_titles_btn.setToolTip("显示 / 隐藏经文小标题")
+        self.show_titles_btn.toggled.connect(self._toggle_scripture_titles)
+        self.addWidget(self.show_titles_btn)
+
+        self.addSeparator()
+
+        scroll_wrap = QWidget()
+        scroll_layout = QHBoxLayout(scroll_wrap)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(8)
+        scroll_layout.addWidget(QLabel("速度"))
+        self.speed_buttons = []
+        for speed, text in [(0, "暂停")] + [(i, f"{i}档") for i in range(1, 10)]:
+            btn = QPushButton(text)
+            btn.setObjectName("speedBtn")
+            btn.setCheckable(True)
+            btn.setAutoExclusive(False)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setMinimumHeight(30)
+            btn.setToolTip("暂停自动滚动" if speed == 0 else f"自动滚动 {speed} 档")
+            btn.setProperty("speedValue", speed)
+            btn.clicked.connect(lambda checked=False, s=speed: self._set_speed(s))
+            self.speed_buttons.append(btn)
+            scroll_layout.addWidget(btn)
+        self.addWidget(scroll_wrap)
+        self._set_speed(0)
+
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.addWidget(spacer)
+        self.addSeparator()
+
+        self.settings_btn = QPushButton("显示设置")
+        self.settings_btn.setObjectName("settingsBtn")
+        self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.settings_btn.clicked.connect(self._open_settings)
+        self.addWidget(self.settings_btn)
+
+        self.theme_btn = QPushButton("亮色")
+        self.theme_btn.setObjectName("themeBtn")
+        self.theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.theme_btn.setToolTip("切换亮色 / 暗色主题")
+        self.theme_btn.clicked.connect(self._toggle_theme)
+        self.addWidget(self.theme_btn)
+
+    def load_settings(self, settings):
+        self.settings = dict(settings)
+        self.theme = settings.get("theme", "dark")
+        blocked = self.topmost_btn.blockSignals(True)
+        self.topmost_btn.setChecked(settings.get("extension_topmost", True))
+        self.topmost_btn.blockSignals(blocked)
+        blocked = self.show_titles_btn.blockSignals(True)
+        self.show_titles_btn.setChecked(bool(settings.get("show_scripture_titles", False)))
+        self.show_titles_btn.blockSignals(blocked)
+        self._update_theme_button()
+
+    def _toggle_scripture_titles(self, checked):
+        self.settings["show_scripture_titles"] = bool(checked)
+        self.settings_changed.emit(dict(self.settings))
+
+    def _open_settings(self):
+        dialog = DisplaySettingsDialog(self.settings, self.window())
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.settings = dialog.get_settings()
+            self.settings_changed.emit(self.settings)
+
+    def _set_speed(self, speed):
+        speed = max(0, min(9, int(speed)))
+        self._speed = speed
+        for i, btn in enumerate(self.speed_buttons):
+            btn.setChecked(i == speed)
+        self.scroll_speed_changed.emit(speed)
+
+    def current_speed(self):
+        return self._speed
+
+    def _toggle_theme(self):
+        self.theme = "light" if self.theme == "dark" else "dark"
+        self._update_theme_button()
+        self.theme_changed.emit(self.theme)
+
+    def _update_theme_button(self):
+        self.theme_btn.setText("暗色" if self.theme == "light" else "亮色")
+
+    def set_extend_active(self, active):
+        if active:
+            self.extend_btn.setText("关闭扩展  Esc")
+            self.topmost_btn.setEnabled(True)
+        else:
+            self.extend_btn.setText("扩展显示  F12")
+            self.topmost_btn.setEnabled(False)
