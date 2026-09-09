@@ -457,25 +457,32 @@ class NavigationPanel(QWidget):
                 blocked = spin.blockSignals(True)
                 spin.setValue(int(chapter))
                 spin.blockSignals(blocked)
+            # 章节联动时，跨章两端都同步到新章节的最大节号。
+            self._on_cross_start_ch_changed(chapter)
+            self._on_cross_end_ch_changed(chapter)
+            self._on_skip_chapter_changed(chapter)
             self._sync_mode_limits()
 
     def _on_cross_start_ch_changed(self, chapter):
         if not self.selected_book:
             return
+        # 切换章节后，起点节号直接显示该章节的最大节号。
         self._set_verse_spin_limit(
-            self.cross_start_v, self.selected_book, int(chapter)
+            self.cross_start_v, self.selected_book, int(chapter), reset_to_max=True
         )
 
     def _on_cross_end_ch_changed(self, chapter):
         if not self.selected_book:
             return
+        # 切换章节后，终点节号直接显示该章节的最大节号。
         self._set_verse_spin_limit(
-            self.cross_end_v, self.selected_book, int(chapter)
+            self.cross_end_v, self.selected_book, int(chapter), reset_to_max=True
         )
 
     def _on_skip_chapter_changed(self, chapter):
         if self.selected_book and not self._history_updating:
             max_v = max(1, self.db.get_verse_count(self.selected_book, int(chapter)))
+            self.skip_edit.setText(f"1-{max_v}")
             self.skip_hint.setText(f"本章 {max_v} 节　·　例 16-18 20")
 
     def sync_selection(self, book, chapter, start, end):
