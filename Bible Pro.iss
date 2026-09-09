@@ -1,9 +1,9 @@
 ; Bible Pro Inno Setup 7 installer
-; Copyright © 2026 XiaoDong
+; Copyright © 2026 XiaoDong and JiangRTTTR
 
 #define MyAppName "Bible Pro"
 #define MyAppVersion "1.0.0"
-#define MyAppPublisher "XiaoDong"
+#define MyAppPublisher "XiaoDong & JiangRTTTR"
 #define MyAppExeName "Bible Pro.exe"
 #define MyAppSourceDir "C:\Users\XiaoDong\Documents\GitHub\bible_projection\dist\Bible Pro"
 #define MyAppIcon "C:\Users\XiaoDong\Documents\GitHub\bible_projection\icon.ico"
