@@ -10,26 +10,8 @@ def install_scripture_search(window):
     """把独立经文搜索接入现有主窗口，不修改原书卷章节搜索。"""
     window._scripture_search_widget = None
 
-    # 顶栏功能按钮统一尺寸，避免部分按钮又窄又小。
-    toolbar_button_size = (96, 32)
-    for attr in (
-        "extend_btn",
-        "topmost_btn",
-        "clear_btn",
-        "show_titles_btn",
-        "settings_btn",
-        "theme_btn",
-    ):
-        button = getattr(window.toolbar, attr, None)
-        if button is not None:
-            button.setFixedSize(*toolbar_button_size)
-
-    # 显示设置 / 亮色之后单独分组，经文搜索作为最后一个独立入口。
-    window.toolbar.addSeparator()
-
     button = QPushButton("经文搜索")
     button.setObjectName("scriptureSearchToolbarButton")
-    button.setFixedSize(*toolbar_button_size)
     button.setCursor(Qt.CursorShape.PointingHandCursor)
     button.setToolTip("搜索整本圣经经文  Ctrl+F")
     button.clicked.connect(lambda: _toggle(window))
