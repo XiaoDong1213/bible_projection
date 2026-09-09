@@ -118,11 +118,13 @@ class BibleDatabase:
         if self.books_table:
             cols = [r[1] for r in self.conn.execute(f'PRAGMA table_info("{self.books_table}")').fetchall()]
             lower = {x.lower(): x for x in cols}
+
             def bc(names):
                 for n in names:
                     if n.lower() in lower:
                         return lower[n.lower()]
                 return None
+
             id_col = bc(["id", "ID", "编号"])
             short_col = bc(["ShortName", "short_name", "简称"])
             pinyin_col = bc(["Pinyin", "pinyin", "拼音", "拼音码", "简拼"])
@@ -141,7 +143,7 @@ class BibleDatabase:
                             "id": data.get(id_col) if id_col else None,
                             "short": str(data.get(short_col, name[:1])).strip() if short_col else name[:1],
                             "pinyin": str(data.get(pinyin_col, "")).strip() if pinyin_col else "",
-                            "chapter_count": int(data[count_col]) if count_col and str(data.get(count_col, "")).isdigit() else None,
+                            "chapter_count": int(data[count_col]) if count_col and str(data.get(count_col)).isdigit() else None,
                         }
         id_to_name = {str(v.get('id')).strip(): k for k, v in self.book_meta.items() if v.get('id') is not None}
         mapped_names = []
@@ -197,23 +199,37 @@ class BibleDatabase:
         return [(b, self._short_name(b)) for b in books]
 
     def get_chapter_count(self, book_name):
-        row = self.conn.execute(f"SELECT MAX({self._quote(self.chapter_col)}) AS n FROM {self._quote(self.verse_table)} WHERE {self._quote(self.book_col)}=?", (self.book_meta.get(book_name, {}).get('id', book_name),)).fetchone()
+        row = self.conn.execute(
+            f"SELECT MAX({self._quote(self.chapter_col)}) AS n FROM {self._quote(self.verse_table)} "
+            f"WHERE {self._quote(self.book_col)}=?",
+            (self.book_meta.get(book_name, {}).get('id', book_name),),
+        ).fetchone()
         return int(row["n"] or 0)
 
     def get_verse_count(self, book_name, chapter):
-        row = self.conn.execute(f"SELECT MAX({self._quote(self.verse_col)}) AS n FROM {self._quote(self.verse_table)} WHERE {self._quote(self.book_col)}=? AND {self._quote(self.chapter_col)}=?", (self.book_meta.get(book_name, {}).get('id', book_name), chapter)).fetchone()
+        row = self.conn.execute(
+            f"SELECT MAX({self._quote(self.verse_col)}) AS n FROM {self._quote(self.verse_table)} "
+            f"WHERE {self._quote(self.book_col)}=? AND {self._quote(self.chapter_col)}=?",
+            (self.book_meta.get(book_name, {}).get('id', book_name), chapter),
+        ).fetchone()
         return int(row["n"] or 0)
 
     @staticmethod
     def _is_placeholder_verse(text):
-        """数据库中用于占位、表示前后节连续关系的纯横线。"""
+        """判断是否为数据库中表示前一节延续关系的纯横线。"""
         return str(text or "").strip() in {"-", "–", "—", "―", "－"}
 
     def get_logical_verses(self, book_name, chapter, start_verse=None, end_verse=None):
-        """返回逻辑经文单元。
+        """读取章节并转换为逻辑经文单位。
 
-        部分数据库会把类似“14~15”的连续节存成：14=横线、15=正文。
-        这里不修改原始数据库，而是在读取层把它还原为一个逻辑单元。
+        数据库中的结构可能是：
+            13 = 完整经文
+            14 = —
+            15 = 完整经文
+
+        这里 14 不是和 15 连接，而是表示 13 延续到 14。
+        因此最终逻辑单位是 13~14，正文取 13；15 仍是独立经文。
+        多个连续横线会继续并入前一个逻辑单位。
         """
         book_value = self.book_meta.get(book_name, {}).get("id", book_name)
         sql = (
@@ -225,29 +241,40 @@ class BibleDatabase:
         raw_rows = self.conn.execute(sql, (book_value, chapter)).fetchall()
         rows = [(int(r["verse"]), str(r["text"] or "")) for r in raw_rows]
         result = []
-        i = 0
-        while i < len(rows):
-            verse, text = rows[i]
-            if i + 1 < len(rows) and self._is_placeholder_verse(text):
-                next_verse, next_text = rows[i + 1]
-                label = f"{verse}~{next_verse}"
-                logical_start, logical_end = verse, next_verse
-                i += 2
-            else:
-                label = str(verse)
-                logical_start = logical_end = verse
-                next_text = text
-                i += 1
 
-            if start_verse is not None and logical_end < int(start_verse):
+        current = None
+        for verse, text in rows:
+            if self._is_placeholder_verse(text):
+                if current is not None:
+                    current["end"] = verse
+                else:
+                    current = {"start": verse, "end": verse, "text": text, "placeholder": True}
                 continue
-            if end_verse is not None and logical_start > int(end_verse):
-                continue
-            result.append((label, next_text, logical_start, logical_end))
+
+            if current is not None:
+                logical_start = current["start"]
+                logical_end = current["end"]
+                logical_text = current["text"]
+                if not (logical_start == logical_end and current.get("placeholder")):
+                    if (start_verse is None or logical_end >= int(start_verse)) and (end_verse is None or logical_start <= int(end_verse)):
+                        label = str(logical_start) if logical_start == logical_end else f"{logical_start}~{logical_end}"
+                        result.append((label, logical_text, logical_start, logical_end))
+
+            current = {"start": verse, "end": verse, "text": text, "placeholder": False}
+
+        if current is not None:
+            logical_start = current["start"]
+            logical_end = current["end"]
+            logical_text = current["text"]
+            if not (logical_start == logical_end and current.get("placeholder")):
+                if (start_verse is None or logical_end >= int(start_verse)) and (end_verse is None or logical_start <= int(end_verse)):
+                    label = str(logical_start) if logical_start == logical_end else f"{logical_start}~{logical_end}"
+                    result.append((label, logical_text, logical_start, logical_end))
+
         return result
 
     def get_verse_display_info(self, book_name, chapter, verse):
-        """返回指定节实际显示的节号标签和正文。"""
+        """返回指定物理节所属的逻辑节号和正文。"""
         try:
             target = int(verse)
         except (TypeError, ValueError):
@@ -258,7 +285,7 @@ class BibleDatabase:
         return str(target), ""
 
     def get_verses(self, book_name, chapter, start_verse=None, end_verse=None):
-        """读取经文；连续节数据库记录会合并成一个逻辑节号。"""
+        """读取经文；连接标记归属于前一节并合并为逻辑节号。"""
         return [
             (label, text)
             for label, text, _start, _end in self.get_logical_verses(
