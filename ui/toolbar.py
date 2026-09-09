@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QTabWidget,
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
-from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtGui import QFont, QColor, QIcon, QPixmap
 
 
 class DisplaySettingsDialog(QDialog):
@@ -187,30 +187,79 @@ class DisplaySettingsDialog(QDialog):
                 lambda _=False, k=key, a=attr: self._choose_color(k, getattr(self, a))
             )
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText("确定")
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
 
+    def _localize_color_dialog(self, dialog):
+        """将 Qt 颜色选择器中的常见英文界面文字替换为中文。"""
+        replacements = {
+            "OK": "确定",
+            "Ok": "确定",
+            "Cancel": "取消",
+            "&OK": "确定",
+            "&Cancel": "取消",
+            "Add to Custom Colors": "添加到自定义颜色",
+            "Pick Screen Color": "屏幕取色",
+            "Basic colors": "基本颜色",
+            "Custom colors": "自定义颜色",
+        }
+
+        for widget in dialog.findChildren(QPushButton):
+            text = widget.text().strip()
+            if text in replacements:
+                widget.setText(replacements[text])
+
+        # 某些 Qt 版本使用 QDialogButtonBox 保存确定/取消按钮。
+        for box in dialog.findChildren(QDialogButtonBox):
+            ok_button = box.button(QDialogButtonBox.StandardButton.Ok)
+            cancel_button = box.button(QDialogButtonBox.StandardButton.Cancel)
+            if ok_button:
+                ok_button.setText("确定")
+            if cancel_button:
+                cancel_button.setText("取消")
+
+        for widget in dialog.findChildren(QLabel):
+            text = widget.text().strip()
+            if text in replacements:
+                widget.setText(replacements[text])
+
     def _choose_color(self, key, button):
         current = self.settings.get(key, "#FFFFFF")
-        color = QColorDialog.getColor(QColor(current), self, "选择颜色")
-        if color.isValid():
-            value = color.name()
-            self.settings[key] = value
-            self._set_color_button(button, value)
+        color = QColor(current)
+        if not color.isValid():
+            color = QColor("#FFFFFF")
+
+        # 不使用 QColorDialog.getColor()，改用实例对话框，才能在 exec 前处理中文界面。
+        dialog = QColorDialog(color, self)
+        dialog.setWindowTitle("选择颜色")
+        self._localize_color_dialog(dialog)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            selected = dialog.selectedColor()
+            if selected.isValid():
+                value = selected.name(QColor.NameFormat.HexRgb)
+                self.settings[key] = value
+                self._set_color_button(button, value)
 
     def _set_color_button(self, button, color):
-        # 不再给按钮设置 QSS。应用级 QSS 可能覆盖/冲突，导致 stylesheet parse 警告。
-        # 使用 QPalette 设置颜色预览，不影响全局样式表。
-        palette = button.palette()
-        palette.setColor(button.backgroundRole(), QColor(color))
-        text_color = QColor("#000000" if QColor(color).lightness() > 160 else "#FFFFFF")
-        palette.setColor(button.foregroundRole(), text_color)
-        button.setAutoFillBackground(True)
-        button.setPalette(palette)
+        """用图标显示纯色块，绕开应用 QSS 对 QPushButton 背景色的覆盖。"""
+        qcolor = QColor(color)
+        if not qcolor.isValid():
+            qcolor = QColor("#FFFFFF")
+
+        # 颜色块直接绘制进 QIcon，QSS 无法覆盖图标，因此不会再出现“颜色被一层东西挡住”。
+        size = 18
+        pixmap = QPixmap(size, size)
+        pixmap.fill(qcolor)
+        button.setIcon(QIcon(pixmap))
+        button.setIconSize(QSize(size, size))
+        button.setToolTip(f"当前颜色：{qcolor.name().upper()}\n点击选择颜色")
 
     def _choose_bg(self):
         dialog = QFileDialog(self, "选择背景图片")
