@@ -71,13 +71,17 @@ class ScriptureSearchWidget(QWidget):
         self.search_input = QLineEdit()
         self.search_input.setObjectName("scriptureSearchInput")
         self.search_input.setPlaceholderText("输入经文关键词，例如：爱 盼望")
+        self.search_input.setFixedHeight(44)
+        self.search_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.search_input.returnPressed.connect(self.search)
-        search_row.addWidget(self.search_input, 1)
+        search_row.addWidget(self.search_input, 1, Qt.AlignmentFlag.AlignVCenter)
         search_btn = QPushButton("搜索")
         search_btn.setObjectName("scriptureSearchButton")
         search_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        search_btn.setFixedSize(82, 44)
+        search_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         search_btn.clicked.connect(self.search)
-        search_row.addWidget(search_btn)
+        search_row.addWidget(search_btn, 0, Qt.AlignmentFlag.AlignVCenter)
         condition.addLayout(search_row)
 
         options = QHBoxLayout()
@@ -375,9 +379,9 @@ class ScriptureSearchWidget(QWidget):
         QPushButton#searchConditionToggle {{ background:transparent; color:{t['text_muted']}; border:none; padding:2px 4px; text-align:left; font-size:12px; font-weight:600; }}
         QPushButton#searchConditionToggle:hover {{ color:{t['accent']}; }}
         QWidget#scriptureConditionBox {{ background:{t['surface_sunken']}; border:1px solid {t['border']}; border-radius:11px; }}
-        QLineEdit#scriptureSearchInput {{ background:{t['control']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:9px; padding:0 13px; min-height:44px; font-size:14px; }}
+        QLineEdit#scriptureSearchInput {{ background:{t['control']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:9px; padding:0 13px; height:44px; min-height:44px; max-height:44px; font-size:14px; }}
         QLineEdit#scriptureSearchInput:focus {{ border:1px solid {t['focus_ring']}; }}
-        QPushButton#scriptureSearchButton {{ background:{t['accent']}; color:#FFFFFF; border:1px solid {t['accent']}; border-radius:9px; min-width:82px; min-height:44px; font-size:14px; font-weight:600; }}
+        QPushButton#scriptureSearchButton {{ background:{t['accent']}; color:#FFFFFF; border:1px solid {t['accent']}; border-radius:9px; min-width:82px; max-width:82px; height:44px; min-height:44px; max-height:44px; font-size:14px; font-weight:600; }}
         QPushButton#scriptureSearchButton:hover {{ background:{t['accent_hover']}; }}
         QLabel#conditionLabel {{ color:{t['text_muted']}; font-size:12px; }}
         QRadioButton#searchOption {{ background:{t['control']}; color:{t['text_muted']}; border:1px solid {t['border']}; border-radius:8px; padding:7px 12px; spacing:0px; font-size:12px; min-height:18px; }}
