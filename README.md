@@ -189,7 +189,7 @@ bible_projection/
 ├── styles/                         # 亮色 / 暗色 QSS 与图标资源
 ├── ui/                             # UI 与显示模块
 │   ├── extension_window.py         # 扩展屏窗口
-│   ├── navigation_panel.py        # 书卷章节导航
+│   ├── navigation_panel.py         # 书卷章节导航
 │   ├── preview_host.py             # 主屏预览
 │   ├── scripture_display.py        # 经文显示
 │   ├── scripture_search.py         # 经文全文搜索
@@ -344,22 +344,35 @@ Bible Pro.iss
 
 ## 📄 版权与许可
 
-Bible Pro 项目代码采用 **MIT License**，详细条款请参阅 `LICENSE`。
+Bible Pro 项目代码采用 **MIT License**。
+
+### 项目贡献者
+
+- **XiaoDong**
+- **JiangRTTTR**
+
+### 项目版权
 
 ```text
-Copyright © 2026 XiaoDong
+Copyright © 2026 XiaoDong and JiangRTTTR
 ```
 
-《和合本》圣经文本、数据库内容、字体、图标及其他第三方资源的版权和授权范围，以相应权利人的许可或版权声明为准；第三方资源不自动适用本项目 MIT License。
+详细许可条款请参阅项目根目录下的 `LICENSE` 文件。
+
+> 本项目中的《和合本》圣经文本、字体、图标以及其他第三方资源，其版权归相应权利人所有。第三方资源不属于本项目代码许可证的授权范围，具体使用权限请以其各自的许可证或版权声明为准。
 
 ---
 
-## ❤️ 项目定位
+## 📌 项目定位
 
-Bible Pro 的目标不是增加复杂的操作流程，而是让 **“找到经文 → 预览经文 → 投影经文”** 这一过程尽可能快速、稳定、直观。
+Bible Pro 主要面向实际聚会和经文投影使用场景，重点关注：
 
-项目将继续围绕实际聚会和讲道场景优化，重点提升经文搜索、投影显示、双屏同步、主题适配和 Windows 发布体验。
+- 经文操作速度。
+- 投影显示稳定性。
+- 主屏与副屏协同。
+- 搜索和定位效率。
+- 亮色 / 暗色主题适配。
+- Windows 安装与升级体验。
+- 代码结构持续模块化和可维护性。
 
----
-
-**Bible Pro · Python + PyQt6 + SQLite**
+项目会根据实际使用反馈持续迭代。
