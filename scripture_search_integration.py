@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import QPushButton
 
 from ui import scripture_search as _scripture_search
 from ui.scripture_result_compat import ScriptureResultWidget
-from ui.themes import THEMES
+from ui.themes import THEMES, theme_tokens
 
 # 旧版搜索面板使用了 text_disabled 令牌，而当前统一主题令牌已改为 text_faint。
 # 在兼容层补齐旧字段，避免恢复旧页面时破坏当前主题系统。
@@ -35,6 +35,47 @@ def install_scripture_search(window):
     window._scripture_search_shortcut = shortcut
 
 
+def _polish_search_panel(widget):
+    """只调整旧搜索面板的视觉层，不触碰搜索逻辑。"""
+    t = theme_tokens(widget.theme)
+
+    # 匹配方式恢复为旧版的无圆点选择样式，四个选项高度统一、垂直居中。
+    radio_style = f"""
+        QRadioButton {{
+            background:{t['control']}; color:{t['text_muted']};
+            border:1px solid {t['border']}; border-radius:8px;
+            padding:6px 10px; spacing:0; font-size:12px; min-height:18px;
+        }}
+        QRadioButton:hover {{
+            background:{t['control_hover']}; color:{t['text']};
+            border-color:{t['border_strong']};
+        }}
+        QRadioButton:checked {{
+            background:{t['accent_soft']}; color:{t['accent_text']};
+            border-color:{t['accent']}; font-weight:600;
+        }}
+        QRadioButton::indicator {{
+            width:0px; height:0px; margin:0; padding:0; border:none;
+        }}
+    """
+    for radio in (
+        widget.fuzzy_radio,
+        widget.exact_radio,
+        widget.all_radio,
+        widget.any_radio,
+    ):
+        radio.setStyleSheet(radio_style)
+        radio.setFixedHeight(32)
+
+    # 结果区域统一内边距和卡片间距，避免第一项、最后一项看起来贴边。
+    widget.result_layout.setContentsMargins(0, 4, 4, 6)
+    widget.result_layout.setSpacing(10)
+
+    # 最近搜索行也统一节奏，避免和结果卡片的视觉密度冲突。
+    widget.history_layout.setContentsMargins(4, 4, 4, 4)
+    widget.history_layout.setSpacing(5)
+
+
 def _toggle(window):
     widget = window._scripture_search_widget
     if widget is not None and widget.isVisible():
@@ -46,6 +87,7 @@ def _toggle(window):
     widget.result_activated.connect(lambda result: _activate(window, result))
     widget.result_project_requested.connect(lambda result: _project(window, result))
     widget.close_requested.connect(widget.close)
+    _polish_search_panel(widget)
 
     width = widget.width()
     height = max(480, window.height() - window.toolbar.height() - 18)
