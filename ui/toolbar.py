@@ -85,7 +85,7 @@ class DisplaySettingsDialog(QDialog):
         title_form.addRow("标题间距", self.title_spacing)
         text_tabs.addTab(title_page, "标题")
 
-        # 小标题：与正文、标题、节号、底注使用完全相同的设置页结构。
+        # 小标题：沿用其他文字设置页面的统一结构，仅提供字体、字号、颜色。
         scripture_title_page = QWidget()
         scripture_title_form = QFormLayout(scripture_title_page)
         scripture_title_form.setContentsMargins(20, 20, 20, 20)
@@ -96,17 +96,9 @@ class DisplaySettingsDialog(QDialog):
         self.scripture_title_size.setRange(10, 200)
         self.scripture_title_size.setSuffix(" px")
         self.scripture_title_color_btn = QPushButton("小标题颜色")
-        self.scripture_title_spacing = QSpinBox()
-        self.scripture_title_spacing.setRange(0, 50)
-        self.scripture_title_spacing.setSuffix(" px")
-        self.scripture_title_line_spacing = QSpinBox()
-        self.scripture_title_line_spacing.setRange(80, 300)
-        self.scripture_title_line_spacing.setSuffix("%")
         scripture_title_form.addRow("小标题字体", self.scripture_title_font_combo)
         scripture_title_form.addRow("小标题字号", self.scripture_title_size)
         scripture_title_form.addRow("小标题颜色", self.scripture_title_color_btn)
-        scripture_title_form.addRow("小标题间距", self.scripture_title_spacing)
-        scripture_title_form.addRow("小标题行距", self.scripture_title_line_spacing)
         text_tabs.addTab(scripture_title_page, "小标题")
 
         verse_page = QWidget()
@@ -236,8 +228,6 @@ class DisplaySettingsDialog(QDialog):
         self.title_spacing.setValue(int(s.get("title_spacing", 12)))
         self.scripture_title_font_combo.setCurrentFont(QFont(s.get("scripture_title_font_family", "微软雅黑")))
         self.scripture_title_size.setValue(int(s.get("scripture_title_size", 30)))
-        self.scripture_title_spacing.setValue(int(s.get("scripture_title_spacing", 8)))
-        self.scripture_title_line_spacing.setValue(int(s.get("scripture_title_line_spacing", 120)))
         self.verse_font_combo.setCurrentFont(QFont(s.get("verse_num_font_family", "微软雅黑")))
         self.verse_size.setValue(int(s.get("verse_num_size", 24)))
         self.footer_font_combo.setCurrentFont(QFont(s.get("footer_font_family", "微软雅黑")))
@@ -268,8 +258,6 @@ class DisplaySettingsDialog(QDialog):
             "scripture_title_font_family": self.scripture_title_font_combo.currentFont().family(),
             "scripture_title_size": self.scripture_title_size.value(),
             "scripture_title_color": self.settings.get("scripture_title_color", "#87CEEB"),
-            "scripture_title_spacing": self.scripture_title_spacing.value(),
-            "scripture_title_line_spacing": self.scripture_title_line_spacing.value(),
             "verse_num_font_family": self.verse_font_combo.currentFont().family(),
             "verse_num_size": self.verse_size.value(),
             "footer_font_family": self.footer_font_combo.currentFont().family(),
@@ -344,7 +332,6 @@ class ToolBarWidget(QToolBar):
         scroll_layout.setContentsMargins(0, 0, 0, 0)
         scroll_layout.setSpacing(8)
         scroll_layout.addWidget(QLabel("速度"))
-
         self.speed_buttons = []
         for speed, text in [(0, "暂停")] + [(i, f"{i}档") for i in range(1, 10)]:
             btn = QPushButton(text)
@@ -364,7 +351,6 @@ class ToolBarWidget(QToolBar):
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.addWidget(spacer)
-
         self.addSeparator()
 
         self.settings_btn = QPushButton("显示设置")
