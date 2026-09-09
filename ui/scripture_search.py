@@ -266,17 +266,20 @@ class ScriptureSearchWidget(QWidget):
         close.clicked.connect(self.close_requested.emit)
         header.addWidget(close, 0, Qt.AlignmentFlag.AlignTop)
         root.addLayout(header)
+
         self.condition_toggle = QPushButton("搜索条件  ▲")
         self.condition_toggle.setObjectName("searchConditionToggle")
         self.condition_toggle.setFlat(True)
         self.condition_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         self.condition_toggle.clicked.connect(self._toggle_conditions)
         root.addWidget(self.condition_toggle)
+
         self.condition_box = QWidget()
         self.condition_box.setObjectName("scriptureConditionBox")
         condition = QVBoxLayout(self.condition_box)
         condition.setContentsMargins(14, 14, 14, 14)
         condition.setSpacing(10)
+
         search_row = QHBoxLayout()
         search_row.setSpacing(8)
         self.search_input = QLineEdit()
@@ -290,24 +293,31 @@ class ScriptureSearchWidget(QWidget):
         search_btn.clicked.connect(self.search)
         search_row.addWidget(search_btn)
         condition.addLayout(search_row)
+
         options = QHBoxLayout()
-        options.setSpacing(18)
+        options.setSpacing(10)
         match_label = QLabel("匹配方式")
         match_label.setObjectName("conditionLabel")
         options.addWidget(match_label)
         self.fuzzy_radio = QRadioButton("模糊")
         self.exact_radio = QRadioButton("精确")
+        self.fuzzy_radio.setObjectName("searchOption")
+        self.exact_radio.setObjectName("searchOption")
         self.fuzzy_radio.setChecked(True)
         self.match_group = QButtonGroup(self)
         self.match_group.addButton(self.fuzzy_radio)
         self.match_group.addButton(self.exact_radio)
         options.addWidget(self.fuzzy_radio)
         options.addWidget(self.exact_radio)
+
         keyword_label = QLabel("多关键词")
         keyword_label.setObjectName("conditionLabel")
+        options.addSpacing(8)
         options.addWidget(keyword_label)
         self.all_radio = QRadioButton("同时包含")
         self.any_radio = QRadioButton("任意包含")
+        self.all_radio.setObjectName("searchOption")
+        self.any_radio.setObjectName("searchOption")
         self.all_radio.setChecked(True)
         self.keyword_group = QButtonGroup(self)
         self.keyword_group.addButton(self.all_radio)
@@ -316,7 +326,9 @@ class ScriptureSearchWidget(QWidget):
         options.addWidget(self.any_radio)
         options.addStretch(1)
         condition.addLayout(options)
+
         scope_row = QHBoxLayout()
+        scope_row.setSpacing(8)
         scope_label = QLabel("搜索范围")
         scope_label.setObjectName("conditionLabel")
         scope_row.addWidget(scope_label)
@@ -326,43 +338,62 @@ class ScriptureSearchWidget(QWidget):
         self.scope_btn.clicked.connect(self._choose_scope)
         scope_row.addWidget(self.scope_btn, 1)
         condition.addLayout(scope_row)
+
+        history_head = QHBoxLayout()
+        history_head.setSpacing(8)
         history_label = QLabel("最近搜索")
         history_label.setObjectName("searchHistoryLabel")
-        condition.addWidget(history_label)
+        history_head.addWidget(history_label, 1)
+        self.clear_history_btn = QPushButton("清空")
+        self.clear_history_btn.setObjectName("historyClearButton")
+        self.clear_history_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_history_btn.clicked.connect(self._clear_history)
+        history_head.addWidget(self.clear_history_btn)
+        condition.addLayout(history_head)
+
         self.history_list = QListWidget()
         self.history_list.setObjectName("scriptureHistoryList")
-        self.history_list.setMaximumHeight(88)
-        self.history_list.itemClicked.connect(self._use_history)
+        self.history_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        self.history_list.setMaximumHeight(128)
         condition.addWidget(self.history_list)
         self._refresh_history()
         root.addWidget(self.condition_box)
+
         result_top = QHBoxLayout()
         self.result_header = QLabel("搜索结果")
         self.result_header.setObjectName("scriptureResultHeader")
         result_top.addWidget(self.result_header, 1)
+        self.result_hint = QLabel("")
+        self.result_hint.setObjectName("scriptureResultHint")
+        result_top.addWidget(self.result_hint)
         root.addLayout(result_top)
+
         self.result_scroll = QScrollArea()
         self.result_scroll.setObjectName("scriptureResultScroll")
         self.result_scroll.setWidgetResizable(True)
         self.result_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.result_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.result_container = QWidget()
         self.result_container.setObjectName("scriptureResultContainer")
         self.result_layout = QVBoxLayout(self.result_container)
-        self.result_layout.setContentsMargins(0, 0, 0, 0)
+        self.result_layout.setContentsMargins(0, 0, 4, 0)
         self.result_layout.setSpacing(8)
         self.result_scroll.setWidget(self.result_container)
         root.addWidget(self.result_scroll, 1)
+
         pager = QHBoxLayout()
         pager.setSpacing(8)
         self.prev_btn = QPushButton("‹")
-        self.prev_btn.setObjectName("scripturePagerButton")
         self.next_btn = QPushButton("›")
+        self.prev_btn.setObjectName("scripturePagerButton")
         self.next_btn.setObjectName("scripturePagerButton")
+        self.prev_btn.setFixedSize(34, 32)
+        self.next_btn.setFixedSize(34, 32)
         self.prev_btn.clicked.connect(self._prev_page)
         self.next_btn.clicked.connect(self._next_page)
         pager.addWidget(self.prev_btn)
         self.page_label = QLabel("第 0 / 0 页")
-        self.page_label.setObjectName("scripturePagerLabel")
+        self.page_label.setObjectName("scripturePageLabel")
         self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         pager.addWidget(self.page_label, 1)
         pager.addWidget(self.next_btn)
@@ -397,6 +428,7 @@ class ScriptureSearchWidget(QWidget):
         keywords = self._keywords()
         if not keywords:
             self.result_header.setText("请输入关键词")
+            self.result_hint.setText("")
             return
         self._remember_search(self.search_input.text().strip())
         self.page = 0
@@ -414,11 +446,22 @@ class ScriptureSearchWidget(QWidget):
             if widget:
                 widget.deleteLater()
         if not self.results:
-            empty = QLabel("没有找到相关经文\n\n请尝试更换关键词或扩大搜索范围")
-            empty.setObjectName("scriptureEmptyState")
-            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            empty.setWordWrap(True)
-            self.result_layout.addWidget(empty)
+            empty_box = QWidget()
+            empty_layout = QVBoxLayout(empty_box)
+            empty_layout.setContentsMargins(20, 50, 20, 50)
+            empty_icon = QLabel("⌕")
+            empty_icon.setObjectName("scriptureEmptyIcon")
+            empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_title = QLabel("没有找到相关经文")
+            empty_title.setObjectName("scriptureEmptyTitle")
+            empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_hint = QLabel("换一个关键词试试，或扩大搜索范围")
+            empty_hint.setObjectName("scriptureEmptyHint")
+            empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_layout.addWidget(empty_icon)
+            empty_layout.addWidget(empty_title)
+            empty_layout.addWidget(empty_hint)
+            self.result_layout.addWidget(empty_box)
         else:
             for result in self.results:
                 card = ScriptureResultWidget(result, keywords)
@@ -428,7 +471,9 @@ class ScriptureSearchWidget(QWidget):
                 self.result_layout.addWidget(card)
             self.result_layout.addStretch(1)
         self.result_header.setText(f"搜索结果  ·  找到 {self.total} 条")
+        self.result_hint.setText("点击经文标题可定位")
         self._update_pager()
+        self.result_scroll.verticalScrollBar().setValue(0)
 
     def _toggle_conditions_closed(self):
         self.condition_box.setVisible(False)
@@ -452,7 +497,6 @@ class ScriptureSearchWidget(QWidget):
             self.selected_books or None, self.PAGE_SIZE, self.page * self.PAGE_SIZE,
         )
         self._render_results(keywords)
-        self.result_scroll.verticalScrollBar().setValue(0)
 
     def _prev_page(self):
         self.load_page(self.page - 1)
@@ -462,25 +506,135 @@ class ScriptureSearchWidget(QWidget):
 
     def _update_pager(self):
         pages = max(1, (self.total + self.PAGE_SIZE - 1) // self.PAGE_SIZE) if self.total else 0
-        self.page_label.setText(f"第 {self.page + 1} / {pages} 页" if pages else "暂无结果")
+        self.page_label.setText(f"第 {self.page + 1} / {pages} 页" if pages else "第 0 / 0 页")
         self.prev_btn.setEnabled(self.page > 0)
-        self.next_btn.setEnabled(pages > 0 and self.page < pages - 1)
+        self.next_btn.setEnabled(bool(pages) and self.page < pages - 1)
+
+    def _remember_search(self, text):
+        if not text:
+            return
+        self.history = [text] + [x for x in self.history if x != text]
+        self.history = self.history[:10]
+        if self.config:
+            self.config.save_scripture_search_history(self.history)
+        self._refresh_history()
 
     def _refresh_history(self):
         self.history_list.clear()
-        for value in self.history[:5]:
-            item = QListWidgetItem(value)
+        self.clear_history_btn.setEnabled(bool(self.history))
+        for text in self.history:
+            item = QListWidgetItem()
+            item.setSizeHint(self._history_row_size())
             self.history_list.addItem(item)
+            row = QWidget()
+            row.setObjectName("scriptureHistoryRow")
+            layout = QHBoxLayout(row)
+            layout.setContentsMargins(10, 2, 6, 2)
+            layout.setSpacing(6)
+            use_btn = QPushButton(text)
+            use_btn.setObjectName("historyUseButton")
+            use_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            use_btn.setToolTip("使用此搜索")
+            use_btn.clicked.connect(lambda _, value=text: self._use_history_text(value))
+            layout.addWidget(use_btn, 1)
+            delete_btn = QPushButton("×")
+            delete_btn.setObjectName("historyDeleteButton")
+            delete_btn.setFixedSize(26, 26)
+            delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            delete_btn.setToolTip("删除此搜索")
+            delete_btn.clicked.connect(lambda _, value=text: self._delete_history(value))
+            layout.addWidget(delete_btn)
+            self.history_list.setItemWidget(item, row)
 
-    def _remember_search(self, value):
-        if not value:
+    @staticmethod
+    def _history_row_size():
+        from PyQt6.QtCore import QSize
+        return QSize(0, 34)
+
+    def _use_history_text(self, text):
+        self.search_input.setText(text)
+        self.search()
+
+    def _delete_history(self, text):
+        self.history = [x for x in self.history if x != text]
+        if self.config:
+            self.config.save_scripture_search_history(self.history)
+        self._refresh_history()
+
+    def _clear_history(self):
+        if not self.history:
             return
-        self.history = [value] + [x for x in self.history if x != value]
-        self.history = self.history[:8]
+        self.history = []
         if self.config:
             self.config.save_scripture_search_history(self.history)
         self._refresh_history()
 
     def _use_history(self, item):
-        self.search_input.setText(item.text())
-        self.search()
+        self._use_history_text(item.text())
+
+    def _apply_style(self):
+        t = theme_tokens(self.theme)
+        self.setStyleSheet(f"""
+        QWidget#scriptureSearchPanel {{ background:{t['surface_raised']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:14px; }}
+        QLabel#scriptureSearchTitle {{ color:{t['text']}; font-size:19px; font-weight:600; }}
+        QLabel#scriptureSearchSubtitle {{ color:{t['text_muted']}; font-size:12px; }}
+        QPushButton#scriptureSearchClose {{ background:transparent; color:{t['text_muted']}; border:none; border-radius:9px; font-size:22px; }}
+        QPushButton#scriptureSearchClose:hover {{ background:{t['control_hover']}; color:{t['text']}; }}
+        QPushButton#searchConditionToggle {{ background:transparent; color:{t['text_muted']}; border:none; padding:2px 4px; text-align:left; font-size:12px; font-weight:600; }}
+        QPushButton#searchConditionToggle:hover {{ color:{t['accent']}; }}
+        QWidget#scriptureConditionBox {{ background:{t['surface_sunken']}; border:1px solid {t['border']}; border-radius:11px; }}
+        QLineEdit#scriptureSearchInput {{ background:{t['control']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:9px; padding:0 13px; min-height:44px; font-size:14px; selection-background-color:{t['accent']}; selection-color:#FFFFFF; }}
+        QLineEdit#scriptureSearchInput:focus {{ border:1px solid {t['focus_ring']}; }}
+        QPushButton#scriptureSearchButton {{ background:{t['accent']}; color:#FFFFFF; border:1px solid {t['accent']}; border-radius:9px; min-width:82px; min-height:44px; padding:0 18px; font-size:14px; font-weight:600; }}
+        QPushButton#scriptureSearchButton:hover {{ background:{t['accent_hover']}; }}
+        QPushButton#scriptureSearchButton:pressed {{ background:{t['accent_pressed']}; }}
+        QLabel#conditionLabel {{ color:{t['text_muted']}; font-size:12px; }}
+        QRadioButton#searchOption {{ background:{t['control']}; color:{t['text_muted']}; border:1px solid {t['border']}; border-radius:8px; padding:6px 10px; spacing:0; font-size:12px; min-height:18px; }}
+        QRadioButton#searchOption:hover {{ background:{t['control_hover']}; color:{t['text']}; border-color:{t['border_strong']}; }}
+        QRadioButton#searchOption:checked {{ background:{t['accent_soft']}; color:{t['accent_text']}; border-color:{t['accent']}; font-weight:600; }}
+        QRadioButton#searchOption::indicator {{ width:0px; height:0px; margin:0; padding:0; border:none; }}
+        QPushButton#scriptureScopeButton {{ background:{t['control']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:8px; min-height:34px; padding:0 12px; text-align:left; }}
+        QPushButton#scriptureScopeButton:hover {{ background:{t['control_hover']}; border-color:{t['border_strong']}; }}
+        QLabel#searchHistoryLabel {{ color:{t['text_faint']}; font-size:11px; font-weight:600; padding-top:2px; }}
+        QPushButton#historyClearButton {{ background:transparent; color:{t['text_muted']}; border:none; padding:2px 4px; font-size:11px; }}
+        QPushButton#historyClearButton:hover:enabled {{ color:{t['accent']}; }}
+        QPushButton#historyClearButton:disabled {{ color:{t['text_faint']}; }}
+        QListWidget#scriptureHistoryList {{ background:transparent; border:none; color:{t['text']}; outline:none; padding:0; }}
+        QListWidget#scriptureHistoryList::item {{ background:{t['control']}; border:1px solid transparent; border-radius:7px; margin:2px 0; padding:0; }}
+        QWidget#scriptureHistoryRow {{ background:transparent; }}
+        QPushButton#historyUseButton {{ background:transparent; color:{t['text_muted']}; border:none; padding:5px 0; text-align:left; font-size:12px; }}
+        QPushButton#historyUseButton:hover {{ color:{t['text']}; }}
+        QPushButton#historyDeleteButton {{ background:transparent; color:{t['text_faint']}; border:none; border-radius:7px; font-size:15px; padding:0; }}
+        QPushButton#historyDeleteButton:hover {{ background:{t['control_hover']}; color:{t['text']}; }}
+        QLabel#scriptureResultHeader {{ color:{t['text']}; font-size:13px; font-weight:600; }}
+        QLabel#scriptureResultHint {{ color:{t['text_faint']}; font-size:11px; }}
+        QScrollArea#scriptureResultScroll {{ background:transparent; border:none; }}
+        QWidget#scriptureResultContainer {{ background:transparent; }}
+        QFrame#scriptureSearchResult {{ background:{t['surface']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:10px; }}
+        QFrame#scriptureSearchResult:hover {{ background:{t['control']}; border-color:{t['border_strong']}; }}
+        QPushButton#scriptureResultTitle {{ background:transparent; color:{t['text']}; border:none; padding:0; text-align:left; font-size:15px; font-weight:600; }}
+        QPushButton#scriptureResultTitle:hover {{ color:{t['accent']}; }}
+        QLabel#scriptureResultMeta {{ color:{t['text_faint']}; font-size:11px; }}
+        QLabel#scriptureResultText {{ color:{t['text']}; font-size:14px; }}
+        QLabel#scriptureResultText mark {{ background:{t['accent_soft']}; color:{t['accent_text']}; padding:1px 2px; border-radius:3px; }}
+        QPushButton#scriptureResultAction {{ background:transparent; color:{t['text_muted']}; border:1px solid {t['border']}; border-radius:7px; min-width:44px; min-height:28px; padding:0 8px; font-size:11px; }}
+        QPushButton#scriptureResultAction:hover {{ background:{t['accent_soft']}; color:{t['accent_text']}; border-color:{t['accent']}; }}
+        QPushButton#scripturePagerButton {{ background:{t['control']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:8px; font-size:20px; }}
+        QPushButton#scripturePagerButton:hover:enabled {{ background:{t['control_hover']}; border-color:{t['border_strong']}; }}
+        QPushButton#scripturePagerButton:disabled {{ background:{t['surface_sunken']}; color:{t['text_faint']}; border-color:{t['border']}; }}
+        QLabel#scripturePageLabel {{ color:{t['text_muted']}; font-size:12px; }}
+        QLabel#scriptureEmptyIcon {{ color:{t['text_faint']}; font-size:38px; }}
+        QLabel#scriptureEmptyTitle {{ color:{t['text']}; font-size:16px; font-weight:600; }}
+        QLabel#scriptureEmptyHint {{ color:{t['text_muted']}; font-size:12px; }}
+        QScrollBar:vertical {{ background:transparent; width:8px; margin:2px; }}
+        QScrollBar::handle:vertical {{ background:{t['scroll']}; border-radius:4px; min-height:36px; }}
+        QScrollBar::handle:vertical:hover {{ background:{t['scroll_hover']}; }}
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height:0; }}
+        """)
+
+    def apply_theme(self, theme):
+        self.theme = theme
+        self.setProperty("theme", theme)
+        self._apply_style()
+        self.style().unpolish(self)
+        self.style().polish(self)
