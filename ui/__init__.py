@@ -5,7 +5,7 @@ from .themes import THEMES
 from .history_item import HistoryItemWidget, HistoryListWidget
 from .scripture_display import ScriptureDisplay
 from .preview_host import PreviewHost
-from .search_widget import SearchWidget
+from .search_widget_space_fix import SearchWidget
 from .navigation_panel import NavigationPanel
 from .toolbar import ToolBarWidget
 from .extension_window import ExtensionWindow
