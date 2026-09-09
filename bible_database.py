@@ -21,8 +21,14 @@ class BibleDatabase:
         tables = self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         if not tables:
             raise RuntimeError("和合本.db中没有可用数据表")
-        self.verse_table = "Bible" if any(r[0] == "Bible" for r in tables) else tables[0][0]
-        self.books_table = "Books" if any(r[0] == "Books" for r in tables) else None
+        table_names = [r[0] for r in tables]
+        self.verse_table = "Bible" if "Bible" in table_names else table_names[0]
+        self.books_table = "Books" if "Books" in table_names else None
+        self.titles_table = "Titles" if "Titles" in table_names else None
+        self.title_columns = {}
+        if self.titles_table:
+            self._inspect_titles_table()
+
         columns = [r[1] for r in self.conn.execute(f'PRAGMA table_info("{self.verse_table}")').fetchall()]
 
         def find(names):
@@ -38,6 +44,74 @@ class BibleDatabase:
         self.text_col = find(["Scripture", "text", "content", "verse_text", "经文", "经文内容"])
         if not all([self.book_col, self.chapter_col, self.verse_col, self.text_col]):
             raise RuntimeError(f"无法识别和合本.db字段：当前表 {self.verse_table} 字段为：{', '.join(columns)}")
+
+    def _inspect_titles_table(self):
+        """识别 Titles 表字段；数据库没有标题表或字段不完整时自动停用标题读取。"""
+        columns = [r[1] for r in self.conn.execute(f'PRAGMA table_info("{self.titles_table}")').fetchall()]
+        lower = {c.lower(): c for c in columns}
+
+        def find(names):
+            for name in names:
+                if name.lower() in lower:
+                    return lower[name.lower()]
+            return None
+
+        self.title_columns = {
+            "book": find(["Book", "book_id", "BookID", "书卷", "书名"]),
+            "chapter": find(["Chapter", "chapter_id", "ChapterID", "章节", "章"]),
+            "verse": find(["Verse", "verse_id", "VerseID", "StartVerse", "start_verse", "节号", "节"]),
+            "text": find(["Title", "title", "Text", "text", "Content", "content", "Name", "name", "标题", "小标题"]),
+        }
+        if not all(self.title_columns.values()):
+            self.titles_table = None
+            self.title_columns = {}
+
+    @staticmethod
+    def _clean_scripture_title(value):
+        """删除小标题中的经文交叉引用括号，保留普通括号内容。"""
+        text = str(value or "").strip()
+        if not text:
+            return ""
+
+        # 只删除明确包含“数字:数字/数字-数字”的经文引用括号。
+        # 普通说明性括号不会被误删，例如“耶稣的教训（下）”。
+        reference = re.compile(r"\d{1,3}\s*[:：.]\s*\d{1,3}(?:\s*[-–—]\s*\d{1,3})?")
+        pattern = re.compile(r"[（(]([^（）()]*)[）)]")
+
+        def replace(match):
+            inner = match.group(1).strip()
+            return "" if reference.search(inner) else match.group(0)
+
+        text = pattern.sub(replace, text)
+        text = re.sub(r"\s{2,}", " ", text).strip(" \t-—–，,；;：:")
+        return text
+
+    def get_chapter_titles(self, book_name, chapter):
+        """返回指定章节的小标题，键为小标题所属的节号。"""
+        if not self.titles_table:
+            return {}
+        cols = self.title_columns
+        book_value = self.book_meta.get(book_name, {}).get("id", book_name)
+        sql = (
+            f"SELECT {self._quote(cols['book'])} AS book, "
+            f"{self._quote(cols['chapter'])} AS chapter, "
+            f"{self._quote(cols['verse'])} AS verse, "
+            f"{self._quote(cols['text'])} AS title "
+            f"FROM {self._quote(self.titles_table)} "
+            f"WHERE {self._quote(cols['book'])}=? AND {self._quote(cols['chapter'])}=? "
+            f"ORDER BY {self._quote(cols['verse'])}"
+        )
+        rows = self.conn.execute(sql, (book_value, chapter)).fetchall()
+        result = {}
+        for row in rows:
+            try:
+                verse = int(row["verse"])
+            except (TypeError, ValueError):
+                continue
+            title = self._clean_scripture_title(row["title"])
+            if title:
+                result.setdefault(verse, []).append(title)
+        return result
 
     def _quote(self, name):
         return '"' + name.replace('"', '""') + '"'
@@ -114,10 +188,6 @@ class BibleDatabase:
         q = self._normalize_code(query)
         if not q or not re.fullmatch(r"[a-z]+", q):
             return []
-
-        # 只搜索 Books.Pinyin 中定义的简拼，不搜索中文书名、中文简称或数字编号。
-        # 例如撒母耳记下的合法简拼为 smx：sm / smx 可以用于逐步筛选；
-        # sme、smej、smejx 均不能命中。
         results = []
         for book in self.book_names:
             pinyin = self._normalize_code(self.book_meta.get(book, {}).get("pinyin", ""))
@@ -168,13 +238,12 @@ class BibleDatabase:
         return [(int(r["verse"]), str(r["text"])) for r in self.conn.execute(sql, params).fetchall()]
 
     def get_selection_verses(self, selection):
-        """按多段选择查询经文，返回 (chapter, verse, text) 列表。"""
+        """按多段选择查询经文，返回 (chapter, verse, text, titles) 列表。"""
         rows = []
         for span in selection.spans:
-            for verse, text in self.get_verses(
-                selection.book, span.chapter, span.start, span.end
-            ):
-                rows.append((span.chapter, verse, text))
+            titles = self.get_chapter_titles(selection.book, span.chapter)
+            for verse, text in self.get_verses(selection.book, span.chapter, span.start, span.end):
+                rows.append((span.chapter, verse, text, list(titles.get(verse, []))))
         return rows
 
     def get_verse_range(self, book_name, chapter, start_verse=1, end_verse=None):
