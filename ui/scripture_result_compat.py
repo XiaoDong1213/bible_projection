@@ -24,7 +24,7 @@ class ScriptureResultWidget(QFrame):
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 12, 14, 12)
-        root.setSpacing(10)
+        root.setSpacing(8)
 
         top = QHBoxLayout()
         top.setContentsMargins(0, 0, 0, 0)
@@ -37,6 +37,7 @@ class ScriptureResultWidget(QFrame):
         title.setCursor(Qt.CursorShape.PointingHandCursor)
         title.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         title.setFixedHeight(30)
+        title.setStyleSheet("padding:0; margin:0; border:none; background:transparent;")
         title.clicked.connect(lambda: self.activated.emit(self.result))
         top.addWidget(title, 1)
 
@@ -44,6 +45,7 @@ class ScriptureResultWidget(QFrame):
         copy_btn.setObjectName("scriptureResultAction")
         copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         copy_btn.setFixedSize(48, 30)
+        copy_btn.setStyleSheet("padding:0; margin:0;")
         copy_btn.clicked.connect(lambda: self.copy_requested.emit(self.result))
         top.addWidget(copy_btn)
 
@@ -51,6 +53,7 @@ class ScriptureResultWidget(QFrame):
         project_btn.setObjectName("scriptureResultAction")
         project_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         project_btn.setFixedSize(48, 30)
+        project_btn.setStyleSheet("padding:0; margin:0;")
         project_btn.clicked.connect(lambda: self.project_requested.emit(self.result))
         top.addWidget(project_btn)
         root.addLayout(top)
@@ -59,6 +62,8 @@ class ScriptureResultWidget(QFrame):
         text.setObjectName("scriptureResultText")
         text.setTextFormat(Qt.TextFormat.RichText)
         text.setWordWrap(True)
+        text.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        text.setContentsMargins(0, 0, 0, 0)
         text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         root.addWidget(text)
 
@@ -75,7 +80,6 @@ class ScriptureResultWidget(QFrame):
             safe_term = html.escape(term)
             safe = safe.replace(
                 safe_term,
-                f'<span style="background-color:{t["accent"]}; '
-                f'color:#FFFFFF; padding:1px 3px;">{safe_term}</span>',
+                f'<span style="background-color:{t["accent"]}; color:#FFFFFF;">{safe_term}</span>',
             )
         return safe
