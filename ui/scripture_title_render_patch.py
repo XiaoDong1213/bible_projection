@@ -1,18 +1,17 @@
-"""经文小标题渲染兼容层。
-
-小标题的显示设置已经直接集成到 toolbar.py / config.py，
-本文件只保留渲染和旧滚动接口兼容，不再动态修改显示设置对话框。
-"""
+"""经文小标题渲染兼容层。"""
 
 from PyQt6.QtGui import QColor
-
 from .scripture_display import ScriptureDisplay, ScriptureBody
+from .toolbar import DisplaySettingsDialog
 
 
 _ORIGINAL_DISPLAY_INIT = ScriptureDisplay.__init__
 _ORIGINAL_APPLY_SETTINGS = ScriptureDisplay.apply_settings
 _ORIGINAL_RENDER_SCRIPTURE = ScriptureDisplay._render_scripture
 _ORIGINAL_DISPLAY_AUTO_SCROLL = ScriptureDisplay._auto_scroll
+_ORIGINAL_DIALOG_BUILD_UI = DisplaySettingsDialog._build_ui
+_ORIGINAL_DIALOG_LOAD_SETTINGS = DisplaySettingsDialog._load_settings
+_ORIGINAL_DIALOG_SET_COLOR_BUTTON = DisplaySettingsDialog._set_color_button
 
 
 def _body_clamp_scroll(self):
@@ -48,9 +47,7 @@ def _display_init(self, parent=None):
 
 def _apply_display_settings(self, settings):
     _ORIGINAL_APPLY_SETTINGS(self, settings)
-    self.scripture_title_font_family = str(
-        settings.get("scripture_title_font_family", self.scripture_title_font_family)
-    )
+    self.scripture_title_font_family = str(settings.get("scripture_title_font_family", self.scripture_title_font_family))
     try:
         self.scripture_title_size = max(10, min(200, int(settings.get("scripture_title_size", 30))))
     except (TypeError, ValueError):
@@ -58,16 +55,6 @@ def _apply_display_settings(self, settings):
 
     color = QColor(str(settings.get("scripture_title_color", "#87CEEB")))
     self.scripture_title_color = color if color.isValid() else QColor("#87CEEB")
-
-    try:
-        self.scripture_title_spacing = max(0, min(100, int(settings.get("scripture_title_spacing", 8))))
-    except (TypeError, ValueError):
-        self.scripture_title_spacing = 8
-
-    try:
-        self.scripture_title_line_spacing = max(80, min(300, int(settings.get("scripture_title_line_spacing", 120))))
-    except (TypeError, ValueError):
-        self.scripture_title_line_spacing = 120
 
     if self.verses:
         old = self.scroll_fraction()
@@ -78,25 +65,19 @@ def _apply_display_settings(self, settings):
 def _title_html(self, text):
     safe = str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     fs = self._px(self.scripture_title_size)
-    spacing = self._px(self.scripture_title_spacing)
-    line_spacing = int(self.scripture_title_line_spacing)
     return (
-        f'<p style="margin:0 0 {spacing}px 0;padding:0;line-height:{line_spacing}%;">'
-        f'<span style="color:{self.scripture_title_color.name()};font-size:{fs}px;'
-        f'font-family:&quot;{self.scripture_title_font_family}&quot;;font-weight:bold;">{safe}</span></p>'
+        '<p style="margin:0 0 8px 0;padding:0;line-height:%s%%;">'
+        '<span style="color:%s;font-size:%spx;font-family:&quot;%s&quot;;font-weight:bold;">%s</span></p>'
+        % (self.line_spacing, self.scripture_title_color.name(), fs, self.scripture_title_font_family, safe)
     )
 
 
 def _title_inline_html(self, text):
     safe = str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     fs = self._px(self.scripture_title_size)
-    line_spacing = int(self.scripture_title_line_spacing)
-    gap = max(1, self._px(self.scripture_title_spacing))
     return (
-        f'<br><span style="color:{self.scripture_title_color.name()};font-size:{fs}px;'
-        f'font-family:&quot;{self.scripture_title_font_family}&quot;;font-weight:bold;'
-        f'line-height:{line_spacing}%;">{safe}</span><br>'
-        f'<span style="font-size:{gap}px;line-height:100%;">&#8203;</span>'
+        '<br><span style="color:%s;font-size:%spx;font-family:&quot;%s&quot;;font-weight:bold;">%s</span><br>'
+        % (self.scripture_title_color.name(), fs, self.scripture_title_font_family, safe)
     )
 
 
@@ -145,9 +126,53 @@ def _display_auto_scroll(self):
             self.scroll_finished.emit()
 
 
+def _dialog_build_ui(self):
+    _ORIGINAL_DIALOG_BUILD_UI(self)
+    # 标题间距不再作为用户设置项，保留内部字段以兼容旧配置。
+    spacing = getattr(self, "title_spacing", None)
+    if spacing is not None:
+        form = spacing.parentWidget().layout() if spacing.parentWidget() else None
+        if form is not None and hasattr(form, "removeRow"):
+            form.removeRow(spacing)
+
+
+def _dialog_load_settings(self):
+    _ORIGINAL_DIALOG_LOAD_SETTINGS(self)
+    # 统一刷新颜色按钮，确保打开显示设置时能看到当前颜色预览。
+    color_fields = [
+        ("font_color", "font_color_btn"),
+        ("title_color", "title_color_btn"),
+        ("scripture_title_color", "scripture_title_color_btn"),
+        ("verse_num_color", "verse_color_btn"),
+        ("footer_color", "footer_color_btn"),
+        ("bg_color", "bg_color_btn"),
+    ]
+    for key, attr in color_fields:
+        button = getattr(self, attr, None)
+        if button is not None:
+            self._set_color_button(button, self.settings.get(key, "#FFFFFF"))
+
+
+def _dialog_set_color_button(self, button, color):
+    qcolor = color if isinstance(color, QColor) else QColor(str(color))
+    if not qcolor.isValid():
+        return
+    name = qcolor.name()
+    text_color = "#000000" if qcolor.lightness() > 160 else "#FFFFFF"
+    button.setAutoFillBackground(True)
+    button.setStyleSheet(
+        f"QPushButton {{ background-color: {name}; color: {text_color}; "
+        "border: 1px solid #6B7280; border-radius: 6px; padding: 6px 12px; }}"
+    )
+
+
 ScriptureDisplay.__init__ = _display_init
 ScriptureDisplay.apply_settings = _apply_display_settings
 ScriptureDisplay._title_html = _title_html
 ScriptureDisplay._title_inline_html = _title_inline_html
 ScriptureDisplay._render_scripture = _render_scripture_with_titles
 ScriptureDisplay._auto_scroll = _display_auto_scroll
+
+DisplaySettingsDialog._build_ui = _dialog_build_ui
+DisplaySettingsDialog._load_settings = _dialog_load_settings
+DisplaySettingsDialog._set_color_button = _dialog_set_color_button
