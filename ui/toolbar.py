@@ -55,6 +55,15 @@ class ColorPreview(QWidget):
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, hex_value)
 
 
+class ToolbarButton(QPushButton):
+    """顶栏按钮：鼠标移出后自动清除焦点，避免焦点轮廓残留。"""
+
+    def leaveEvent(self, event):
+        super().leaveEvent(event)
+        self.clearFocus()
+        self.update()
+
+
 class DisplaySettingsDialog(QDialog):
     def __init__(self, settings, parent=None):
         super().__init__(parent)
@@ -379,13 +388,13 @@ class ToolBarWidget(QToolBar):
         self.settings = {}
         self._speed = 0
 
-        self.extend_btn = QPushButton("扩展显示  F12")
+        self.extend_btn = ToolbarButton("扩展显示  F12")
         self.extend_btn.setObjectName("extendBtn")
         self.extend_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.extend_btn.clicked.connect(self.extend_toggled)
         self.addWidget(self.extend_btn)
 
-        self.topmost_btn = QPushButton("置顶")
+        self.topmost_btn = ToolbarButton("置顶")
         self.topmost_btn.setObjectName("topmostBtn")
         self.topmost_btn.setCheckable(True)
         self.topmost_btn.setChecked(True)
@@ -395,14 +404,14 @@ class ToolBarWidget(QToolBar):
         self.topmost_btn.toggled.connect(self.topmost_toggled)
         self.addWidget(self.topmost_btn)
 
-        self.clear_btn = QPushButton("清屏")
+        self.clear_btn = ToolbarButton("清屏")
         self.clear_btn.setObjectName("clearBtn")
         self.clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.clear_btn.setToolTip("清空预览与扩展屏经文")
         self.clear_btn.clicked.connect(self.clear_requested)
         self.addWidget(self.clear_btn)
 
-        self.show_titles_btn = QPushButton("小标题")
+        self.show_titles_btn = ToolbarButton("小标题")
         self.show_titles_btn.setObjectName("showTitlesBtn")
         self.show_titles_btn.setCheckable(True)
         self.show_titles_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -420,7 +429,7 @@ class ToolBarWidget(QToolBar):
         scroll_layout.addWidget(QLabel("速度"))
         self.speed_buttons = []
         for speed, text in [(0, "暂停")] + [(i, f"{i}档") for i in range(1, 10)]:
-            btn = QPushButton(text)
+            btn = ToolbarButton(text)
             btn.setObjectName("speedBtn")
             btn.setCheckable(True)
             btn.setAutoExclusive(False)
@@ -439,13 +448,13 @@ class ToolBarWidget(QToolBar):
         self.addWidget(spacer)
         self.addSeparator()
 
-        self.settings_btn = QPushButton("显示设置")
+        self.settings_btn = ToolbarButton("显示设置")
         self.settings_btn.setObjectName("settingsBtn")
         self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.settings_btn.clicked.connect(self._open_settings)
         self.addWidget(self.settings_btn)
 
-        self.theme_btn = QPushButton("亮色")
+        self.theme_btn = ToolbarButton("亮色")
         self.theme_btn.setObjectName("themeBtn")
         self.theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.theme_btn.setToolTip("切换亮色 / 暗色主题")
