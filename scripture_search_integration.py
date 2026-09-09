@@ -39,12 +39,11 @@ def _polish_search_panel(widget):
     """只调整旧搜索面板的视觉层，不触碰搜索逻辑。"""
     t = theme_tokens(widget.theme)
 
-    # 匹配方式保持旧版的无圆点选择样式，四个选项高度统一。
     radio_style = f"""
         QRadioButton {{
             background:{t['control']}; color:{t['text_muted']};
             border:1px solid {t['border']}; border-radius:8px;
-            padding:6px 10px; spacing:0; font-size:12px; min-height:18px;
+            padding:6px 10px; spacing:0; font-size:12px;
         }}
         QRadioButton:hover {{
             background:{t['control_hover']}; color:{t['text']};
@@ -58,33 +57,41 @@ def _polish_search_panel(widget):
             width:0px; height:0px; margin:0; padding:0; border:none;
         }}
     """
-    for radio in (
-        widget.fuzzy_radio,
-        widget.exact_radio,
-        widget.all_radio,
-        widget.any_radio,
-    ):
+    for radio in (widget.fuzzy_radio, widget.exact_radio, widget.all_radio, widget.any_radio):
         radio.setStyleSheet(radio_style)
         radio.setFixedHeight(32)
 
-    # 搜索框和“搜索”按钮强制使用完全相同的高度，避免 Qt 默认 sizeHint
-    # 受字体、边框和平台样式影响而出现视觉高低不一致。
+    # 搜索行使用统一的 40px 控件高度，取消 QPushButton 的默认额外垂直空间。
     search_button = widget.findChild(QPushButton, "scriptureSearchButton")
     if search_button is not None:
-        search_button.setFixedHeight(44)
-        search_button.setFixedWidth(82)
+        search_button.setFixedSize(82, 40)
+        search_button.setStyleSheet(f"""
+            QPushButton {{
+                background:{t['accent']}; color:#FFFFFF;
+                border:1px solid {t['accent']}; border-radius:9px;
+                padding:0; margin:0; font-size:14px; font-weight:600;
+            }}
+            QPushButton:hover {{ background:{t['accent_hover']}; }}
+            QPushButton:pressed {{ background:{t['accent']}; }}
+        """)
 
-    search_input = widget.findChild(type(widget.search_input), "scriptureSearchInput")
-    if search_input is not None:
-        search_input.setFixedHeight(44)
+    search_input = widget.search_input
+    search_input.setFixedHeight(40)
+    search_input.setStyleSheet(f"""
+        QLineEdit {{
+            background:{t['control']}; color:{t['text']};
+            border:1px solid {t['border']}; border-radius:9px;
+            padding:0 13px; margin:0; font-size:14px;
+        }}
+        QLineEdit:focus {{ border:1px solid {t['focus_ring']}; }}
+    """)
 
-    # 结果区域统一内边距和卡片间距，避免第一项、最后一项看起来贴边。
-    widget.result_layout.setContentsMargins(0, 4, 4, 6)
-    widget.result_layout.setSpacing(10)
+    # 恢复历史版本的结果节奏：容器 0/4/4/0，卡片之间 8px。
+    widget.result_layout.setContentsMargins(0, 4, 4, 0)
+    widget.result_layout.setSpacing(8)
 
-    # 最近搜索行也统一节奏。
     widget.history_layout.setContentsMargins(4, 4, 4, 4)
-    widget.history_layout.setSpacing(5)
+    widget.history_layout.setSpacing(4)
 
 
 def _toggle(window):
@@ -128,9 +135,7 @@ def _selection_from_result(window, result):
             pass
 
     verse = max(1, min(verse, max_verse))
-    return ScriptureSelection.single_chapter(
-        book, chapter, verse, verse, max_verse=max_verse
-    )
+    return ScriptureSelection.single_chapter(book, chapter, verse, verse, max_verse=max_verse)
 
 
 def _activate(window, result):
