@@ -12,14 +12,14 @@ VSVersionInfo(
   kids=[
     StringFileInfo([
       StringTable('040904B0', [
-        StringStruct('CompanyName', 'XiaoDong'),
+        StringStruct('CompanyName', 'XiaoDong & JiangRTTTR'),
         StringStruct('FileDescription', 'Bible Pro'),
         StringStruct('FileVersion', '1.0.0.0'),
         StringStruct('InternalName', 'Bible Pro'),
         StringStruct('OriginalFilename', 'Bible Pro.exe'),
         StringStruct('ProductName', 'Bible Pro'),
         StringStruct('ProductVersion', '1.0.0.0'),
-        StringStruct('LegalCopyright', 'Copyright © 2026 XiaoDong'),
+        StringStruct('LegalCopyright', 'Copyright © 2026 XiaoDong and JiangRTTTR'),
       ])
     ]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
