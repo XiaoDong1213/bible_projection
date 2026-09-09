@@ -43,7 +43,7 @@ def _polish_search_panel(widget):
     # 单选按钮的高度由面板样式统一控制，不在这里覆盖，避免出现高度不一致。
     search_button = widget.findChild(QPushButton, "scriptureSearchButton")
     if search_button is not None:
-        search_button.setFixedSize(82, 44)
+        search_button.setFixedSize(82, 34)
 
     widget.search_input.setFixedHeight(44)
 
@@ -70,7 +70,6 @@ def _toggle(window):
 
     width = widget.width()
     height = max(480, window.height() - window.toolbar.height() - 18)
-    widget.resize(width, height)
     global_pos = window.mapToGlobal(
         QPoint(window.width() - width - 8, window.toolbar.height() + 4)
     )
