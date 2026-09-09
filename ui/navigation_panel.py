@@ -172,7 +172,6 @@ class NavigationPanel(QWidget):
         bottom_layout.setContentsMargins(12, 8, 12, 10)
         bottom_layout.setSpacing(8)
 
-        # 模式：与顶栏页签同语言（下划线，无外框）
         mode_bar = QWidget()
         mode_bar.setObjectName("modeBar")
         mode_row = QHBoxLayout(mode_bar)
@@ -204,7 +203,6 @@ class NavigationPanel(QWidget):
         self.range_stack = QStackedWidget()
         self.range_stack.setObjectName("rangeStack")
 
-        # ---- 单章：一行内联 ----
         single_page = QWidget()
         single_page.setObjectName("rangePage")
         single_row = QHBoxLayout(single_page)
@@ -219,7 +217,6 @@ class NavigationPanel(QWidget):
         single_row.addLayout(self._inline_field("止", self.end_spin))
         self.range_stack.addWidget(single_page)
 
-        # ---- 跨章 ----
         cross_page = QWidget()
         cross_page.setObjectName("rangePage")
         cross_root = QVBoxLayout(cross_page)
@@ -239,7 +236,6 @@ class NavigationPanel(QWidget):
         )
         self.range_stack.addWidget(cross_page)
 
-        # ---- 跳节 ----
         skip_page = QWidget()
         skip_page.setObjectName("rangePage")
         skip_layout = QVBoxLayout(skip_page)
@@ -265,7 +261,6 @@ class NavigationPanel(QWidget):
 
         bottom_layout.addWidget(self.range_stack)
 
-        # 次要开关 + 主操作：一行减轻纵向堆叠
         action_row = QHBoxLayout()
         action_row.setSpacing(8)
         self.segment_btn = QPushButton("分节：关")
@@ -309,7 +304,6 @@ class NavigationPanel(QWidget):
 
     @staticmethod
     def _labeled_spin_row(title, *fields):
-        """跨章一行：起/止 + 章节。"""
         row = QHBoxLayout()
         row.setSpacing(6)
         row.setContentsMargins(0, 0, 0, 0)
@@ -390,30 +384,45 @@ class NavigationPanel(QWidget):
         self._set_verse_ranges(book, 1, whole_chapter=whole_chapter)
         self._sync_mode_limits()
 
-    def _set_verse_ranges(self, book, chapter, whole_chapter=False):
-        max_v = max(1, self.db.get_verse_count(book, chapter))
-        bs = self.start_spin.blockSignals(True)
-        be = self.end_spin.blockSignals(True)
-        self.start_spin.setRange(1, max_v)
-        self.end_spin.setRange(1, max_v)
-        self.start_spin.setValue(1)
-        self.end_spin.setValue(max_v if whole_chapter else min(5, max_v))
-        self.start_spin.blockSignals(bs)
-        self.end_spin.blockSignals(be)
+    def _set_verse_spin_limit(self, spin, book, chapter, *, value=None, clamp=True):
+        """按当前书卷/章节同步节号最大值，并按需修正当前值。"""
+        max_v = max(1, self.db.get_verse_count(book, int(chapter)))
+        blocked = spin.blockSignals(True)
+        spin.setRange(1, max_v)
+        if value is not None:
+            spin.setValue(max(1, min(int(value), max_v)))
+        elif clamp and spin.value() > max_v:
+            spin.setValue(max_v)
+        spin.blockSignals(blocked)
+        return max_v
 
-        for spin in (self.cross_start_v, self.cross_end_v):
-            blocked = spin.blockSignals(True)
-            spin.setRange(1, max_v)
-            if spin is self.cross_start_v:
-                spin.setValue(1)
-            else:
-                spin.setValue(max_v if whole_chapter else min(5, max_v))
-            spin.blockSignals(blocked)
+    def _set_verse_ranges(self, book, chapter, whole_chapter=False):
+        max_v = self._set_verse_spin_limit(
+            self.start_spin, book, chapter, value=1, clamp=False
+        )
+        self._set_verse_spin_limit(
+            self.end_spin,
+            book,
+            chapter,
+            value=max_v if whole_chapter else min(5, max_v),
+            clamp=False,
+        )
+
+        start_cross_max = self._set_verse_spin_limit(
+            self.cross_start_v, book, self.cross_start_ch.value(), clamp=True
+        )
+        end_cross_max = self._set_verse_spin_limit(
+            self.cross_end_v, book, self.cross_end_ch.value(), clamp=True
+        )
 
         if whole_chapter:
+            self.cross_start_v.setValue(1)
+            self.cross_end_v.setValue(end_cross_max)
             self.skip_edit.setText(f"1-{max_v}")
         elif not self.skip_edit.text().strip():
             self.skip_edit.setText("1-5" if max_v >= 5 else f"1-{max_v}")
+
+        self.skip_hint.setText(f"本章 {max_v} 节　·　例 16-18 20")
 
     def _sync_mode_limits(self):
         if not self.selected_book:
@@ -429,14 +438,17 @@ class NavigationPanel(QWidget):
             spin.setRange(1, max_ch)
 
         ch = int(self.chapter_spin.value())
-        max_v = max(1, self.db.get_verse_count(book, ch))
-        self.start_spin.setRange(1, max_v)
-        self.end_spin.setRange(1, max_v)
+        self._set_verse_spin_limit(self.start_spin, book, ch)
+        self._set_verse_spin_limit(self.end_spin, book, ch)
 
         sc = int(self.cross_start_ch.value())
         ec = int(self.cross_end_ch.value())
-        self.cross_start_v.setRange(1, max(1, self.db.get_verse_count(book, sc)))
-        self.cross_end_v.setRange(1, max(1, self.db.get_verse_count(book, ec)))
+        self._set_verse_spin_limit(self.cross_start_v, book, sc)
+        self._set_verse_spin_limit(self.cross_end_v, book, ec)
+
+        skip_ch = int(self.skip_chapter_spin.value())
+        skip_max = max(1, self.db.get_verse_count(book, skip_ch))
+        self.skip_hint.setText(f"本章 {skip_max} 节　·　例 16-18 20")
 
     def _on_chapter_changed(self, chapter):
         if self.selected_book:
@@ -450,26 +462,22 @@ class NavigationPanel(QWidget):
     def _on_cross_start_ch_changed(self, chapter):
         if not self.selected_book:
             return
-        max_v = max(1, self.db.get_verse_count(self.selected_book, int(chapter)))
-        blocked = self.cross_start_v.blockSignals(True)
-        self.cross_start_v.setRange(1, max_v)
-        if self.cross_start_v.value() > max_v:
-            self.cross_start_v.setValue(max_v)
-        self.cross_start_v.blockSignals(blocked)
+        self._set_verse_spin_limit(
+            self.cross_start_v, self.selected_book, int(chapter)
+        )
 
     def _on_cross_end_ch_changed(self, chapter):
         if not self.selected_book:
             return
-        max_v = max(1, self.db.get_verse_count(self.selected_book, int(chapter)))
-        blocked = self.cross_end_v.blockSignals(True)
-        self.cross_end_v.setRange(1, max_v)
-        if self.cross_end_v.value() > max_v:
-            self.cross_end_v.setValue(max_v)
-        self.cross_end_v.blockSignals(blocked)
+        self._set_verse_spin_limit(
+            self.cross_end_v, self.selected_book, int(chapter)
+        )
 
     def _on_skip_chapter_changed(self, chapter):
         if self.selected_book and not self._history_updating:
-            max_v = max(1, self.db.get_verse_count(self.selected_book, int(chapter)))
+            max_v = self._set_verse_spin_limit if False else max(
+                1, self.db.get_verse_count(self.selected_book, int(chapter))
+            )
             self.skip_hint.setText(f"本章 {max_v} 节　·　例 16-18 20")
 
     def sync_selection(self, book, chapter, start, end):
