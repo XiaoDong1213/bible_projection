@@ -384,12 +384,16 @@ class NavigationPanel(QWidget):
         self._set_verse_ranges(book, 1, whole_chapter=whole_chapter)
         self._sync_mode_limits()
 
-    def _set_verse_spin_limit(self, spin, book, chapter, *, value=None, clamp=True):
-        """按当前书卷/章节同步节号最大值，并按需修正当前值。"""
+    def _set_verse_spin_limit(
+        self, spin, book, chapter, *, value=None, clamp=True, reset_to_max=False
+    ):
+        """按当前书卷/章节同步节号范围，并按需修正当前显示值。"""
         max_v = max(1, self.db.get_verse_count(book, int(chapter)))
         blocked = spin.blockSignals(True)
         spin.setRange(1, max_v)
-        if value is not None:
+        if reset_to_max:
+            spin.setValue(max_v)
+        elif value is not None:
             spin.setValue(max(1, min(int(value), max_v)))
         elif clamp and spin.value() > max_v:
             spin.setValue(max_v)
@@ -457,7 +461,6 @@ class NavigationPanel(QWidget):
                 blocked = spin.blockSignals(True)
                 spin.setValue(int(chapter))
                 spin.blockSignals(blocked)
-            # 章节联动时，跨章两端都同步到新章节的最大节号。
             self._on_cross_start_ch_changed(chapter)
             self._on_cross_end_ch_changed(chapter)
             self._on_skip_chapter_changed(chapter)
@@ -466,17 +469,21 @@ class NavigationPanel(QWidget):
     def _on_cross_start_ch_changed(self, chapter):
         if not self.selected_book:
             return
-        # 切换章节后，起点节号直接显示该章节的最大节号。
         self._set_verse_spin_limit(
-            self.cross_start_v, self.selected_book, int(chapter), reset_to_max=True
+            self.cross_start_v,
+            self.selected_book,
+            int(chapter),
+            reset_to_max=True,
         )
 
     def _on_cross_end_ch_changed(self, chapter):
         if not self.selected_book:
             return
-        # 切换章节后，终点节号直接显示该章节的最大节号。
         self._set_verse_spin_limit(
-            self.cross_end_v, self.selected_book, int(chapter), reset_to_max=True
+            self.cross_end_v,
+            self.selected_book,
+            int(chapter),
+            reset_to_max=True,
         )
 
     def _on_skip_chapter_changed(self, chapter):
