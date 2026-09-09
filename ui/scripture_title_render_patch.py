@@ -60,4 +60,6 @@ def _render_scripture_with_titles(self):
     self._fit_document_width()
 
 
+# 将辅助方法绑定到 ScriptureDisplay，避免实例调用时出现 AttributeError。
+ScriptureDisplay._title_inline_html = _title_inline_html
 ScriptureDisplay._render_scripture = _render_scripture_with_titles
