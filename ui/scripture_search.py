@@ -81,18 +81,24 @@ class BookScopeDialog(QDialog):
         self.filter_input.textChanged.connect(self._filter_books)
         root.addWidget(self.filter_input)
         columns = QHBoxLayout()
-        columns.setSpacing(12)
+        columns.setSpacing(16)
         for title, category in (("旧约", "old"), ("新约", "new")):
             box = QVBoxLayout()
             label = QLabel(title)
             label.setObjectName("scopeTitle")
             box.addWidget(label)
             actions = QHBoxLayout()
-            actions.setSpacing(6)
+            actions.setSpacing(8)
             select_all = QPushButton("全选")
             clear = QPushButton("清空")
             select_all.setObjectName("scopeAction")
             clear.setObjectName("scopeAction")
+            select_all.setFixedHeight(32)
+            clear.setFixedHeight(32)
+            select_all.setMinimumWidth(72)
+            clear.setMinimumWidth(72)
+            select_all.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            clear.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             select_all.clicked.connect(lambda _, c=category: self._set_all(c, True))
             clear.clicked.connect(lambda _, c=category: self._set_all(c, False))
             actions.addWidget(select_all)
@@ -150,7 +156,7 @@ class BookScopeDialog(QDialog):
         QLineEdit#scopeFilter {{ background:{t['control']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:9px; padding:0 12px; min-height:40px; }}
         QLineEdit#scopeFilter:focus {{ border:1px solid {t['focus_ring']}; }}
         QLabel#scopeTitle {{ color:{t['text']}; font-size:14px; font-weight:600; }}
-        QPushButton#scopeAction {{ background:{t['control']}; color:{t['text_muted']}; border:1px solid {t['border']}; border-radius:7px; padding:5px 10px; }}
+        QPushButton#scopeAction {{ background:{t['control']}; color:{t['text_muted']}; border:1px solid {t['border']}; border-radius:7px; padding:0 12px; min-width:72px; min-height:32px; }}
         QPushButton#scopeAction:hover {{ background:{t['control_hover']}; color:{t['text']}; border-color:{t['border_strong']}; }}
         QListWidget#scopeBookList {{ background:{t['surface_sunken']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:9px; padding:5px; outline:none; }}
         QListWidget#scopeBookList::item {{ padding:7px 8px; border-radius:6px; color:{t['text']}; }}
@@ -260,14 +266,12 @@ class ScriptureSearchWidget(QWidget):
         close.clicked.connect(self.close_requested.emit)
         header.addWidget(close, 0, Qt.AlignmentFlag.AlignTop)
         root.addLayout(header)
-
         self.condition_toggle = QPushButton("搜索条件  ▲")
         self.condition_toggle.setObjectName("searchConditionToggle")
         self.condition_toggle.setFlat(True)
         self.condition_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         self.condition_toggle.clicked.connect(self._toggle_conditions)
         root.addWidget(self.condition_toggle)
-
         self.condition_box = QWidget()
         self.condition_box.setObjectName("scriptureConditionBox")
         condition = QVBoxLayout(self.condition_box)
@@ -286,7 +290,6 @@ class ScriptureSearchWidget(QWidget):
         search_btn.clicked.connect(self.search)
         search_row.addWidget(search_btn)
         condition.addLayout(search_row)
-
         options = QHBoxLayout()
         options.setSpacing(18)
         match_label = QLabel("匹配方式")
@@ -313,7 +316,6 @@ class ScriptureSearchWidget(QWidget):
         options.addWidget(self.any_radio)
         options.addStretch(1)
         condition.addLayout(options)
-
         scope_row = QHBoxLayout()
         scope_label = QLabel("搜索范围")
         scope_label.setObjectName("conditionLabel")
@@ -334,42 +336,33 @@ class ScriptureSearchWidget(QWidget):
         condition.addWidget(self.history_list)
         self._refresh_history()
         root.addWidget(self.condition_box)
-
         result_top = QHBoxLayout()
         self.result_header = QLabel("搜索结果")
         self.result_header.setObjectName("scriptureResultHeader")
         result_top.addWidget(self.result_header, 1)
-        self.result_hint = QLabel("")
-        self.result_hint.setObjectName("scriptureResultHint")
-        result_top.addWidget(self.result_hint)
         root.addLayout(result_top)
-
         self.result_scroll = QScrollArea()
         self.result_scroll.setObjectName("scriptureResultScroll")
         self.result_scroll.setWidgetResizable(True)
         self.result_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.result_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.result_container = QWidget()
         self.result_container.setObjectName("scriptureResultContainer")
         self.result_layout = QVBoxLayout(self.result_container)
-        self.result_layout.setContentsMargins(0, 0, 4, 0)
+        self.result_layout.setContentsMargins(0, 0, 0, 0)
         self.result_layout.setSpacing(8)
         self.result_scroll.setWidget(self.result_container)
         root.addWidget(self.result_scroll, 1)
-
         pager = QHBoxLayout()
         pager.setSpacing(8)
         self.prev_btn = QPushButton("‹")
-        self.next_btn = QPushButton("›")
         self.prev_btn.setObjectName("scripturePagerButton")
+        self.next_btn = QPushButton("›")
         self.next_btn.setObjectName("scripturePagerButton")
-        self.prev_btn.setFixedSize(34, 32)
-        self.next_btn.setFixedSize(34, 32)
         self.prev_btn.clicked.connect(self._prev_page)
         self.next_btn.clicked.connect(self._next_page)
         pager.addWidget(self.prev_btn)
         self.page_label = QLabel("第 0 / 0 页")
-        self.page_label.setObjectName("scripturePageLabel")
+        self.page_label.setObjectName("scripturePagerLabel")
         self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         pager.addWidget(self.page_label, 1)
         pager.addWidget(self.next_btn)
@@ -404,7 +397,6 @@ class ScriptureSearchWidget(QWidget):
         keywords = self._keywords()
         if not keywords:
             self.result_header.setText("请输入关键词")
-            self.result_hint.setText("")
             return
         self._remember_search(self.search_input.text().strip())
         self.page = 0
@@ -422,22 +414,11 @@ class ScriptureSearchWidget(QWidget):
             if widget:
                 widget.deleteLater()
         if not self.results:
-            empty_box = QWidget()
-            empty_layout = QVBoxLayout(empty_box)
-            empty_layout.setContentsMargins(20, 50, 20, 50)
-            empty_icon = QLabel("⌕")
-            empty_icon.setObjectName("scriptureEmptyIcon")
-            empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            empty_title = QLabel("没有找到相关经文")
-            empty_title.setObjectName("scriptureEmptyTitle")
-            empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            empty_hint = QLabel("换一个关键词试试，或扩大搜索范围")
-            empty_hint.setObjectName("scriptureEmptyHint")
-            empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            empty_layout.addWidget(empty_icon)
-            empty_layout.addWidget(empty_title)
-            empty_layout.addWidget(empty_hint)
-            self.result_layout.addWidget(empty_box)
+            empty = QLabel("没有找到相关经文\n\n请尝试更换关键词或扩大搜索范围")
+            empty.setObjectName("scriptureEmptyState")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty.setWordWrap(True)
+            self.result_layout.addWidget(empty)
         else:
             for result in self.results:
                 card = ScriptureResultWidget(result, keywords)
@@ -447,9 +428,7 @@ class ScriptureSearchWidget(QWidget):
                 self.result_layout.addWidget(card)
             self.result_layout.addStretch(1)
         self.result_header.setText(f"搜索结果  ·  找到 {self.total} 条")
-        self.result_hint.setText("点击经文标题可定位")
         self._update_pager()
-        self.result_scroll.verticalScrollBar().setValue(0)
 
     def _toggle_conditions_closed(self):
         self.condition_box.setVisible(False)
@@ -473,6 +452,7 @@ class ScriptureSearchWidget(QWidget):
             self.selected_books or None, self.PAGE_SIZE, self.page * self.PAGE_SIZE,
         )
         self._render_results(keywords)
+        self.result_scroll.verticalScrollBar().setValue(0)
 
     def _prev_page(self):
         self.load_page(self.page - 1)
@@ -482,83 +462,25 @@ class ScriptureSearchWidget(QWidget):
 
     def _update_pager(self):
         pages = max(1, (self.total + self.PAGE_SIZE - 1) // self.PAGE_SIZE) if self.total else 0
-        self.page_label.setText(f"第 {self.page + 1} / {pages} 页" if pages else "第 0 / 0 页")
+        self.page_label.setText(f"第 {self.page + 1} / {pages} 页" if pages else "暂无结果")
         self.prev_btn.setEnabled(self.page > 0)
-        self.next_btn.setEnabled(bool(pages) and self.page < pages - 1)
+        self.next_btn.setEnabled(pages > 0 and self.page < pages - 1)
 
-    def _remember_search(self, text):
-        if not text:
+    def _refresh_history(self):
+        self.history_list.clear()
+        for value in self.history[:5]:
+            item = QListWidgetItem(value)
+            self.history_list.addItem(item)
+
+    def _remember_search(self, value):
+        if not value:
             return
-        self.history = [text] + [x for x in self.history if x != text]
-        self.history = self.history[:10]
+        self.history = [value] + [x for x in self.history if x != value]
+        self.history = self.history[:8]
         if self.config:
             self.config.save_scripture_search_history(self.history)
         self._refresh_history()
 
-    def _refresh_history(self):
-        self.history_list.clear()
-        for text in self.history:
-            self.history_list.addItem(text)
-
     def _use_history(self, item):
         self.search_input.setText(item.text())
         self.search()
-
-    def _apply_style(self):
-        t = theme_tokens(self.theme)
-        self.setStyleSheet(f"""
-        QWidget#scriptureSearchPanel {{ background:{t['surface_raised']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:14px; }}
-        QLabel#scriptureSearchTitle {{ color:{t['text']}; font-size:19px; font-weight:600; }}
-        QLabel#scriptureSearchSubtitle {{ color:{t['text_muted']}; font-size:12px; }}
-        QPushButton#scriptureSearchClose {{ background:transparent; color:{t['text_muted']}; border:none; border-radius:9px; font-size:22px; }}
-        QPushButton#scriptureSearchClose:hover {{ background:{t['control_hover']}; color:{t['text']}; }}
-        QPushButton#searchConditionToggle {{ background:transparent; color:{t['text_muted']}; border:none; padding:2px 4px; text-align:left; font-size:12px; font-weight:600; }}
-        QPushButton#searchConditionToggle:hover {{ color:{t['accent']}; }}
-        QWidget#scriptureConditionBox {{ background:{t['surface_sunken']}; border:1px solid {t['border']}; border-radius:11px; }}
-        QLineEdit#scriptureSearchInput {{ background:{t['control']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:9px; padding:0 13px; min-height:44px; font-size:14px; selection-background-color:{t['accent']}; selection-color:#FFFFFF; }}
-        QLineEdit#scriptureSearchInput:focus {{ border:1px solid {t['focus_ring']}; }}
-        QPushButton#scriptureSearchButton {{ background:{t['accent']}; color:#FFFFFF; border:1px solid {t['accent']}; border-radius:9px; min-width:82px; min-height:44px; padding:0 18px; font-size:14px; font-weight:600; }}
-        QPushButton#scriptureSearchButton:hover {{ background:{t['accent_hover']}; }}
-        QPushButton#scriptureSearchButton:pressed {{ background:{t['accent_pressed']}; }}
-        QLabel#conditionLabel {{ color:{t['text_muted']}; font-size:12px; }}
-        QRadioButton {{ color:{t['text']}; spacing:6px; }}
-        QRadioButton::indicator {{ width:14px; height:14px; border-radius:7px; border:1px solid {t['border_strong']}; background:{t['control']}; }}
-        QRadioButton::indicator:checked {{ border:4px solid {t['accent']}; background:{t['surface_raised']}; }}
-        QPushButton#scriptureScopeButton {{ background:{t['control']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:8px; min-height:34px; padding:0 12px; text-align:left; }}
-        QPushButton#scriptureScopeButton:hover {{ background:{t['control_hover']}; border-color:{t['border_strong']}; }}
-        QLabel#searchHistoryLabel {{ color:{t['text_faint']}; font-size:11px; font-weight:600; padding-top:2px; }}
-        QListWidget#scriptureHistoryList {{ background:transparent; border:none; color:{t['text']}; outline:none; padding:0; }}
-        QListWidget#scriptureHistoryList::item {{ background:{t['control']}; color:{t['text_muted']}; border:1px solid transparent; border-radius:7px; padding:7px 10px; margin:2px 0; }}
-        QListWidget#scriptureHistoryList::item:hover {{ background:{t['control_hover']}; color:{t['text']}; border-color:{t['border_strong']}; }}
-        QLabel#scriptureResultHeader {{ color:{t['text']}; font-size:13px; font-weight:600; }}
-        QLabel#scriptureResultHint {{ color:{t['text_faint']}; font-size:11px; }}
-        QScrollArea#scriptureResultScroll {{ background:transparent; border:none; }}
-        QWidget#scriptureResultContainer {{ background:transparent; }}
-        QFrame#scriptureSearchResult {{ background:{t['surface']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:10px; }}
-        QFrame#scriptureSearchResult:hover {{ background:{t['control']}; border-color:{t['border_strong']}; }}
-        QPushButton#scriptureResultTitle {{ background:transparent; color:{t['text']}; border:none; padding:0; text-align:left; font-size:15px; font-weight:600; }}
-        QPushButton#scriptureResultTitle:hover {{ color:{t['accent']}; }}
-        QLabel#scriptureResultMeta {{ color:{t['text_faint']}; font-size:11px; }}
-        QLabel#scriptureResultText {{ color:{t['text']}; font-size:14px; }}
-        QLabel#scriptureResultText mark {{ background:{t['accent_soft']}; color:{t['accent_text']}; padding:1px 2px; border-radius:3px; }}
-        QPushButton#scriptureResultAction {{ background:transparent; color:{t['text_muted']}; border:1px solid {t['border']}; border-radius:7px; min-width:44px; min-height:28px; padding:0 8px; font-size:11px; }}
-        QPushButton#scriptureResultAction:hover {{ background:{t['accent_soft']}; color:{t['accent_text']}; border-color:{t['accent']}; }}
-        QPushButton#scripturePagerButton {{ background:{t['control']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:8px; font-size:20px; }}
-        QPushButton#scripturePagerButton:hover:enabled {{ background:{t['control_hover']}; border-color:{t['border_strong']}; }}
-        QPushButton#scripturePagerButton:disabled {{ background:{t['surface_sunken']}; color:{t['text_faint']}; border-color:{t['border']}; }}
-        QLabel#scripturePageLabel {{ color:{t['text_muted']}; font-size:12px; }}
-        QLabel#scriptureEmptyIcon {{ color:{t['text_faint']}; font-size:38px; }}
-        QLabel#scriptureEmptyTitle {{ color:{t['text']}; font-size:16px; font-weight:600; }}
-        QLabel#scriptureEmptyHint {{ color:{t['text_muted']}; font-size:12px; }}
-        QScrollBar:vertical {{ background:transparent; width:8px; margin:2px; }}
-        QScrollBar::handle:vertical {{ background:{t['scroll']}; border-radius:4px; min-height:36px; }}
-        QScrollBar::handle:vertical:hover {{ background:{t['scroll_hover']}; }}
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height:0; }}
-        """)
-
-    def apply_theme(self, theme):
-        self.theme = theme
-        self.setProperty("theme", theme)
-        self._apply_style()
-        self.style().unpolish(self)
-        self.style().polish(self)
