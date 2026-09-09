@@ -20,12 +20,14 @@ class ScriptureBody(QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setMouseTracking(True)
         self._doc = QTextDocument(self)
         self._doc.setDocumentMargin(0)
         self._scroll_y = 0.0
         self._pad_left = 0
         self._pad_right = 0
         self._pad_bottom = 0
+        self._wheel_step = 48.0
 
     def set_html(self, html):
         self._doc.setHtml(html)
@@ -76,19 +78,31 @@ class ScriptureBody(QWidget):
         if emit:
             self.scroll_changed.emit(self._scroll_y)
 
-    def _clamp_scroll(self):
-        self.set_scroll_y(self._scroll_y, emit=False)
-
-    def scroll_fraction(self):
-        m = self.max_scroll()
-        return 0.0 if m <= 0 else self._scroll_y / m
-
-    def set_scroll_fraction(self, fraction):
+    def scroll_by(self, delta):
+        """按增量手动滚动，供方向键、鼠标滚轮和工具栏按钮共用。"""
         try:
-            f = max(0.0, min(1.0, float(fraction)))
+            delta = float(delta)
         except (TypeError, ValueError):
             return
-        self.set_scroll_y(f * self.max_scroll())
+        self.set_scroll_y(self._scroll_y + delta)
+
+    def wheelEvent(self, event):
+        """鼠标滚轮直接驱动浮点滚动，不依赖 QWidget 默认滚动条。"""
+        angle = event.angleDelta().y()
+        pixel = event.pixelDelta().y()
+        if pixel:
+            delta = -float(pixel)
+        elif angle:
+            delta = -(float(angle) / 120.0) * self._wheel_step
+        else:
+            event.ignore()
+            return
+        old = self._scroll_y
+        self.scroll_by(delta)
+        if abs(self._scroll_y - old) > 1e-4:
+            event.accept()
+        else:
+            event.ignore()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -112,7 +126,6 @@ class ScriptureBody(QWidget):
 
 class ScriptureDisplay(QWidget):
     scroll_changed = pyqtSignal(int)
-    # 自动滚动到达底部时通知外层，便于把速度 UI 同步回「暂停」
     scroll_finished = pyqtSignal()
 
     _TICK_MS_LEGACY = 30.0
@@ -273,15 +286,7 @@ class ScriptureDisplay(QWidget):
         self.update()
 
     def set_from_selection(self, selection, verses):
-        self.set_scripture(
-            selection.book,
-            selection.primary_chapter,
-            selection.primary_start,
-            selection.primary_end,
-            verses,
-            title=selection.title(),
-            show_chapter_nums=selection.is_multi_chapter,
-        )
+        self.set_scripture(selection.book, selection.primary_chapter, selection.primary_start, selection.primary_end, verses, title=selection.title(), show_chapter_nums=selection.is_multi_chapter)
 
     def clear_scripture(self):
         self.verses = []
@@ -307,10 +312,7 @@ class ScriptureDisplay(QWidget):
         self.title_bar.setMinimumHeight(h)
         self.title_bar.setMaximumHeight(h)
         self.title_bar.setFont(font)
-        self.title_bar.setStyleSheet(
-            f'color:{self.title_color.name()};font-family:"{self.title_font_family}";'
-            f"font-size:{size}px;font-weight:bold;background:transparent;padding:0 {pad}px;"
-        )
+        self.title_bar.setStyleSheet(f'color:{self.title_color.name()};font-family:"{self.title_font_family}";' f"font-size:{size}px;font-weight:bold;background:transparent;padding:0 {pad}px;")
         self.title_bar.setText(self._title_text)
 
     def set_verse_segmentation(self, enabled):
@@ -347,41 +349,24 @@ class ScriptureDisplay(QWidget):
         vn = self._px(self.verse_num_size)
         fs = self._px(self.font_size)
         label = f"{chapter}:{n}" if getattr(self, "_show_chapter_nums", False) and chapter is not None else str(n)
-        return (
-            f'<span style="color:{self.verse_num_color.name()};font-size:{vn}px;'
-            f'font-family:&quot;{self.verse_num_font_family}&quot;;font-weight:bold;vertical-align:super;">{label}</span>'
-            f'&nbsp;<span style="color:{self.font_color.name()};font-size:{fs}px;'
-            f'font-family:&quot;{self.font_family}&quot;;">{safe}</span>'
-        )
+        return (f'<span style="color:{self.verse_num_color.name()};font-size:{vn}px;' f'font-family:&quot;{self.verse_num_font_family}&quot;;font-weight:bold;vertical-align:super;">{label}</span>' f'&nbsp;<span style="color:{self.font_color.name()};font-size:{fs}px;' f'font-family:&quot;{self.font_family}&quot;;">{safe}</span>')
 
     def _title_html(self, text):
         safe = str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         fs = self._px(self.title_size)
         spacing = self._px(self.title_spacing)
-        return (
-            f'<p style="margin:0 0 {spacing}px 0;padding:0;line-height:{self.line_spacing}%;">'
-            f'<span style="color:{self.title_color.name()};font-size:{fs}px;'
-            f'font-family:&quot;{self.title_font_family}&quot;;font-weight:bold;">{safe}</span></p>'
-        )
+        return (f'<p style="margin:0 0 {spacing}px 0;padding:0;line-height:{self.line_spacing}%;">' f'<span style="color:{self.title_color.name()};font-size:{fs}px;' f'font-family:&quot;{self.title_font_family}&quot;;font-weight:bold;">{safe}</span></p>')
 
     def _verse_block_html(self, chapter, n, t):
-        return (
-            f"<p style='margin:0;padding:0;text-align:justify;"
-            f"line-height:{self.line_spacing}%;'>{self._verse_html(chapter, n, t)}</p>"
-        )
+        return (f"<p style='margin:0;padding:0;text-align:justify;" f"line-height:{self.line_spacing}%;'>{self._verse_html(chapter, n, t)}</p>")
 
     def _render_scripture(self):
         fs = self._px(self.font_size)
         top = max(10, int(fs * 0.35))
         bottom = max(12, int(fs * 0.45))
-        html = (
-            f"<div style='padding-top:{top}px;padding-bottom:{bottom}px;margin:0;"
-            f"line-height:{self.line_spacing}%;text-align:justify;'>"
-        )
+        html = (f"<div style='padding-top:{top}px;padding-bottom:{bottom}px;margin:0;" f"line-height:{self.line_spacing}%;text-align:justify;'>")
         rows = [self._verse_row(row) for row in self.verses]
-
         if self.verse_segmentation:
-            # 分节显示开启：每节独立成行；小标题插入到所属经文之前。
             blocks = []
             for ch, n, t, titles in rows:
                 if self.show_scripture_titles:
@@ -390,37 +375,19 @@ class ScriptureDisplay(QWidget):
                 blocks.append(self._verse_block_html(ch, n, t))
             html += "".join(blocks)
         elif self.show_scripture_titles:
-            # 分节显示关闭：经文保持原来的连续排版，只有遇到小标题时才强制换行。
-            # 先把连续经文按小标题锚点切成若干段，每个标题独占一行，段内经文继续连续。
-            segments = []
-            current = []
+            html += "<p style='margin:0;padding:0;white-space:normal;text-align:justify;'>"
+            has_content = False
             for ch, n, t, titles in rows:
-                if titles:
-                    if current:
-                        segments.append((None, current))
-                        current = []
-                    for subtitle in titles:
-                        segments.append((subtitle, []))
-                current.append((ch, n, t))
-            if current:
-                segments.append((None, current))
-
-            for subtitle, segment_rows in segments:
-                if subtitle is not None:
-                    html += self._title_html(subtitle)
-                if segment_rows:
-                    html += (
-                        "<p style='margin:0;padding:0;white-space:normal;text-align:justify;'>"
-                        + " ".join(self._verse_html(ch, n, t) for ch, n, t in segment_rows)
-                        + "</p>"
-                    )
+                for subtitle in titles:
+                    if has_content:
+                        html += "<br>"
+                    html += self._title_inline_html(subtitle)
+                    has_content = True
+                html += self._verse_html(ch, n, t) + " "
+                has_content = True
+            html += "</p>"
         else:
-            # 两个开关都关闭：完全保持原来的连续经文排版。
-            html += (
-                "<p style='margin:0;padding:0;white-space:normal;text-align:justify;'>"
-                + " ".join(self._verse_html(ch, n, t) for ch, n, t, _titles in rows)
-                + "</p>"
-            )
+            html += ("<p style='margin:0;padding:0;white-space:normal;text-align:justify;'>" + " ".join(self._verse_html(ch, n, t) for ch, n, t, _titles in rows) + "</p>")
         self.text_display.set_html(html + "</div>")
         self._fit_document_width()
 
@@ -428,10 +395,7 @@ class ScriptureDisplay(QWidget):
         fs = self._px(self.footer_size)
         self.footer_label.setText(self.footer_text)
         self.footer_label.setFont(QFont(self.footer_font_family, fs))
-        self.footer_label.setStyleSheet(
-            f'color:{self.footer_color.name()};font-family:"{self.footer_font_family}";'
-            f"font-size:{fs}px;background:transparent;"
-        )
+        self.footer_label.setStyleSheet(f'color:{self.footer_color.name()};font-family:"{self.footer_font_family}";' f"font-size:{fs}px;background:transparent;")
 
     def _ensure_bg_pixmap(self):
         path = self.bg_image
@@ -457,11 +421,7 @@ class ScriptureDisplay(QWidget):
         if pix is not None:
             size = self.size()
             if self._bg_scaled is None or self._bg_scaled_size != size:
-                self._bg_scaled = pix.scaled(
-                    size,
-                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
+                self._bg_scaled = pix.scaled(size, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
                 self._bg_scaled_size = size
             scaled = self._bg_scaled
             painter.drawPixmap((self.width() - scaled.width()) // 2, (self.height() - scaled.height()) // 2, scaled)
@@ -485,6 +445,10 @@ class ScriptureDisplay(QWidget):
 
     def set_scroll_fraction(self, fraction):
         self.text_display.set_scroll_fraction(fraction)
+
+    def scroll_by(self, delta):
+        """手动滚动接口，方向键和工具栏按钮统一调用这里。"""
+        self.text_display.scroll_by(delta)
 
     def set_scroll_speed(self, speed):
         try:
@@ -518,7 +482,6 @@ class ScriptureDisplay(QWidget):
         self.set_scroll_position(target)
         if target >= self.max_scroll() - 0.5:
             self.set_scroll_speed(0)
-            self.scroll_finished.emit()
 
     def apply_settings(self, settings):
         self.font_family = settings.get("font_family", self.font_family)
