@@ -10,6 +10,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
 
+from feature_flags import ENABLE_SCRIPTURE_TITLES
+
 
 class DisplaySettingsDialog(QDialog):
     def __init__(self, settings, parent=None):
