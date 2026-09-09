@@ -2,14 +2,12 @@
 
 from PyQt6.QtGui import QColor
 from .scripture_display import ScriptureDisplay, ScriptureBody
-from .toolbar import DisplaySettingsDialog
 
 
 _ORIGINAL_DISPLAY_INIT = ScriptureDisplay.__init__
 _ORIGINAL_APPLY_SETTINGS = ScriptureDisplay.apply_settings
 _ORIGINAL_RENDER_SCRIPTURE = ScriptureDisplay._render_scripture
 _ORIGINAL_DISPLAY_AUTO_SCROLL = ScriptureDisplay._auto_scroll
-_ORIGINAL_DIALOG_BUILD_UI = DisplaySettingsDialog._build_ui
 
 
 def _body_clamp_scroll(self):
@@ -124,27 +122,9 @@ def _display_auto_scroll(self):
             self.scroll_finished.emit()
 
 
-def _dialog_build_ui(self):
-    _ORIGINAL_DIALOG_BUILD_UI(self)
-    # 标题间距不作为用户设置项，但保留控件实例以兼容旧配置读取。
-    spacing = getattr(self, "title_spacing", None)
-    if spacing is not None:
-        spacing.hide()
-        parent = spacing.parentWidget()
-        if parent is not None:
-            layout = parent.layout()
-            if layout is not None and hasattr(layout, "labelForField"):
-                label = layout.labelForField(spacing)
-                if label is not None:
-                    label.hide()
-
-
 ScriptureDisplay.__init__ = _display_init
 ScriptureDisplay.apply_settings = _apply_display_settings
 ScriptureDisplay._title_html = _title_html
 ScriptureDisplay._title_inline_html = _title_inline_html
 ScriptureDisplay._render_scripture = _render_scripture_with_titles
 ScriptureDisplay._auto_scroll = _display_auto_scroll
-
-# 不再覆盖 DisplaySettingsDialog 的颜色样式，直接使用 toolbar.py 原有实现。
-DisplaySettingsDialog._build_ui = _dialog_build_ui
