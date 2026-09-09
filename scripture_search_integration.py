@@ -1,3 +1,4 @@
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import QPushButton
 
@@ -11,14 +12,14 @@ def install_scripture_search(window):
 
     button = QPushButton("经文搜索")
     button.setObjectName("scriptureSearchToolbarButton")
-    button.setCursor(window.cursor().shape())
+    button.setCursor(Qt.CursorShape.PointingHandCursor)
     button.setToolTip("搜索整本圣经经文  Ctrl+F")
     button.clicked.connect(lambda: _toggle(window))
     window.toolbar.addWidget(button)
     window.scripture_search_button = button
 
     shortcut = QShortcut(QKeySequence("Ctrl+F"), window)
-    shortcut.setContext(QShortcut.Context.WindowShortcut)
+    shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
     shortcut.activated.connect(lambda: _toggle(window))
     window._scripture_search_shortcut = shortcut
 
