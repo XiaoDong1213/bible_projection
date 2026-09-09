@@ -1,22 +1,12 @@
-"""经文小标题渲染与独立样式兼容层。"""
+"""经文小标题渲染兼容层。
 
-from PyQt6.QtGui import QColor, QFont
-from PyQt6.QtWidgets import QFormLayout, QFontComboBox, QPushButton, QSpinBox, QTabWidget, QWidget, QColorDialog
+只负责小标题显示和滚动接口兼容，不再动态改写显示设置对话框。
+显示设置对话框保持 toolbar.py 的原始实现，避免运行时 monkey patch 引发崩溃。
+"""
+
+from PyQt6.QtGui import QColor
 
 from .scripture_display import ScriptureDisplay, ScriptureBody
-from .toolbar import DisplaySettingsDialog
-from config import AppConfig
-import ui.themes as _themes
-
-# Qt QSS 的 font-family 使用单一字体名更稳定；原来的 CSS fallback 列表会在部分 Qt 版本触发样式解析警告。
-_themes.FONT_FAMILY = '"Microsoft YaHei UI"'
-
-
-def _color_name(value, fallback="#87CEEB"):
-    if isinstance(value, QColor):
-        return value.name() if value.isValid() else fallback
-    color = QColor(str(value or fallback))
-    return color.name() if color.isValid() else fallback
 
 
 _ORIGINAL_DISPLAY_INIT = ScriptureDisplay.__init__
@@ -26,7 +16,7 @@ _ORIGINAL_DISPLAY_AUTO_SCROLL = ScriptureDisplay._auto_scroll
 
 
 def _body_clamp_scroll(self):
-    """兼容浮点滚动正文区的边界校正接口。"""
+    """兼容正文区边距更新时使用的滚动边界校正接口。"""
     self.set_scroll_y(self._scroll_y, emit=False)
 
 
@@ -43,8 +33,7 @@ def _body_set_scroll_fraction(self, fraction):
     self.set_scroll_y(value * self.max_scroll())
 
 
-# 上一版滚动修复把旧的三个接口误删了。保留新 scroll_by / wheelEvent，补回旧接口，
-# 这样设置边距、窗口缩放、分页定位和滚动同步都继续走原来的调用链。
+# 保留 ScriptureBody 原有调用链所需要的三个接口。
 ScriptureBody._clamp_scroll = _body_clamp_scroll
 ScriptureBody.scroll_fraction = _body_scroll_fraction
 ScriptureBody.set_scroll_fraction = _body_set_scroll_fraction
@@ -61,11 +50,38 @@ def _display_init(self, parent=None):
 
 def _apply_display_settings(self, settings):
     _ORIGINAL_APPLY_SETTINGS(self, settings)
-    self.scripture_title_font_family = settings.get("scripture_title_font_family", self.scripture_title_font_family)
-    self.scripture_title_size = int(settings.get("scripture_title_size", self.scripture_title_size))
-    self.scripture_title_color = QColor(_color_name(settings.get("scripture_title_color", self.scripture_title_color.name())))
-    self.scripture_title_spacing = int(settings.get("scripture_title_spacing", self.scripture_title_spacing))
-    self.scripture_title_line_spacing = int(settings.get("scripture_title_line_spacing", self.scripture_title_line_spacing))
+
+    # 这些设置没有时使用稳定默认值；即使旧 config.ini 没有对应字段也不会报错。
+    self.scripture_title_font_family = str(
+        settings.get("scripture_title_font_family", self.scripture_title_font_family)
+    )
+    try:
+        self.scripture_title_size = max(
+            10, min(200, int(settings.get("scripture_title_size", self.scripture_title_size)))
+        )
+    except (TypeError, ValueError):
+        self.scripture_title_size = 30
+
+    self.scripture_title_color = QColor(
+        str(settings.get("scripture_title_color", self.scripture_title_color.name()))
+    )
+    if not self.scripture_title_color.isValid():
+        self.scripture_title_color = QColor("#87CEEB")
+
+    try:
+        self.scripture_title_spacing = max(
+            0, min(100, int(settings.get("scripture_title_spacing", self.scripture_title_spacing)))
+        )
+    except (TypeError, ValueError):
+        self.scripture_title_spacing = 8
+
+    try:
+        self.scripture_title_line_spacing = max(
+            80, min(300, int(settings.get("scripture_title_line_spacing", self.scripture_title_line_spacing)))
+        )
+    except (TypeError, ValueError):
+        self.scripture_title_line_spacing = 120
+
     if self.verses:
         old = self.scroll_fraction()
         self._render_scripture()
@@ -73,44 +89,64 @@ def _apply_display_settings(self, settings):
 
 
 def _title_html(self, text):
-    safe = str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    safe = (
+        str(text or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
     fs = self._px(self.scripture_title_size)
     spacing = self._px(self.scripture_title_spacing)
     line_spacing = int(self.scripture_title_line_spacing)
     return (
         f'<p style="margin:0 0 {spacing}px 0;padding:0;line-height:{line_spacing}%;">'
         f'<span style="color:{self.scripture_title_color.name()};font-size:{fs}px;'
-        f'font-family:&quot;{self.scripture_title_font_family}&quot;;font-weight:bold;">{safe}</span></p>'
+        f'font-family:&quot;{self.scripture_title_font_family}&quot;;font-weight:bold;">'
+        f'{safe}</span></p>'
     )
 
 
 def _title_inline_html(self, text):
-    safe = str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    safe = (
+        str(text or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
     fs = self._px(self.scripture_title_size)
     spacing = self._px(self.scripture_title_spacing)
     line_spacing = int(self.scripture_title_line_spacing)
     return (
         f'<br><span style="color:{self.scripture_title_color.name()};font-size:{fs}px;'
-        f'font-family:&quot;{self.scripture_title_font_family}&quot;;font-weight:bold;line-height:{line_spacing}%;">{safe}</span>'
+        f'font-family:&quot;{self.scripture_title_font_family}&quot;;font-weight:bold;'
+        f'line-height:{line_spacing}%;">{safe}</span>'
         f'<br><span style="font-size:{max(1, spacing)}px;">&nbsp;</span><br>'
     )
 
 
 def _render_scripture_with_titles(self):
+    # 开关关闭：完全走原来的渲染逻辑，不改变原有分节/连续显示行为。
     if not self.show_scripture_titles:
         _ORIGINAL_RENDER_SCRIPTURE(self)
         return
+
     fs = self._px(self.font_size)
     top = max(10, int(fs * 0.35))
     bottom = max(12, int(fs * 0.45))
-    html = f"<div style='padding-top:{top}px;padding-bottom:{bottom}px;margin:0;line-height:{self.line_spacing}%;text-align:justify;'>"
+    html = (
+        f"<div style='padding-top:{top}px;padding-bottom:{bottom}px;margin:0;"
+        f"line-height:{self.line_spacing}%;text-align:justify;'>"
+    )
     rows = [self._verse_row(row) for row in self.verses]
+
     if self.verse_segmentation:
+        # 分节显示开启：每节独立显示，小标题出现在对应节之前。
         for ch, n, t, titles in rows:
             for subtitle in titles:
                 html += self._title_html(subtitle)
             html += self._verse_block_html(ch, n, t)
     else:
+        # 分节显示关闭：正文继续连续排版，只有遇到小标题时才换行。
         html += "<p style='margin:0;padding:0;white-space:normal;text-align:justify;'>"
         has_content = False
         for ch, n, t, titles in rows:
@@ -123,6 +159,7 @@ def _render_scripture_with_titles(self):
             html += " "
             has_content = True
         html += "</p>"
+
     self.text_display.set_html(html + "</div>")
     self._fit_document_width()
 
@@ -141,111 +178,3 @@ ScriptureDisplay._title_html = _title_html
 ScriptureDisplay._title_inline_html = _title_inline_html
 ScriptureDisplay._render_scripture = _render_scripture_with_titles
 ScriptureDisplay._auto_scroll = _display_auto_scroll
-
-
-_ORIGINAL_DIALOG_BUILD_UI = DisplaySettingsDialog._build_ui
-_ORIGINAL_DIALOG_LOAD_SETTINGS = DisplaySettingsDialog._load_settings
-_ORIGINAL_DIALOG_GET_SETTINGS = DisplaySettingsDialog.get_settings
-
-
-def _add_scripture_title_settings(self):
-    tabs = self.findChild(QTabWidget, "settingsSubTabs")
-    if tabs is None or hasattr(self, "scripture_title_font_combo"):
-        return
-    page = QWidget()
-    form = QFormLayout(page)
-    form.setContentsMargins(20, 20, 20, 20)
-    form.setHorizontalSpacing(18)
-    form.setVerticalSpacing(12)
-    self.scripture_title_font_combo = QFontComboBox()
-    self.scripture_title_size = QSpinBox()
-    self.scripture_title_size.setRange(10, 200)
-    self.scripture_title_size.setSuffix(" px")
-    self.scripture_title_color_btn = QPushButton("小标题颜色")
-    self.scripture_title_spacing = QSpinBox()
-    self.scripture_title_spacing.setRange(0, 100)
-    self.scripture_title_spacing.setSuffix(" px")
-    self.scripture_title_line_spacing = QSpinBox()
-    self.scripture_title_line_spacing.setRange(80, 300)
-    self.scripture_title_line_spacing.setSuffix("%")
-    form.addRow("小标题字体", self.scripture_title_font_combo)
-    form.addRow("小标题字号", self.scripture_title_size)
-    form.addRow("小标题颜色", self.scripture_title_color_btn)
-    form.addRow("小标题间距", self.scripture_title_spacing)
-    form.addRow("小标题行距", self.scripture_title_line_spacing)
-    tabs.addTab(page, "小标题")
-    self.scripture_title_color_btn.clicked.connect(self._choose_scripture_title_color)
-
-
-def _dialog_build_ui(self):
-    _ORIGINAL_DIALOG_BUILD_UI(self)
-    _add_scripture_title_settings(self)
-
-
-def _choose_scripture_title_color(self):
-    current = _color_name(self.settings.get("scripture_title_color", "#87CEEB"))
-    color = QColorDialog.getColor(QColor(current), self, "选择小标题颜色")
-    if color.isValid():
-        self.settings["scripture_title_color"] = color.name()
-        self._set_color_button(self.scripture_title_color_btn, color.name())
-
-
-def _dialog_set_color_button(self, button, color):
-    color_name = _color_name(color)
-    text_color = "#000000" if QColor(color_name).lightness() > 160 else "#FFFFFF"
-    button.setStyleSheet(f"background-color:{color_name};color:{text_color};border:1px solid #6B7280;")
-
-
-def _dialog_load_settings(self):
-    _ORIGINAL_DIALOG_LOAD_SETTINGS(self)
-    s = self.settings
-    self.scripture_title_font_combo.setCurrentFont(QFont(s.get("scripture_title_font_family", "微软雅黑")))
-    self.scripture_title_size.setValue(int(s.get("scripture_title_size", 30)))
-    self.scripture_title_spacing.setValue(int(s.get("scripture_title_spacing", 8)))
-    self.scripture_title_line_spacing.setValue(int(s.get("scripture_title_line_spacing", 120)))
-    color = _color_name(s.get("scripture_title_color", "#87CEEB"))
-    self.scripture_title_color_btn.setStyleSheet(f"background-color:{color};color:{'#000000' if QColor(color).lightness() > 160 else '#FFFFFF'};border:1px solid #6B7280;")
-
-
-def _dialog_get_settings(self):
-    s = _ORIGINAL_DIALOG_GET_SETTINGS(self)
-    s.update({
-        "scripture_title_font_family": self.scripture_title_font_combo.currentFont().family(),
-        "scripture_title_size": self.scripture_title_size.value(),
-        "scripture_title_color": _color_name(self.settings.get("scripture_title_color", "#87CEEB")),
-        "scripture_title_spacing": self.scripture_title_spacing.value(),
-        "scripture_title_line_spacing": self.scripture_title_line_spacing.value(),
-    })
-    return s
-
-
-DisplaySettingsDialog._build_ui = _dialog_build_ui
-DisplaySettingsDialog._set_color_button = _dialog_set_color_button
-DisplaySettingsDialog._load_settings = _dialog_load_settings
-DisplaySettingsDialog.get_settings = _dialog_get_settings
-
-
-_ORIGINAL_CONFIG_LOAD = AppConfig.load_display_settings
-
-
-def _config_load_display_settings(self):
-    result = _ORIGINAL_CONFIG_LOAD(self)
-    sec = self.parser["Display"] if "Display" in self.parser else {}
-    result["scripture_title_font_family"] = sec.get("scripture_title_font_family", "微软雅黑")
-    try:
-        result["scripture_title_size"] = int(sec.get("scripture_title_size", "30"))
-    except ValueError:
-        result["scripture_title_size"] = 30
-    result["scripture_title_color"] = QColor(sec.get("scripture_title_color", "#87CEEB"))
-    try:
-        result["scripture_title_spacing"] = int(sec.get("scripture_title_spacing", "8"))
-    except ValueError:
-        result["scripture_title_spacing"] = 8
-    try:
-        result["scripture_title_line_spacing"] = int(sec.get("scripture_title_line_spacing", "120"))
-    except ValueError:
-        result["scripture_title_line_spacing"] = 120
-    return result
-
-
-AppConfig.load_display_settings = _config_load_display_settings
