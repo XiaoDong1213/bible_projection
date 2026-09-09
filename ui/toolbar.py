@@ -196,24 +196,21 @@ class DisplaySettingsDialog(QDialog):
 
     def _choose_color(self, key, button):
         current = self.settings.get(key, "#FFFFFF")
-        dialog = QColorDialog(QColor(current), self)
-        dialog.setWindowTitle("选择颜色")
-        ok_button = dialog.button(QDialogButtonBox.StandardButton.Ok)
-        cancel_button = dialog.button(QDialogButtonBox.StandardButton.Cancel)
-        if ok_button:
-            ok_button.setText("确定")
-        if cancel_button:
-            cancel_button.setText("取消")
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            color = dialog.currentColor()
-            if color.isValid():
-                self.settings[key] = color.name()
-                self._set_color_button(button, color.name())
+        color = QColorDialog.getColor(QColor(current), self, "选择颜色")
+        if color.isValid():
+            value = color.name()
+            self.settings[key] = value
+            self._set_color_button(button, value)
 
     def _set_color_button(self, button, color):
-        button.setStyleSheet(
-            f"background:{color};color:{'#000000' if QColor(color).lightness() > 160 else '#FFFFFF'};"
-        )
+        # 不再给按钮设置 QSS。应用级 QSS 可能覆盖/冲突，导致 stylesheet parse 警告。
+        # 使用 QPalette 设置颜色预览，不影响全局样式表。
+        palette = button.palette()
+        palette.setColor(button.backgroundRole(), QColor(color))
+        text_color = QColor("#000000" if QColor(color).lightness() > 160 else "#FFFFFF")
+        palette.setColor(button.foregroundRole(), text_color)
+        button.setAutoFillBackground(True)
+        button.setPalette(palette)
 
     def _choose_bg(self):
         dialog = QFileDialog(self, "选择背景图片")
