@@ -156,8 +156,11 @@ class BookScopeDialog(QDialog):
                 item = QListWidgetItem()
                 item.setData(Qt.ItemDataRole.UserRole, book)
                 item.setData(Qt.ItemDataRole.UserRole + 1, short)
-                self._set_item_checked(item, book in self.selected)
+                # 必须先加入 QListWidget，再设置 selected。
+                # 否则 Qt 对尚未加入列表的 item 不会保留视觉选中状态，
+                # 导致再次打开时数据仍在但书卷没有高亮。
                 lst.addItem(item)
+                self._set_item_checked(item, book in self.selected)
 
             box.addWidget(lst, 1)
             columns.addLayout(box, 1)
