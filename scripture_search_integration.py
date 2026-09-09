@@ -70,6 +70,7 @@ def _toggle(window):
 
     width = widget.width()
     height = max(480, window.height() - window.toolbar.height() - 18)
+    widget.resize(width, height)
     global_pos = window.mapToGlobal(
         QPoint(window.width() - width - 8, window.toolbar.height() + 4)
     )
