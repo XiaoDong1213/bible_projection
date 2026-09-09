@@ -5,12 +5,10 @@ from PyQt6.QtWidgets import (
     QToolBar, QPushButton, QLabel, QDialog, QFormLayout,
     QHBoxLayout, QVBoxLayout, QSpinBox, QFontComboBox, QColorDialog,
     QFileDialog, QLineEdit, QDialogButtonBox, QWidget, QSizePolicy,
-    QTabWidget, QCheckBox,
+    QTabWidget,
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
-
-from feature_flags import ENABLE_SCRIPTURE_TITLES
 
 
 class DisplaySettingsDialog(QDialog):
@@ -58,7 +56,6 @@ class DisplaySettingsDialog(QDialog):
         body_form.setContentsMargins(20, 20, 20, 20)
         body_form.setHorizontalSpacing(18)
         body_form.setVerticalSpacing(12)
-
         self.font_combo = QFontComboBox()
         self.font_size = QSpinBox()
         self.font_size.setRange(12, 300)
@@ -74,7 +71,6 @@ class DisplaySettingsDialog(QDialog):
         title_form.setContentsMargins(20, 20, 20, 20)
         title_form.setHorizontalSpacing(18)
         title_form.setVerticalSpacing(12)
-
         self.title_font_combo = QFontComboBox()
         self.title_size = QSpinBox()
         self.title_size.setRange(12, 300)
@@ -83,19 +79,41 @@ class DisplaySettingsDialog(QDialog):
         self.title_spacing = QSpinBox()
         self.title_spacing.setRange(0, 100)
         self.title_spacing.setSuffix(" px")
-
         title_form.addRow("标题字体", self.title_font_combo)
         title_form.addRow("标题字号", self.title_size)
         title_form.addRow("标题颜色", self.title_color_btn)
         title_form.addRow("标题间距", self.title_spacing)
         text_tabs.addTab(title_page, "标题")
 
+        # 小标题：与正文、标题、节号、底注使用完全相同的设置页结构。
+        scripture_title_page = QWidget()
+        scripture_title_form = QFormLayout(scripture_title_page)
+        scripture_title_form.setContentsMargins(20, 20, 20, 20)
+        scripture_title_form.setHorizontalSpacing(18)
+        scripture_title_form.setVerticalSpacing(12)
+        self.scripture_title_font_combo = QFontComboBox()
+        self.scripture_title_size = QSpinBox()
+        self.scripture_title_size.setRange(10, 200)
+        self.scripture_title_size.setSuffix(" px")
+        self.scripture_title_color_btn = QPushButton("小标题颜色")
+        self.scripture_title_spacing = QSpinBox()
+        self.scripture_title_spacing.setRange(0, 50)
+        self.scripture_title_spacing.setSuffix(" px")
+        self.scripture_title_line_spacing = QSpinBox()
+        self.scripture_title_line_spacing.setRange(80, 300)
+        self.scripture_title_line_spacing.setSuffix("%")
+        scripture_title_form.addRow("小标题字体", self.scripture_title_font_combo)
+        scripture_title_form.addRow("小标题字号", self.scripture_title_size)
+        scripture_title_form.addRow("小标题颜色", self.scripture_title_color_btn)
+        scripture_title_form.addRow("小标题间距", self.scripture_title_spacing)
+        scripture_title_form.addRow("小标题行距", self.scripture_title_line_spacing)
+        text_tabs.addTab(scripture_title_page, "小标题")
+
         verse_page = QWidget()
         verse_form = QFormLayout(verse_page)
         verse_form.setContentsMargins(20, 20, 20, 20)
         verse_form.setHorizontalSpacing(18)
         verse_form.setVerticalSpacing(12)
-
         self.verse_font_combo = QFontComboBox()
         self.verse_size = QSpinBox()
         self.verse_size.setRange(10, 200)
@@ -111,7 +129,6 @@ class DisplaySettingsDialog(QDialog):
         footer_form.setContentsMargins(20, 20, 20, 20)
         footer_form.setHorizontalSpacing(18)
         footer_form.setVerticalSpacing(12)
-
         self.footer_font_combo = QFontComboBox()
         self.footer_size = QSpinBox()
         self.footer_size.setRange(10, 100)
@@ -130,7 +147,6 @@ class DisplaySettingsDialog(QDialog):
         lf.setContentsMargins(20, 20, 20, 20)
         lf.setHorizontalSpacing(18)
         lf.setVerticalSpacing(14)
-
         self.line_spacing = QSpinBox()
         self.line_spacing.setRange(100, 300)
         self.line_spacing.setSuffix("%")
@@ -142,7 +158,6 @@ class DisplaySettingsDialog(QDialog):
         self.footer_height.setSuffix(" px")
         self.footer_text = QLineEdit()
         self.footer_text.setPlaceholderText("留空则不显示底注")
-
         lf.addRow("行距", self.line_spacing)
         lf.addRow("左右边距", self.margin)
         lf.addRow("底注区域高度", self.footer_height)
@@ -154,7 +169,6 @@ class DisplaySettingsDialog(QDialog):
         bg_layout.setContentsMargins(20, 20, 20, 20)
         bg_layout.setHorizontalSpacing(18)
         bg_layout.setVerticalSpacing(14)
-
         self.bg_color_btn = QPushButton("背景颜色")
         self.bg_image = QLineEdit()
         self.bg_image.setReadOnly(True)
@@ -166,24 +180,25 @@ class DisplaySettingsDialog(QDialog):
         bg_row.addWidget(self.bg_image, 1)
         bg_row.addWidget(bg_choose)
         bg_row.addWidget(bg_clear)
-
         bg_layout.addRow("背景颜色", self.bg_color_btn)
         bg_layout.addRow("背景图片", bg_row)
         tabs.addTab(bg_page, "背景")
 
         root.addWidget(tabs, 1)
-
         bg_choose.clicked.connect(self._choose_bg)
         bg_clear.clicked.connect(self._clear_bg)
 
         for key, attr in [
             ("font_color", "font_color_btn"),
             ("title_color", "title_color_btn"),
+            ("scripture_title_color", "scripture_title_color_btn"),
             ("verse_num_color", "verse_color_btn"),
             ("footer_color", "footer_color_btn"),
             ("bg_color", "bg_color_btn"),
         ]:
-            getattr(self, attr).clicked.connect(lambda _=False, k=key, a=attr: self._choose_color(k, getattr(self, a)))
+            getattr(self, attr).clicked.connect(
+                lambda _=False, k=key, a=attr: self._choose_color(k, getattr(self, a))
+            )
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -198,10 +213,14 @@ class DisplaySettingsDialog(QDialog):
             self._set_color_button(button, color.name())
 
     def _set_color_button(self, button, color):
-        button.setStyleSheet(f"background:{color};color:{'#000000' if QColor(color).lightness() > 160 else '#FFFFFF'};")
+        button.setStyleSheet(
+            f"background:{color};color:{'#000000' if QColor(color).lightness() > 160 else '#FFFFFF'};"
+        )
 
     def _choose_bg(self):
-        path, _ = QFileDialog.getOpenFileName(self, "选择背景图片", "", "图片文件 (*.png *.jpg *.jpeg *.bmp *.webp)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择背景图片", "", "图片文件 (*.png *.jpg *.jpeg *.bmp *.webp)"
+        )
         if path:
             self.bg_image.setText(path)
 
@@ -215,6 +234,10 @@ class DisplaySettingsDialog(QDialog):
         self.title_font_combo.setCurrentFont(QFont(s.get("title_font_family", "微软雅黑")))
         self.title_size.setValue(int(s.get("title_size", 36)))
         self.title_spacing.setValue(int(s.get("title_spacing", 12)))
+        self.scripture_title_font_combo.setCurrentFont(QFont(s.get("scripture_title_font_family", "微软雅黑")))
+        self.scripture_title_size.setValue(int(s.get("scripture_title_size", 30)))
+        self.scripture_title_spacing.setValue(int(s.get("scripture_title_spacing", 8)))
+        self.scripture_title_line_spacing.setValue(int(s.get("scripture_title_line_spacing", 120)))
         self.verse_font_combo.setCurrentFont(QFont(s.get("verse_num_font_family", "微软雅黑")))
         self.verse_size.setValue(int(s.get("verse_num_size", 24)))
         self.footer_font_combo.setCurrentFont(QFont(s.get("footer_font_family", "微软雅黑")))
@@ -227,6 +250,7 @@ class DisplaySettingsDialog(QDialog):
         for key, attr in [
             ("font_color", "font_color_btn"),
             ("title_color", "title_color_btn"),
+            ("scripture_title_color", "scripture_title_color_btn"),
             ("verse_num_color", "verse_color_btn"),
             ("footer_color", "footer_color_btn"),
             ("bg_color", "bg_color_btn"),
@@ -241,6 +265,11 @@ class DisplaySettingsDialog(QDialog):
             "title_font_family": self.title_font_combo.currentFont().family(),
             "title_size": self.title_size.value(),
             "title_spacing": self.title_spacing.value(),
+            "scripture_title_font_family": self.scripture_title_font_combo.currentFont().family(),
+            "scripture_title_size": self.scripture_title_size.value(),
+            "scripture_title_color": self.settings.get("scripture_title_color", "#87CEEB"),
+            "scripture_title_spacing": self.scripture_title_spacing.value(),
+            "scripture_title_line_spacing": self.scripture_title_line_spacing.value(),
             "verse_num_font_family": self.verse_font_combo.currentFont().family(),
             "verse_num_size": self.verse_size.value(),
             "footer_font_family": self.footer_font_combo.currentFont().family(),
