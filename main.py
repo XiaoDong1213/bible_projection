@@ -10,6 +10,7 @@ from config import AppConfig
 from bible_database import BibleDatabase
 from main_window import MainWindow
 from scripture_search_integration import install_scripture_search
+from feature_flags import ENABLE_SCRIPTURE_SEARCH
 
 
 # 设置 Windows 应用标识，确保任务栏图标正确关联
@@ -54,8 +55,9 @@ def main():
     db = BibleDatabase()
     window = MainWindow(db, config)
 
-    # 独立经文全文搜索：不改动原有书卷/章节搜索逻辑。
-    install_scripture_search(window)
+    # 独立经文全文搜索：通过发布开关控制，不删除相关代码。
+    if ENABLE_SCRIPTURE_SEARCH:
+        install_scripture_search(window)
 
     # Home / End 使用应用级快捷键，避免焦点位于搜索框、数字框、列表等子控件时被控件自身截获。
     # 关闭 ScriptureDisplay 内部原有的同键快捷键，统一由主窗口处理。
