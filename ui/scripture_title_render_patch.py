@@ -3,7 +3,7 @@
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import QFormLayout, QFontComboBox, QPushButton, QSpinBox, QTabWidget, QWidget, QColorDialog
 
-from .scripture_display import ScriptureDisplay
+from .scripture_display import ScriptureDisplay, ScriptureBody
 from .toolbar import DisplaySettingsDialog
 from config import AppConfig
 import ui.themes as _themes
@@ -22,6 +22,32 @@ def _color_name(value, fallback="#87CEEB"):
 _ORIGINAL_DISPLAY_INIT = ScriptureDisplay.__init__
 _ORIGINAL_APPLY_SETTINGS = ScriptureDisplay.apply_settings
 _ORIGINAL_RENDER_SCRIPTURE = ScriptureDisplay._render_scripture
+_ORIGINAL_DISPLAY_AUTO_SCROLL = ScriptureDisplay._auto_scroll
+
+
+def _body_clamp_scroll(self):
+    """兼容浮点滚动正文区的边界校正接口。"""
+    self.set_scroll_y(self._scroll_y, emit=False)
+
+
+def _body_scroll_fraction(self):
+    maximum = self.max_scroll()
+    return 0.0 if maximum <= 0 else self._scroll_y / maximum
+
+
+def _body_set_scroll_fraction(self, fraction):
+    try:
+        value = max(0.0, min(1.0, float(fraction)))
+    except (TypeError, ValueError):
+        return
+    self.set_scroll_y(value * self.max_scroll())
+
+
+# 上一版滚动修复把旧的三个接口误删了。保留新 scroll_by / wheelEvent，补回旧接口，
+# 这样设置边距、窗口缩放、分页定位和滚动同步都继续走原来的调用链。
+ScriptureBody._clamp_scroll = _body_clamp_scroll
+ScriptureBody.scroll_fraction = _body_scroll_fraction
+ScriptureBody.set_scroll_fraction = _body_set_scroll_fraction
 
 
 def _display_init(self, parent=None):
@@ -101,11 +127,20 @@ def _render_scripture_with_titles(self):
     self._fit_document_width()
 
 
+def _display_auto_scroll(self):
+    was_running = self.scroll_timer.isActive()
+    _ORIGINAL_DISPLAY_AUTO_SCROLL(self)
+    if was_running and self.scroll_speed == 0 and self.max_scroll() > 0:
+        if self.scroll_position() >= self.max_scroll() - 0.5:
+            self.scroll_finished.emit()
+
+
 ScriptureDisplay.__init__ = _display_init
 ScriptureDisplay.apply_settings = _apply_display_settings
 ScriptureDisplay._title_html = _title_html
 ScriptureDisplay._title_inline_html = _title_inline_html
 ScriptureDisplay._render_scripture = _render_scripture_with_titles
+ScriptureDisplay._auto_scroll = _display_auto_scroll
 
 
 _ORIGINAL_DIALOG_BUILD_UI = DisplaySettingsDialog._build_ui
