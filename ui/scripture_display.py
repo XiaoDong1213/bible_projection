@@ -380,17 +380,42 @@ class ScriptureDisplay(QWidget):
         )
         rows = [self._verse_row(row) for row in self.verses]
 
-        # 小标题只是插入到对应经文前的显示节点，不参与分节；没有标题的经文保持原有连续排版。
-        if self.show_scripture_titles:
+        if self.verse_segmentation:
+            # 分节显示开启：每节独立成行；小标题插入到所属经文之前。
             blocks = []
             for ch, n, t, titles in rows:
-                for subtitle in titles:
-                    blocks.append(self._title_html(subtitle))
+                if self.show_scripture_titles:
+                    for subtitle in titles:
+                        blocks.append(self._title_html(subtitle))
                 blocks.append(self._verse_block_html(ch, n, t))
             html += "".join(blocks)
-        elif self.verse_segmentation:
-            html += "".join(self._verse_block_html(ch, n, t) for ch, n, t, _titles in rows)
+        elif self.show_scripture_titles:
+            # 分节显示关闭：经文保持原来的连续排版，只有遇到小标题时才强制换行。
+            # 先把连续经文按小标题锚点切成若干段，每个标题独占一行，段内经文继续连续。
+            segments = []
+            current = []
+            for ch, n, t, titles in rows:
+                if titles:
+                    if current:
+                        segments.append((None, current))
+                        current = []
+                    for subtitle in titles:
+                        segments.append((subtitle, []))
+                current.append((ch, n, t))
+            if current:
+                segments.append((None, current))
+
+            for subtitle, segment_rows in segments:
+                if subtitle is not None:
+                    html += self._title_html(subtitle)
+                if segment_rows:
+                    html += (
+                        "<p style='margin:0;padding:0;white-space:normal;text-align:justify;'>"
+                        + " ".join(self._verse_html(ch, n, t) for ch, n, t in segment_rows)
+                        + "</p>"
+                    )
         else:
+            # 两个开关都关闭：完全保持原来的连续经文排版。
             html += (
                 "<p style='margin:0;padding:0;white-space:normal;text-align:justify;'>"
                 + " ".join(self._verse_html(ch, n, t) for ch, n, t, _titles in rows)
