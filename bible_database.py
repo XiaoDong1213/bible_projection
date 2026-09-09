@@ -220,17 +220,7 @@ class BibleDatabase:
         return str(text or "").strip() in {"-", "–", "—", "―", "－"}
 
     def get_logical_verses(self, book_name, chapter, start_verse=None, end_verse=None):
-        """读取章节并转换为逻辑经文单位。
-
-        数据库中的结构可能是：
-            13 = 完整经文
-            14 = —
-            15 = 完整经文
-
-        这里 14 不是和 15 连接，而是表示 13 延续到 14。
-        因此最终逻辑单位是 13~14，正文取 13；15 仍是独立经文。
-        多个连续横线会继续并入前一个逻辑单位。
-        """
+        """读取章节并转换为逻辑经文单位。"""
         book_value = self.book_meta.get(book_name, {}).get("id", book_name)
         sql = (
             f"SELECT {self._quote(self.verse_col)} AS verse, {self._quote(self.text_col)} AS text "
@@ -241,7 +231,6 @@ class BibleDatabase:
         raw_rows = self.conn.execute(sql, (book_value, chapter)).fetchall()
         rows = [(int(r["verse"]), str(r["text"] or "")) for r in raw_rows]
         result = []
-
         current = None
         for verse, text in rows:
             if self._is_placeholder_verse(text):
@@ -250,27 +239,23 @@ class BibleDatabase:
                 else:
                     current = {"start": verse, "end": verse, "text": text, "placeholder": True}
                 continue
-
             if current is not None:
                 logical_start = current["start"]
                 logical_end = current["end"]
                 logical_text = current["text"]
                 if not (logical_start == logical_end and current.get("placeholder")):
                     if (start_verse is None or logical_end >= int(start_verse)) and (end_verse is None or logical_start <= int(end_verse)):
-                        label = str(logical_start) if logical_start == logical_end else f"{logical_start}~{logical_end}"
+                        label = str(logical_start) if logical_start == logical_end else f"{logical_start}-{logical_end}"
                         result.append((label, logical_text, logical_start, logical_end))
-
             current = {"start": verse, "end": verse, "text": text, "placeholder": False}
-
         if current is not None:
             logical_start = current["start"]
             logical_end = current["end"]
             logical_text = current["text"]
             if not (logical_start == logical_end and current.get("placeholder")):
                 if (start_verse is None or logical_end >= int(start_verse)) and (end_verse is None or logical_start <= int(end_verse)):
-                    label = str(logical_start) if logical_start == logical_end else f"{logical_start}~{logical_end}"
+                    label = str(logical_start) if logical_start == logical_end else f"{logical_start}-{logical_end}"
                     result.append((label, logical_text, logical_start, logical_end))
-
         return result
 
     def get_verse_display_info(self, book_name, chapter, verse):
@@ -286,21 +271,14 @@ class BibleDatabase:
 
     def get_verses(self, book_name, chapter, start_verse=None, end_verse=None):
         """读取经文；连接标记归属于前一节并合并为逻辑节号。"""
-        return [
-            (label, text)
-            for label, text, _start, _end in self.get_logical_verses(
-                book_name, chapter, start_verse, end_verse
-            )
-        ]
+        return [(label, text) for label, text, _start, _end in self.get_logical_verses(book_name, chapter, start_verse, end_verse)]
 
     def get_selection_verses(self, selection):
         """按多段选择查询经文，返回 (chapter, verse, text, titles) 列表。"""
         rows = []
         for span in selection.spans:
             titles = self.get_chapter_titles(selection.book, span.chapter)
-            for label, text, logical_start, logical_end in self.get_logical_verses(
-                selection.book, span.chapter, span.start, span.end
-            ):
+            for label, text, logical_start, logical_end in self.get_logical_verses(selection.book, span.chapter, span.start, span.end):
                 merged_titles = []
                 for verse in range(logical_start, logical_end + 1):
                     merged_titles.extend(titles.get(verse, []))
