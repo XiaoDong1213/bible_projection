@@ -10,8 +10,6 @@ _ORIGINAL_APPLY_SETTINGS = ScriptureDisplay.apply_settings
 _ORIGINAL_RENDER_SCRIPTURE = ScriptureDisplay._render_scripture
 _ORIGINAL_DISPLAY_AUTO_SCROLL = ScriptureDisplay._auto_scroll
 _ORIGINAL_DIALOG_BUILD_UI = DisplaySettingsDialog._build_ui
-_ORIGINAL_DIALOG_LOAD_SETTINGS = DisplaySettingsDialog._load_settings
-_ORIGINAL_DIALOG_SET_COLOR_BUTTON = DisplaySettingsDialog._set_color_button
 
 
 def _body_clamp_scroll(self):
@@ -128,46 +126,17 @@ def _display_auto_scroll(self):
 
 def _dialog_build_ui(self):
     _ORIGINAL_DIALOG_BUILD_UI(self)
-    # 标题间距不再作为用户设置项。保留控件对象但隐藏整行，
-    # 避免旧配置兼容逻辑访问已被删除的 Qt 对象导致崩溃。
+    # 标题间距不作为用户设置项，但保留控件实例以兼容旧配置读取。
     spacing = getattr(self, "title_spacing", None)
     if spacing is not None:
         spacing.hide()
-        form = spacing.parentWidget().layout() if spacing.parentWidget() else None
-        if form is not None and hasattr(form, "labelForField"):
-            label = form.labelForField(spacing)
-            if label is not None:
-                label.hide()
-
-
-def _dialog_load_settings(self):
-    _ORIGINAL_DIALOG_LOAD_SETTINGS(self)
-    # 打开显示设置时同步刷新所有颜色按钮的预览。
-    color_fields = [
-        ("font_color", "font_color_btn"),
-        ("title_color", "title_color_btn"),
-        ("scripture_title_color", "scripture_title_color_btn"),
-        ("verse_num_color", "verse_color_btn"),
-        ("footer_color", "footer_color_btn"),
-        ("bg_color", "bg_color_btn"),
-    ]
-    for key, attr in color_fields:
-        button = getattr(self, attr, None)
-        if button is not None:
-            self._set_color_button(button, self.settings.get(key, "#FFFFFF"))
-
-
-def _dialog_set_color_button(self, button, color):
-    qcolor = color if isinstance(color, QColor) else QColor(str(color))
-    if not qcolor.isValid():
-        return
-    name = qcolor.name()
-    text_color = "#000000" if qcolor.lightness() > 160 else "#FFFFFF"
-    button.setAutoFillBackground(True)
-    button.setStyleSheet(
-        f"QPushButton {{ background-color: {name}; color: {text_color}; "
-        "border: 1px solid #6B7280; border-radius: 6px; padding: 6px 12px; }}"
-    )
+        parent = spacing.parentWidget()
+        if parent is not None:
+            layout = parent.layout()
+            if layout is not None and hasattr(layout, "labelForField"):
+                label = layout.labelForField(spacing)
+                if label is not None:
+                    label.hide()
 
 
 ScriptureDisplay.__init__ = _display_init
@@ -177,6 +146,5 @@ ScriptureDisplay._title_inline_html = _title_inline_html
 ScriptureDisplay._render_scripture = _render_scripture_with_titles
 ScriptureDisplay._auto_scroll = _display_auto_scroll
 
+# 不再覆盖 DisplaySettingsDialog 的颜色样式，直接使用 toolbar.py 原有实现。
 DisplaySettingsDialog._build_ui = _dialog_build_ui
-DisplaySettingsDialog._load_settings = _dialog_load_settings
-DisplaySettingsDialog._set_color_button = _dialog_set_color_button
