@@ -58,10 +58,28 @@ def _current_scroll(window):
         return 0.0
 
 
+def _replace_history_selection(self, old_selection, new_selection):
+    """方向键只修改当前历史项，不新增一条历史记录。"""
+    history = getattr(self.nav_panel, "history", None)
+    if not history:
+        return
+
+    for index, item in enumerate(history):
+        if item == old_selection:
+            history[index] = new_selection
+            self.nav_panel._update_history_list(selected_index=index)
+            self.nav_panel.history_changed.emit(
+                [entry.to_history_entry() for entry in history]
+            )
+            return
+
+
 def _load_and_restore(self, selection, scroll_y):
+    old_selection = getattr(self, "current_selection", None)
     self._load_selection(selection)
-    # 方向键产生的选择也必须进入历史记录，否则左侧历史仍停留在旧节。
-    self.nav_panel.add_selection_to_history(self.current_selection)
+    # 左右键是“修改当前历史项”，不是“新增历史记录”。
+    if old_selection is not None:
+        _replace_history_selection(self, old_selection, self.current_selection)
     self.nav_panel.sync_from_selection(self.current_selection)
     _restore_scroll(self, scroll_y)
 
@@ -96,7 +114,6 @@ def _remove_verse_end(self):
         self.db, selection.book, span.chapter, span.end
     )
 
-    # 末端包含多个逻辑单位时，只移除最末端的整个逻辑单位。
     if current_start > span.start:
         new_end = current_start - 1
         _prev_start, prev_end = _logical_range(
@@ -107,7 +124,6 @@ def _remove_verse_end(self):
             return
         target_start = span.start
     else:
-        # 当前只选中了一个逻辑单位：左键直接跳到前一个逻辑单位。
         previous = _previous_logical_range(
             self.db, selection.book, span.chapter, current_start
         )
