@@ -23,28 +23,34 @@ class ScriptureResultWidget(QFrame):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 13, 16, 13)
-        root.setSpacing(8)
+        root.setContentsMargins(14, 12, 14, 12)
+        root.setSpacing(10)
 
         top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
         top.setSpacing(8)
+
         label = result.get("verse_label", result.get("verse", ""))
         title = QPushButton(f"{result['book']} {result['chapter']}:{label}")
         title.setObjectName("scriptureResultTitle")
         title.setFlat(True)
         title.setCursor(Qt.CursorShape.PointingHandCursor)
+        title.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        title.setFixedHeight(30)
         title.clicked.connect(lambda: self.activated.emit(self.result))
         top.addWidget(title, 1)
 
         copy_btn = QPushButton("复制")
         copy_btn.setObjectName("scriptureResultAction")
         copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        copy_btn.setFixedSize(48, 30)
         copy_btn.clicked.connect(lambda: self.copy_requested.emit(self.result))
         top.addWidget(copy_btn)
 
         project_btn = QPushButton("投影")
         project_btn.setObjectName("scriptureResultAction")
         project_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        project_btn.setFixedSize(48, 30)
         project_btn.clicked.connect(lambda: self.project_requested.emit(self.result))
         top.addWidget(project_btn)
         root.addLayout(top)
@@ -53,6 +59,7 @@ class ScriptureResultWidget(QFrame):
         text.setObjectName("scriptureResultText")
         text.setTextFormat(Qt.TextFormat.RichText)
         text.setWordWrap(True)
+        text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         root.addWidget(text)
 
     @staticmethod
