@@ -4,9 +4,13 @@ from PyQt6.QtWidgets import QPushButton
 
 from ui import scripture_search as _scripture_search
 from ui.scripture_result_compat import ScriptureResultWidget
+from ui.themes import THEMES
 
-# 当前经文搜索模块已经移除了旧版结果卡片；旧版侧边面板仍需要它。
-# 在加载 legacy 面板前提供兼容实现，避免改动当前搜索逻辑。
+# 旧版搜索面板使用了 text_disabled 令牌，而当前统一主题令牌已改为 text_faint。
+# 在兼容层补齐旧字段，避免恢复旧页面时破坏当前主题系统。
+for _tokens in THEMES.values():
+    _tokens.setdefault("text_disabled", _tokens.get("text_faint", _tokens["text_muted"]))
+
 _scripture_search.ScriptureResultWidget = ScriptureResultWidget
 
 from ui.scripture_search_legacy import ScriptureSearchWidget
