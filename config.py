@@ -40,9 +40,19 @@ class AppConfig:
             if "Display" not in self.parser:
                 self._fill_default_config()
                 self._save_ini()
-            elif "verse_segmentation" not in self.parser["Display"]:
-                self.parser["Display"]["verse_segmentation"] = "False"
-                self._save_ini()
+            else:
+                changed = False
+                if "verse_segmentation" not in self.parser["Display"]:
+                    self.parser["Display"]["verse_segmentation"] = "False"
+                    changed = True
+                if "show_scripture_titles" not in self.parser["Display"]:
+                    self.parser["Display"]["show_scripture_titles"] = "False"
+                    changed = True
+                if "title_spacing" not in self.parser["Display"]:
+                    self.parser["Display"]["title_spacing"] = "12"
+                    changed = True
+                if changed:
+                    self._save_ini()
             if "Window" not in self.parser:
                 self.parser["Window"] = {"geometry": ""}
             if "History" not in self.parser:
@@ -59,7 +69,8 @@ class AppConfig:
         self.parser["Display"] = {
             "theme": "dark", "font_family": "微软雅黑", "font_size": "24", "font_color": "#FFFFFF",
             "verse_num_color": "#FFD700", "verse_num_size": "16", "verse_num_font_family": "微软雅黑",
-            "title_color": "#87CEEB", "title_size": "20", "title_font_family": "微软雅黑",
+            "title_color": "#87CEEB", "title_size": "20", "title_font_family": "微软雅黑", "title_spacing": "12",
+            "show_scripture_titles": "False",
             "bg_color": "#000000", "bg_image": "", "line_spacing": "160", "margin": "60",
             "footer_text": "", "footer_height": "45", "footer_size": "14", "footer_color": "#AAAAAA",
             "footer_font_family": "微软雅黑", "extension_topmost": "True", "verse_segmentation": "False",
@@ -95,7 +106,8 @@ class AppConfig:
         defaults = {
             "theme": "dark", "font_family": "微软雅黑", "font_size": 24, "font_color": "#FFFFFF",
             "verse_num_color": "#FFD700", "verse_num_size": 16, "verse_num_font_family": "微软雅黑",
-            "title_color": "#87CEEB", "title_size": 20, "title_font_family": "微软雅黑",
+            "title_color": "#87CEEB", "title_size": 20, "title_font_family": "微软雅黑", "title_spacing": 12,
+            "show_scripture_titles": False,
             "bg_color": "#000000", "bg_image": "", "line_spacing": 160, "margin": 60,
             "footer_text": "", "footer_height": 45, "footer_size": 14, "footer_color": "#AAAAAA",
             "footer_font_family": "微软雅黑", "extension_topmost": True, "verse_segmentation": False,
@@ -103,8 +115,8 @@ class AppConfig:
         result = {}
         sec = self.parser["Display"] if "Display" in self.parser else {}
         color_keys = {"font_color", "verse_num_color", "title_color", "bg_color", "footer_color"}
-        bool_keys = {"extension_topmost", "verse_segmentation"}
-        int_keys = {"font_size", "verse_num_size", "title_size", "line_spacing", "margin", "footer_height", "footer_size"}
+        bool_keys = {"extension_topmost", "verse_segmentation", "show_scripture_titles"}
+        int_keys = {"font_size", "verse_num_size", "title_size", "title_spacing", "line_spacing", "margin", "footer_height", "footer_size"}
         for k, default_val in defaults.items():
             raw = sec.get(k, None) if hasattr(sec, "get") else None
             if raw is None:
