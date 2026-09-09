@@ -191,11 +191,21 @@ _ORIGINAL_CONFIG_LOAD = AppConfig.load_display_settings
 
 def _config_load_display_settings(self):
     result = _ORIGINAL_CONFIG_LOAD(self)
-    result.setdefault("scripture_title_font_family", "微软雅黑")
-    result.setdefault("scripture_title_size", 30)
-    result.setdefault("scripture_title_color", QColor("#87CEEB"))
-    result.setdefault("scripture_title_spacing", 8)
-    result.setdefault("scripture_title_line_spacing", 120)
+    sec = self.parser["Display"] if "Display" in self.parser else {}
+    result["scripture_title_font_family"] = sec.get("scripture_title_font_family", "微软雅黑")
+    try:
+        result["scripture_title_size"] = int(sec.get("scripture_title_size", "30"))
+    except ValueError:
+        result["scripture_title_size"] = 30
+    result["scripture_title_color"] = QColor(sec.get("scripture_title_color", "#87CEEB"))
+    try:
+        result["scripture_title_spacing"] = int(sec.get("scripture_title_spacing", "8"))
+    except ValueError:
+        result["scripture_title_spacing"] = 8
+    try:
+        result["scripture_title_line_spacing"] = int(sec.get("scripture_title_line_spacing", "120"))
+    except ValueError:
+        result["scripture_title_line_spacing"] = 120
     return result
 
 
