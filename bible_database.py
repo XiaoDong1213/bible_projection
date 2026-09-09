@@ -93,13 +93,10 @@ class BibleDatabase:
             if pinyin:
                 self.book_codes[self._normalize_code(pinyin)] = book
 
-        # 内置常用简称，兼容中文书卷搜索
+        # 内置简称仅供程序内部兼容，不作为搜索输入。
         self.short_names = {
             "创":"创世记","出":"出埃及记","利":"利未记","民":"民数记","申":"申命记","书":"约书亚记","士":"士师记","得":"路得记","撒上":"撒母耳记上","撒下":"撒母耳记下","王上":"列王纪上","王下":"列王纪下","代上":"历代志上","代下":"历代志下","拉":"以斯拉记","尼":"尼希米记","斯":"以斯帖记","伯":"约伯记","诗":"诗篇","箴":"箴言","传":"传道书","歌":"雅歌","赛":"以赛亚书","耶":"耶利米书","哀":"耶利米哀歌","结":"以西结书","但":"但以理书","何":"何西阿书","珥":"约珥书","摩":"阿摩司书","俄":"俄巴底亚书","拿":"约拿书","弥":"弥迦书","鸿":"那鸿书","哈":"哈巴谷书","番":"西番雅书","该":"哈该书","亚":"撒迦利亚书","玛":"玛拉基书","太":"马太福音","可":"马可福音","路":"路加福音","约":"约翰福音","徒":"使徒行传","罗":"罗马书","林前":"哥林多前书","林后":"哥林多后书","加":"加拉太书","弗":"以弗所书","腓":"腓立比书","西":"歌罗西书","帖前":"帖撒罗尼迦前书","帖后":"帖撒罗尼迦后书","提前":"提摩太前书","提后":"提摩太后书","多":"提多书","门":"腓利门书","来":"希伯来书","雅":"雅各书","彼前":"彼得前书","彼后":"彼得后书","约一":"约翰一书","约二":"约翰二书","约三":"约翰三书","犹":"犹大书","启":"启示录"
         }
-        for short, full in self.short_names.items():
-            if full in self.book_names:
-                self.book_codes[short.lower()] = full
 
     def _normalize_code(self, value):
         """统一搜索编码格式。"""
@@ -113,56 +110,20 @@ class BibleDatabase:
         return self.book_meta.get(book, {}).get("short", book[:1])
 
     def search_books(self, query):
-        """按简拼、简称或书名查找匹配书卷。"""
+        """只按书卷简拼搜索；输入必须是合法简拼的前缀。"""
         q = self._normalize_code(query)
-        if not q:
+        if not q or not re.fullmatch(r"[a-z]+", q):
             return []
 
-        # 已有完整编码时直接返回，避免继续进行模糊匹配。
-        if q in self.book_codes:
-            return [self.book_codes[q]]
-
-        # 英文/数字输入代表简拼或数字编号：只允许“前缀匹配”。
-        # 例如“smx”是“撒母耳记下”的合法简拼；“smejx”不是合法简拼，
-        # 即使它包含/接近完整拼音，也不能通过模糊匹配命中。
-        if re.fullmatch(r"[a-z0-9]+", q):
-            prefix_results = []
-            for book in self.book_names:
-                codes = [code for code, target in self.book_codes.items() if target == book]
-                pinyin = self._normalize_code(self.book_meta.get(book, {}).get("pinyin", ""))
-                short_name = self._short_name(book).lower()
-                if (
-                    pinyin.startswith(q)
-                    or any(code.startswith(q) for code in codes)
-                    or short_name.startswith(q)
-                ):
-                    if book not in prefix_results:
-                        prefix_results.append(book)
-            return prefix_results
-
-        # 中文书名/简称仍保留模糊搜索能力。
-        prefix_results = []
-        fuzzy_results = []
+        # 只搜索 Books.Pinyin 中定义的简拼，不搜索中文书名、中文简称或数字编号。
+        # 例如撒母耳记下的合法简拼为 smx：sm / smx 可以用于逐步筛选；
+        # sme、smej、smejx 均不能命中。
+        results = []
         for book in self.book_names:
-            codes = [code for code, target in self.book_codes.items() if target == book]
             pinyin = self._normalize_code(self.book_meta.get(book, {}).get("pinyin", ""))
-            short_name = self._short_name(book).lower()
-            book_name = book.lower()
-            is_prefix = (
-                pinyin.startswith(q)
-                or any(code.startswith(q) for code in codes)
-                or short_name.startswith(q)
-                or book_name.startswith(q)
-            )
-            is_fuzzy = (
-                q in book_name
-                or q in short_name
-            )
-            if is_prefix and book not in prefix_results:
-                prefix_results.append(book)
-            elif is_fuzzy and book not in fuzzy_results:
-                fuzzy_results.append(book)
-        return prefix_results + fuzzy_results
+            if pinyin and pinyin.startswith(q):
+                results.append(book)
+        return results
 
     def find_book(self, query):
         """返回搜索结果中的最佳匹配书卷。"""
