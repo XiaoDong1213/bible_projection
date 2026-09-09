@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import QPushButton
 
 from ui import scripture_search as _scripture_search
 from ui.scripture_result_compat import ScriptureResultWidget
-from ui.themes import THEMES, theme_tokens
+from ui.themes import THEMES
 
 # 旧版搜索面板使用了 text_disabled 令牌，而当前统一主题令牌已改为 text_faint。
 # 在兼容层补齐旧字段，避免恢复旧页面时破坏当前主题系统。
@@ -37,55 +37,17 @@ def install_scripture_search(window):
 
 
 def _polish_search_panel(widget):
-    """只调整旧搜索面板的视觉层，不触碰搜索逻辑。"""
-    t = theme_tokens(widget.theme)
-
-    radio_style = f"""
-        QRadioButton {{
-            background:{t['control']}; color:{t['text_muted']};
-            border:1px solid {t['border']}; border-radius:8px;
-            padding:6px 10px; spacing:0; font-size:12px;
-        }}
-        QRadioButton:hover {{
-            background:{t['control_hover']}; color:{t['text']};
-            border-color:{t['border_strong']};
-        }}
-        QRadioButton:checked {{
-            background:{t['accent_soft']}; color:{t['accent_text']};
-            border-color:{t['accent']}; font-weight:600;
-        }}
-        QRadioButton::indicator {{
-            width:0px; height:0px; margin:0; padding:0; border:none;
-        }}
-    """
+    """只调整旧搜索面板的尺寸与布局，不覆盖主题样式。"""
+    # 主题颜色统一由 ScriptureSearchWidget._apply_style() 管理。
+    # 这里不要再给子控件设置独立 stylesheet，否则主题切换后会残留旧主题颜色。
     for radio in (widget.fuzzy_radio, widget.exact_radio, widget.all_radio, widget.any_radio):
-        radio.setStyleSheet(radio_style)
         radio.setFixedHeight(32)
 
-    # 搜索行使用统一的 40px 控件高度，取消 QPushButton 的默认额外垂直空间。
     search_button = widget.findChild(QPushButton, "scriptureSearchButton")
     if search_button is not None:
         search_button.setFixedSize(82, 40)
-        search_button.setStyleSheet(f"""
-            QPushButton {{
-                background:{t['accent']}; color:#FFFFFF;
-                border:1px solid {t['accent']}; border-radius:9px;
-                padding:0; margin:0; font-size:14px; font-weight:600;
-            }}
-            QPushButton:hover {{ background:{t['accent_hover']}; }}
-            QPushButton:pressed {{ background:{t['accent']}; }}
-        """)
 
-    search_input = widget.search_input
-    search_input.setFixedHeight(40)
-    search_input.setStyleSheet(f"""
-        QLineEdit {{
-            background:{t['control']}; color:{t['text']};
-            border:1px solid {t['border']}; border-radius:9px;
-            padding:0 13px; margin:0; font-size:14px;
-        }}
-        QLineEdit:focus {{ border:1px solid {t['focus_ring']}; }}
-    """)
+    widget.search_input.setFixedHeight(40)
 
     # 恢复历史版本的结果节奏：容器 0/4/4/0，卡片之间 8px。
     widget.result_layout.setContentsMargins(0, 4, 4, 0)
