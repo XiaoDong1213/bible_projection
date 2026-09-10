@@ -2,11 +2,12 @@
 ; Copyright © 2026 XiaoDong and JiangRTTTR
 
 #define MyAppName "Bible Pro"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.5.0"
 #define MyAppPublisher "XiaoDong & JiangRTTTR"
 #define MyAppExeName "Bible Pro.exe"
-#define MyAppSourceDir "C:\Users\XiaoDong\Documents\GitHub\bible_projection\dist\Bible Pro"
-#define MyAppIcon "C:\Users\XiaoDong\Documents\GitHub\bible_projection\icon.ico"
+; Paths are relative to this .iss file (project root), so the script works on any machine.
+#define MyAppSourceDir AddBackslash(SourcePath) + "dist\Bible Pro"
+#define MyAppIcon AddBackslash(SourcePath) + "resources\icon.ico"
 #define MyAppUserModelId "XiaoDong.BibleProjection"
 
 [Setup]
@@ -19,6 +20,7 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 DisableProgramGroupPage=yes
+OutputDir=dist_installer
 OutputBaseFilename=Bible Pro_Setup
 SetupIconFile={#MyAppIcon}
 SolidCompression=yes

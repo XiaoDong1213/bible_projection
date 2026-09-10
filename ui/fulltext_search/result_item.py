@@ -3,7 +3,7 @@ import html
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout
 
-from .themes import theme_tokens
+from ui.themes import theme_tokens
 
 
 class ScriptureResultWidget(QFrame):

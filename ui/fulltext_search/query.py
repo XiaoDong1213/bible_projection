@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from .themes import theme_tokens
+from ui.themes import theme_tokens
 
 
 def search_scripture(db, keywords, fuzzy=True, match_all=True, books=None, limit=10, offset=0):

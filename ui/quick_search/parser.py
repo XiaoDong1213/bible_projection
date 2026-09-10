@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from ..selection import ScriptureSelection, VerseSpan
+from core.selection import ScriptureSelection, VerseSpan
 
 
 class SearchParser:

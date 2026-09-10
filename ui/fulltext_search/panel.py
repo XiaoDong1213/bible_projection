@@ -1,7 +1,8 @@
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QButtonGroup, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
-from .scripture_search import BookScopeDialog, ScriptureResultWidget, search_scripture
+from .query import BookScopeDialog, search_scripture
+from .result_item import ScriptureResultWidget
 
 
 class ScriptureSearchWidget(QWidget):
@@ -368,7 +369,7 @@ class ScriptureSearchWidget(QWidget):
             self._refresh_history()
 
     def _apply_style(self):
-        from .themes import theme_tokens
+        from ui.themes import theme_tokens
         t = theme_tokens(self.theme)
         self.setStyleSheet(f"""
         QWidget#scriptureSearchPanel {{ background:{t['surface_raised']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:14px; }}

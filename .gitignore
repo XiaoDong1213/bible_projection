@@ -9,18 +9,16 @@ venv/
 # 本地配置与运行产物
 config.ini
 
-# PyInstaller / Inno 产物（体积大，勿提交）
+# PyInstaller / Inno 产物
 build/
 dist/
 dist_installer/
-bible_projection.spec
-build.bat
-build_installer.bat
-installer.iss
-installer_assets/
-icon.ico
-app_paths.py
+
+# 本地临时
 .local_backup_keep/
+_tmp_*.py
+_patch_*.py
+_bootstrap_*.py
 
 # 编辑器 / 系统
 .idea/

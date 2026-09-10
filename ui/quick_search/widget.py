@@ -10,9 +10,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from .search import BookMatcher, SearchParser, SearchState
-from .selection import ScriptureSelection
-from .themes import search_panel_style
+from .book_matcher import BookMatcher
+from .parser import SearchParser
+from .state import SearchState
+from core.selection import ScriptureSelection
+from ui.themes import search_panel_style
 
 
 class SearchLineEdit(QLineEdit):

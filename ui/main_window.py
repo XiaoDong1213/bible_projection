@@ -1,19 +1,33 @@
-# 主窗口 - 业务逻辑层
-import os
-from pathlib import Path
+"""主窗口：业务逻辑（含方向键逻辑导航与扩展屏滚动同步）。"""
+
+from __future__ import annotations
 
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QHBoxLayout, QSplitter, QStatusBar, QLabel, QApplication,
-    QAbstractSpinBox, QLineEdit, QAbstractItemView, QTextEdit,
+    QMainWindow,
+    QWidget,
+    QHBoxLayout,
+    QSplitter,
+    QStatusBar,
+    QLabel,
+    QApplication,
+    QAbstractSpinBox,
+    QLineEdit,
+    QAbstractItemView,
+    QTextEdit,
 )
 from PyQt6.QtCore import Qt, QPoint, QTimer
 from PyQt6.QtGui import QKeySequence, QShortcut
 
-from config import AppConfig
-from bible_database import BibleDatabase
-from ui import SearchWidget, NavigationPanel, ToolBarWidget, ExtensionWindow, PreviewHost
+from core.config import AppConfig
+from core.database import BibleDatabase
+from core.selection import ScriptureSelection
+from core.logical import normalize_selection
+from core.paths import styles_dir
+from ui.quick_search import SearchWidget
+from ui.navigation import NavigationPanel
+from ui.toolbar import ToolBarWidget
+from ui.display import PreviewHost, ExtensionWindow
 from ui.themes import build_stylesheet, theme_tokens
-from ui.selection import ScriptureSelection
 
 
 class MainWindow(QMainWindow):
@@ -31,6 +45,7 @@ class MainWindow(QMainWindow):
         self.verses = []
         self.settings = config.load_display_settings()
         self.theme = self.settings.get("theme", "dark")
+        self._stylesheet_cache = ""
         self._last_speed = 3
         self.setWindowTitle("Bible Pro")
         self.setMinimumSize(800, 600)
@@ -50,6 +65,7 @@ class MainWindow(QMainWindow):
         self.nav_panel.history_changed.connect(self._save_history)
         self._apply_settings(self.settings)
 
+        # v1：16ms 定时 + scroll_changed 持续按比例同步副屏；副屏自身不滚
         self._extension_sync_timer = QTimer(self)
         self._extension_sync_timer.setInterval(16)
         self._extension_sync_timer.timeout.connect(self._sync_extension_scroll)
@@ -58,21 +74,17 @@ class MainWindow(QMainWindow):
         self.config.save_history(h)
 
     def _load_theme_style(self):
-        # 单一令牌源：themes.py 生成整表，写入 styles 便于打包查看
-        styles_dir = Path(__file__).resolve().parent / "styles"
-        sheet = build_stylesheet(self.theme, styles_dir)
-        try:
-            (styles_dir / f"{self.theme}.qss").write_text(sheet, encoding="utf-8")
-        except OSError:
-            pass
+        sheet = build_stylesheet(self.theme, styles_dir())
+        self._stylesheet_cache = sheet
         app = QApplication.instance()
-        app.setStyleSheet(sheet)
+        if app is not None:
+            app.setStyleSheet(sheet)
         tokens = theme_tokens(self.theme)
         if hasattr(self, "preview_host"):
             self.preview_host.apply_theme(tokens)
         if hasattr(self, "search_widget") and self.search_widget is not None:
             self.search_widget.apply_theme(self.theme)
-        if hasattr(self, "_scripture_search_widget") and self._scripture_search_widget is not None:
+        if getattr(self, "_scripture_search_widget", None) is not None:
             self._scripture_search_widget.apply_theme(self.theme)
 
     def _create_toolbar(self):
@@ -115,7 +127,6 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
     def _focus_blocks_nav_shortcuts(self):
-        """焦点在输入控件/列表时，不抢方向键、数字键、空格等。"""
         w = QApplication.focusWidget()
         if w is None:
             return False
@@ -128,10 +139,10 @@ class MainWindow(QMainWindow):
             if self._focus_blocks_nav_shortcuts():
                 return
             fn()
+
         return handler
 
     def _create_shortcuts(self):
-        # Enter/Esc/F12 全局可用；方向键/空格/数字在导航面板输入时让出
         bindings = [
             (Qt.Key.Key_Return, self._show_search, False),
             (Qt.Key.Key_Enter, self._show_search, False),
@@ -159,7 +170,6 @@ class MainWindow(QMainWindow):
         self.toolbar._set_speed(speed)
 
     def _on_scroll_finished(self):
-        # 自动滚到底后，工具栏同步为暂停
         self.toolbar._set_speed(0)
 
     def _create_statusbar(self):
@@ -179,7 +189,6 @@ class MainWindow(QMainWindow):
         self.nav_panel.set_verse_segmentation(enabled)
         if self.extension_window:
             self.extension_window.apply_settings(s)
-            QApplication.processEvents()
             self._sync_extension_scroll()
 
     def _on_theme_changed(self, t):
@@ -223,10 +232,8 @@ class MainWindow(QMainWindow):
         enabled = bool(e)
         self.settings["verse_segmentation"] = enabled
         self.scripture_display.set_verse_segmentation(enabled)
-        # 扩展屏同步分段状态
         if self.extension_window:
             self.extension_window.scripture_display.set_verse_segmentation(enabled)
-        QApplication.processEvents()
         self._sync_extension_scroll()
         self.config.save_display_settings({"verse_segmentation": enabled})
 
@@ -241,7 +248,6 @@ class MainWindow(QMainWindow):
         selection = self._coerce_selection(selection)
         if selection is None:
             return
-        # 从历史点开：只投影，不重排历史
         self._load_selection(selection)
 
     @staticmethod
@@ -255,7 +261,6 @@ class MainWindow(QMainWindow):
         return None
 
     def _load_scripture(self, b, c, s, e):
-        """兼容旧调用：单章范围。"""
         max_v = self.db.get_verse_count(b, c)
         if s is None:
             selection = ScriptureSelection.single_chapter(b, c, 1, max_v, max_verse=max_v)
@@ -265,6 +270,7 @@ class MainWindow(QMainWindow):
         self._load_selection(selection)
 
     def _load_selection(self, selection: ScriptureSelection):
+        selection = normalize_selection(self.db, selection)
         self.current_selection = selection
         self.current_book = selection.book
         self.current_chapter = selection.primary_chapter
@@ -290,7 +296,6 @@ class MainWindow(QMainWindow):
             self.status_label.setText("按回车键打开搜索")
 
     def _clear_display(self):
-        """清空预览与扩展屏经文。"""
         self.toolbar._set_speed(0)
         self.current_selection = None
         self.current_book = None
@@ -314,7 +319,6 @@ class MainWindow(QMainWindow):
             self.extension_window.hide()
             self._extension_sync_timer.stop()
             self.toolbar.set_extend_active(False)
-            # 保留最后一次副屏舞台尺寸，预览继续按该分辨率 letterbox，避免排版跳变
             self.status_label.setText("扩展显示已关闭（预览仍按副屏分辨率缩放）")
 
     def _show_extension(self):
@@ -330,7 +334,6 @@ class MainWindow(QMainWindow):
         else:
             self.extension_window.apply_topmost(topmost)
 
-        # 优先选非主屏作为投影屏
         primary = QApplication.primaryScreen()
         target = None
         for s in screens:
@@ -343,22 +346,18 @@ class MainWindow(QMainWindow):
         geom = target.geometry()
         stage_w, stage_h = geom.width(), geom.height()
 
-        # 预览与副屏使用同一舞台分辨率排版
         self.preview_host.set_stage_size(stage_w, stage_h)
         self.extension_window.scripture_display.set_stage_size(stage_w, stage_h)
         self.extension_window.setGeometry(geom)
         self.extension_window.showFullScreen()
         if self.verses and self.current_selection is not None:
-            self.extension_window.update_from_selection(
-                self.current_selection, self.verses
-            )
+            self.extension_window.update_from_selection(self.current_selection, self.verses)
         elif self.verses:
             self.extension_window.update_scripture(
                 self.current_book, self.current_chapter, self.current_start, self.current_end, self.verses
             )
         self.extension_window.set_scroll_speed(0)
         QApplication.processEvents()
-        # 舞台尺寸变化后预览文档高度会变，再同步一次滚动
         self.preview_host._fit_view()
         QApplication.processEvents()
         self._sync_extension_scroll()
@@ -391,65 +390,169 @@ class MainWindow(QMainWindow):
         else:
             self.toolbar._set_speed(getattr(self, "_last_speed", 3))
 
+    # --- 方向键：逻辑连续节导航（内联原 arrow_navigation_patch） ---
+
+    def _logical_range(self, book, chapter, verse):
+        label, _text = self.db.get_verse_display_info(book, chapter, verse)
+        text = str(label or "").strip()
+        if "-" in text:
+            start_text, end_text = text.split("-", 1)
+            try:
+                return int(start_text), int(end_text)
+            except ValueError:
+                pass
+        try:
+            value = int(text)
+        except ValueError:
+            value = int(verse)
+        return value, value
+
+    def _next_logical_start(self, book, chapter, verse):
+        _start, end = self._logical_range(book, chapter, verse)
+        candidate = end + 1
+        max_v = self.db.get_verse_count(book, chapter)
+        if candidate > max_v:
+            return None
+        start, _end = self._logical_range(book, chapter, candidate)
+        return start
+
+    def _previous_logical_range(self, book, chapter, verse):
+        start, _end = self._logical_range(book, chapter, verse)
+        candidate = start - 1
+        if candidate < 1:
+            return None
+        return self._logical_range(book, chapter, candidate)
+
+    def _current_scroll_y(self):
+        try:
+            return float(self.scripture_display.text_display.scroll_y())
+        except (AttributeError, TypeError, ValueError):
+            return 0.0
+
+    def _restore_scroll_y(self, scroll_y):
+        def restore():
+            self.scripture_display.text_display.set_scroll_y(scroll_y, emit=False)
+            self.scripture_display.update()
+            if self.extension_window and self.extension_window.isVisible():
+                self._sync_extension_scroll()
+
+        QTimer.singleShot(0, restore)
+
+    def _replace_history_selection(self, old_selection, new_selection):
+        history = getattr(self.nav_panel, "history", None)
+        if not history:
+            return
+        for index, item in enumerate(history):
+            if item == old_selection:
+                history[index] = new_selection
+                self.nav_panel._update_history_list(selected_index=index)
+                self.nav_panel.history_changed.emit(
+                    [entry.to_history_entry() for entry in history]
+                )
+                return
+
+    def _load_and_restore(self, selection, scroll_y):
+        old_selection = getattr(self, "current_selection", None)
+        self._load_selection(selection)
+        if old_selection is not None:
+            self._replace_history_selection(old_selection, self.current_selection)
+        self.nav_panel.sync_from_selection(self.current_selection)
+        self._restore_scroll_y(scroll_y)
+
     def _add_verse_end(self):
         selection = self._simple_selection_or_none()
         if selection is None:
             return
+        scroll_y = self._current_scroll_y()
         span = selection.spans[0]
-        max_v = self.db.get_verse_count(selection.book, span.chapter)
-        if span.end >= max_v:
+        next_start = self._next_logical_start(selection.book, span.chapter, span.end)
+        if next_start is None:
             return
-        self._load_selection(
+        self._load_and_restore(
             ScriptureSelection.single_chapter(
-                selection.book, span.chapter, span.start, span.end + 1
-            )
+                selection.book, span.chapter, span.start, next_start
+            ),
+            scroll_y,
         )
-        self.nav_panel.sync_from_selection(self.current_selection)
 
     def _remove_verse_end(self):
         selection = self._simple_selection_or_none()
         if selection is None:
             return
+        scroll_y = self._current_scroll_y()
         span = selection.spans[0]
-        if span.end <= span.start:
-            return
-        self._load_selection(
-            ScriptureSelection.single_chapter(
-                selection.book, span.chapter, span.start, span.end - 1
-            )
+        current_start, _current_end = self._logical_range(
+            selection.book, span.chapter, span.end
         )
-        self.nav_panel.sync_from_selection(self.current_selection)
+
+        if current_start > span.start:
+            new_end = current_start - 1
+            _prev_start, prev_end = self._logical_range(
+                selection.book, span.chapter, new_end
+            )
+            new_end = prev_end
+            if new_end < span.start:
+                return
+            target_start = span.start
+        else:
+            previous = self._previous_logical_range(
+                selection.book, span.chapter, current_start
+            )
+            if previous is None:
+                return
+            target_start, new_end = previous
+
+        self._load_and_restore(
+            ScriptureSelection.single_chapter(
+                selection.book, span.chapter, target_start, new_end
+            ),
+            scroll_y,
+        )
 
     def _add_verse_start(self):
         selection = self._simple_selection_or_none()
         if selection is None:
             return
+        scroll_y = self._current_scroll_y()
         span = selection.spans[0]
-        if span.start <= 1:
-            return
-        self._load_selection(
-            ScriptureSelection.single_chapter(
-                selection.book, span.chapter, span.start - 1, span.end
-            )
+        previous = self._previous_logical_range(
+            selection.book, span.chapter, span.start
         )
-        self.nav_panel.sync_from_selection(self.current_selection)
+        if previous is None:
+            return
+        prev_start, _prev_end = previous
+        self._load_and_restore(
+            ScriptureSelection.single_chapter(
+                selection.book, span.chapter, prev_start, span.end
+            ),
+            scroll_y,
+        )
 
     def _remove_verse_start(self):
         selection = self._simple_selection_or_none()
         if selection is None:
             return
+        scroll_y = self._current_scroll_y()
         span = selection.spans[0]
-        if span.start >= span.end:
-            return
-        self._load_selection(
-            ScriptureSelection.single_chapter(
-                selection.book, span.chapter, span.start + 1, span.end
-            )
+        start, end = self._logical_range(
+            selection.book, span.chapter, span.start
         )
-        self.nav_panel.sync_from_selection(self.current_selection)
+        if end >= span.end:
+            return
+        new_start = end + 1
+        new_start, _new_end = self._logical_range(
+            selection.book, span.chapter, new_start
+        )
+        if new_start > span.end:
+            return
+        self._load_and_restore(
+            ScriptureSelection.single_chapter(
+                selection.book, span.chapter, new_start, span.end
+            ),
+            scroll_y,
+        )
 
     def _simple_selection_or_none(self):
-        """扩缩节快捷键仅作用于单章单段；跨章/跳节时提示。"""
         if self.current_selection is None or not self.verses:
             return None
         if not self.current_selection.is_simple:
@@ -488,7 +591,6 @@ class MainWindow(QMainWindow):
             self._syncing_scroll = False
 
     def closeEvent(self, event):
-        # 退出时保存窗口几何并关闭数据库
         try:
             self.config.save_window_state(self.saveGeometry())
         except Exception:

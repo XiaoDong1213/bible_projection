@@ -6,6 +6,8 @@ Bible Pro 是一款基于 **Python + PyQt6 + SQLite** 构建的 Windows 桌面�
 
 软件采用 **主屏控制 + 副屏投影** 的模式：主屏用于选择和控制经文，副屏用于向投影仪、电视或第二显示器全屏展示经文。
 
+本仓库为 **v2 重构版**：功能对齐原版，代码按 `app` / `core` / `ui` / `resources` 分层，便于维护与打包。
+
 ---
 
 ## ✨ 当前功能
@@ -103,7 +105,7 @@ Bible Pro 当前提供独立的 **经文全文搜索** 模块，并通过功能�
 - 亮色模式。
 - 暗色模式。
 
-主题样式集中在 `styles/` 与 UI 主题模块中管理，搜索相关窗口也跟随当前主题适配。
+主题样式集中在 `resources/styles/` 与 `ui/themes/` 中管理，搜索相关窗口也跟随当前主题适配。
 
 ### 🕘 历史记录
 
@@ -137,7 +139,7 @@ Bible Pro 当前提供独立的 **经文全文搜索** 模块，并通过功能�
 
 ## 🧩 功能开关
 
-开发 / 发布阶段的独立功能通过 `feature_flags.py` 管理。
+开发 / 发布阶段的独立功能通过 `app/feature_flags.py` 管理。
 
 当前包括：
 
@@ -167,7 +169,7 @@ ENABLE_SCRIPTURE_TITLES = True
 | PyInstaller | Windows EXE 打包 |
 | Inno Setup 7 | Windows 安装程序制作 |
 
-项目采用模块化结构，将数据库、主窗口、导航、经文显示、搜索、历史记录、主题和扩展屏等职责拆分，便于继续维护和扩展。
+项目采用模块化结构：`app` 负责启动与功能开关，`core` 负责配置 / 数据库 / 选择模型，`ui` 负责界面与显示，`resources` 存放只读资源，便于继续维护和扩展。
 
 ---
 
@@ -176,26 +178,31 @@ ENABLE_SCRIPTURE_TITLES = True
 当前核心结构如下：
 
 ```text
-bible_projection/
-├── main.py                         # 程序入口
-├── main_window.py                  # 主窗口及核心流程
-├── bible_database.py               # 数据库及经文查询
-├── config.py                       # 配置、显示设置、历史数据
-├── feature_flags.py                # 功能开关
-├── scripture_search_integration.py # 经文全文搜索与主窗口集成
-├── 和合本.db                       # 经文数据库
-├── icon.ico                        # Windows 应用图标
-├── install.mark                    # 安装版识别标记
-├── styles/                         # 亮色 / 暗色 QSS 与图标资源
-├── ui/                             # UI 与显示模块
-│   ├── extension_window.py         # 扩展屏窗口
-│   ├── navigation_panel.py         # 书卷章节导航
-│   ├── preview_host.py             # 主屏预览
-│   ├── scripture_display.py        # 经文显示
-│   ├── scripture_search.py         # 经文全文搜索
-│   ├── scripture_search_legacy.py  # 兼容旧版搜索面板
-│   ├── history_item.py             # 历史记录项
-│   └── search/                     # 搜索解析与书卷匹配模块
+bible_projection_v2/
+├── main.py                         # 程序入口（转调 app.main）
+├── app/                            # 启动与功能开关
+│   ├── main.py
+│   └── feature_flags.py
+├── core/                           # 业务核心
+│   ├── config.py                   # 配置、显示设置、历史数据
+│   ├── database.py                 # 数据库及经文查询
+│   ├── selection.py                # 经文选择模型
+│   ├── logical.py                  # 逻辑连续节等
+│   └── paths.py                    # 资源 / 数据目录（含安装版）
+├── ui/                             # 界面模块
+│   ├── main_window.py              # 主窗口及核心流程
+│   ├── display/                    # 经文显示、主屏预览、扩展屏
+│   ├── navigation/                 # 书卷章节导航
+│   ├── quick_search/               # 快速定位（回车搜索）
+│   ├── fulltext_search/            # 经文全文搜索
+│   ├── toolbar/                    # 工具栏
+│   ├── themes/                     # 亮色 / 暗色主题
+│   └── history/                    # 历史记录项
+├── resources/                      # 只读资源
+│   ├── 和合本.db                   # 经文数据库
+│   ├── icon.ico                    # Windows 应用图标
+│   ├── install.mark                # 安装版识别标记
+│   └── styles/                     # QSS 图标等 SVG 资源
 ├── Bible Pro.spec                  # PyInstaller 打包配置
 ├── build_exe.bat                   # Windows EXE 打包脚本
 ├── Bible Pro.iss                   # Inno Setup 7 安装程序配置
@@ -213,7 +220,7 @@ bible_projection/
 ### 环境
 
 - Windows
-- Python 3.x
+- Python 3.10+
 - PyQt6
 
 安装依赖：
@@ -222,13 +229,21 @@ bible_projection/
 pip install PyQt6
 ```
 
-启动：
+在项目根目录 `bible_projection_v2` 下启动：
 
 ```bash
 python main.py
 ```
 
-运行时需要确保项目中的经文数据库及相关资源文件可被程序正确访问。
+或：
+
+```bash
+python -m app.main
+```
+
+运行时需要确保 `resources/` 中的经文数据库及相关资源文件可被程序正确访问。
+
+开发时配置写在项目根目录 `config.ini`；安装版（打包 EXE）配置在 `%APPDATA%\bible_projection\`。
 
 ---
 
@@ -259,7 +274,7 @@ dist/
 
 **用户配置、历史记录和窗口状态不应作为测试配置直接打入安装包。**
 
-程序安装后应使用用户自己的运行时配置，以避免开发环境中的测试设置被带入正式安装版本。
+`build_exe.bat` 会尽量删除 `dist` 中的个人配置文件。程序安装后应使用用户自己的运行时配置，以避免开发环境中的测试设置被带入正式安装版本。
 
 ---
 
@@ -275,10 +290,9 @@ Bible Pro.iss
 
 1. 运行 `build_exe.bat`。
 2. 检查 `dist/Bible Pro/` 中的 EXE 能够正常运行。
-3. 使用 Inno Setup 7 打开 `Bible Pro.iss`。
-4. 确认安装源目录指向当前 EXE 输出目录。
-5. 编译安装程序。
-6. 在输出目录取得最终安装包。
+3. 使用 Inno Setup 7 打开 `Bible Pro.iss`（源目录相对本仓库，无需改绝对路径）。
+4. 编译安装程序。
+5. 在 `dist_installer/` 取得最终安装包（`Bible Pro_Setup.exe`）。
 
 正式安装包只包含程序运行所需文件，不应包含开发环境中的用户配置和测试数据。
 
@@ -308,37 +322,6 @@ Bible Pro.iss
 7. 点击结果可定位到经文，也可以直接请求投影。
 
 搜索范围窗口支持旧约、新约书卷列表，并提供书卷筛选、全选和清空操作。
-
----
-
-## 🧱 开发说明
-
-项目目前处于持续整理和优化阶段。代码结构正在从较大的 UI / 业务文件逐步拆分为职责明确的模块。
-
-重点维护方向包括：
-
-- 经文搜索模块继续独立化。
-- 搜索输入解析与书卷匹配逻辑独立维护。
-- 主窗口与 UI 组件进一步解耦。
-- 亮色 / 暗色主题保持统一。
-- 双屏投影稳定性继续优化。
-- Windows 打包、安装和升级流程继续完善。
-- 功能开关用于控制尚处于开发或发布阶段的独立功能。
-
----
-
-## 🐛 问题反馈
-
-如果发现 Bug 或有功能建议，可以通过 GitHub Issues 提交。
-
-建议提供：
-
-- Bible Pro 版本。
-- Windows 系统版本。
-- 问题描述。
-- 复现步骤。
-- 截图或错误信息。
-- 如果涉及投影问题，同时说明显示器 / 投影仪的使用方式。
 
 ---
 

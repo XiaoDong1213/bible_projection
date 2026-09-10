@@ -1,25 +1,17 @@
+"""全文经文搜索面板挂载。"""
+
+from __future__ import annotations
+
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import QPushButton
 
-from ui import scripture_search as _scripture_search
-from ui.scripture_result_compat import ScriptureResultWidget
-from ui.themes import THEMES
-
-# 旧版搜索面板使用了 text_disabled 令牌，而当前统一主题令牌已改为 text_faint。
-# 在兼容层补齐旧字段，避免恢复旧页面时破坏当前主题系统。
-for _tokens in THEMES.values():
-    _tokens.setdefault("text_disabled", _tokens.get("text_faint", _tokens["text_muted"]))
-
-# 运行时向旧搜索模块注入兼容结果组件；使用 setattr 避免静态类型检查将其视为未知模块属性。
-setattr(_scripture_search, "ScriptureResultWidget", ScriptureResultWidget)
-
-from ui.scripture_search_legacy import ScriptureSearchWidget
-from ui.selection import ScriptureSelection
+from core.selection import ScriptureSelection
+from .panel import ScriptureSearchWidget
 
 
-def install_scripture_search(window):
-    """恢复旧版独立经文搜索面板，不修改原书卷章节搜索。"""
+def attach_fulltext_search(window):
+    """在主窗口工具栏挂载「经文搜索」按钮与 Ctrl+F。"""
     window._scripture_search_widget = None
 
     button = QPushButton("经文搜索")
@@ -37,20 +29,13 @@ def install_scripture_search(window):
 
 
 def _polish_search_panel(widget):
-    """只调整旧搜索面板的尺寸与布局，不覆盖主题样式。"""
-    # 主题颜色统一由 ScriptureSearchWidget._apply_style() 管理。
-    # 这里不要再给子控件设置独立 stylesheet，否则主题切换后会残留旧主题颜色。
-    # 单选按钮的高度由面板样式统一控制，不在这里覆盖，避免出现高度不一致。
     search_button = widget.findChild(QPushButton, "scriptureSearchButton")
     if search_button is not None:
         search_button.setFixedSize(82, 34)
 
     widget.search_input.setFixedHeight(44)
-
-    # 恢复历史版本的结果节奏：容器 0/4/4/0，卡片之间 8px。
     widget.result_layout.setContentsMargins(0, 4, 4, 0)
     widget.result_layout.setSpacing(8)
-
     widget.history_layout.setContentsMargins(4, 4, 4, 4)
     widget.history_layout.setSpacing(4)
 
@@ -68,8 +53,6 @@ def _toggle(window):
     widget.close_requested.connect(widget.close)
     _polish_search_panel(widget)
 
-    # 经文搜索面板由原来的 720px 缩小为 480px（缩小 1/3）。
-    # 显式解除旧面板的固定宽度限制，避免 resize() 被 setFixedWidth(720) 拒绝。
     panel_width = 480
     widget.setMinimumWidth(0)
     widget.setMaximumWidth(panel_width)

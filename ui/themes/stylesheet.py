@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from core.paths import styles_dir as default_styles_dir
+
 # ---------------------------------------------------------------------------
 # Design tokens
 # ---------------------------------------------------------------------------
@@ -109,7 +111,9 @@ THEMES = {
 
 def theme_tokens(name: str = "dark") -> dict:
     """返回主题令牌字典。"""
-    return THEMES.get(name, THEMES["dark"])
+    tokens = dict(THEMES.get(name, THEMES["dark"]))
+    tokens.setdefault("text_disabled", tokens.get("text_faint", tokens["text_muted"]))
+    return tokens
 
 
 def search_panel_style(name: str = "dark") -> str:
@@ -176,7 +180,7 @@ def build_stylesheet(name: str = "dark", styles_dir: str | Path | None = None) -
     """生成完整应用 QSS。"""
     t = theme_tokens(name)
     r = RADIUS
-    styles_dir = Path(styles_dir) if styles_dir else Path(__file__).resolve().parent.parent / "styles"
+    styles_dir = Path(styles_dir) if styles_dir else default_styles_dir()
     suffix = "dark" if name == "dark" else "light"
     # 使用正斜杠，避免 QSS url 在 Windows 上转义问题
     arrow_up = (styles_dir / f"arrow-up-{suffix}.svg").as_posix()
@@ -798,7 +802,7 @@ QToolTip {{
 
 def write_qss_files(styles_dir: str | Path | None = None) -> None:
     """把生成结果同步写回 styles/*.qss，便于打包与手工查看。"""
-    styles_dir = Path(styles_dir) if styles_dir else Path(__file__).resolve().parent.parent / "styles"
+    styles_dir = Path(styles_dir) if styles_dir else default_styles_dir()
     styles_dir.mkdir(parents=True, exist_ok=True)
     for name in ("dark", "light"):
         (styles_dir / f"{name}.qss").write_text(

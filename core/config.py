@@ -6,21 +6,16 @@ from configparser import ConfigParser
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QMessageBox
 
+from .paths import app_dir, data_dir
+
 
 class AppConfig:
     """管理程序配置、窗口状态和搜索历史。"""
 
     def __init__(self):
-        self.app_root = Path(__file__).parent.resolve()
+        self.app_root = app_dir()
         self.is_frozen = bool(getattr(sys, "frozen", False))
-        if self.is_frozen:
-            if sys.platform == "win32":
-                base = Path(os.environ.get("APPDATA", str(Path.home())))
-            else:
-                base = Path.home()
-            self.data_dir = base / "bible_projection"
-        else:
-            self.data_dir = self.app_root
+        self.data_dir = data_dir()
         self.ini_path = self.data_dir / "config.ini"
         self.parser = ConfigParser()
         self._ensure_data_dir()
