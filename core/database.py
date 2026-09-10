@@ -2,18 +2,36 @@ import os
 import re
 import sqlite3
 
+from .paths import database_path
+
 
 class BibleDatabase:
-    """负责数据库连接、书卷索引和经文查询。"""
+    """负责数据库连接、书卷索引和经文查询（带章级缓存）。"""
 
     def __init__(self, db_path=None):
         if db_path is None:
-            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "和合本.db")
+            db_path = str(database_path())
         self.db_path = db_path
         self.conn = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row
+        try:
+            self.conn.execute("PRAGMA cache_size=-8000")
+        except sqlite3.Error:
+            pass
+        self._chapter_logical_cache = {}
+        self._chapter_titles_cache = {}
         self._inspect_database()
         self._build_book_index()
+
+    def close(self):
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+
+    def clear_caches(self):
+        self._chapter_logical_cache.clear()
+        self._chapter_titles_cache.clear()
 
     def _inspect_database(self):
         tables = self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
@@ -81,7 +99,12 @@ class BibleDatabase:
 
     def get_chapter_titles(self, book_name, chapter):
         """返回指定章节的小标题，键为标题所属节号。"""
+        key = (str(book_name), int(chapter))
+        cached = self._chapter_titles_cache.get(key)
+        if cached is not None:
+            return cached
         if not self.titles_table:
+            self._chapter_titles_cache[key] = {}
             return {}
         cols = self.title_columns
         book_value = self.book_meta.get(book_name, {}).get("id", book_name)
@@ -101,6 +124,7 @@ class BibleDatabase:
             title = self._clean_scripture_title(row["title"])
             if title:
                 result.setdefault(verse, []).append(title)
+        self._chapter_titles_cache[key] = result
         return result
 
     def _quote(self, name):
@@ -219,8 +243,12 @@ class BibleDatabase:
         """判断是否为数据库中表示前一节延续关系的纯横线。"""
         return str(text or "").strip() in {"-", "–", "—", "―", "－"}
 
-    def get_logical_verses(self, book_name, chapter, start_verse=None, end_verse=None):
-        """读取章节并转换为逻辑经文单位。"""
+    def _load_chapter_logical(self, book_name, chapter):
+        """整章逻辑节，按 (book, chapter) 缓存。"""
+        key = (str(book_name), int(chapter))
+        cached = self._chapter_logical_cache.get(key)
+        if cached is not None:
+            return cached
         book_value = self.book_meta.get(book_name, {}).get("id", book_name)
         sql = (
             f"SELECT {self._quote(self.verse_col)} AS verse, {self._quote(self.text_col)} AS text "
@@ -244,18 +272,31 @@ class BibleDatabase:
                 logical_end = current["end"]
                 logical_text = current["text"]
                 if not (logical_start == logical_end and current.get("placeholder")):
-                    if (start_verse is None or logical_end >= int(start_verse)) and (end_verse is None or logical_start <= int(end_verse)):
-                        label = str(logical_start) if logical_start == logical_end else f"{logical_start}-{logical_end}"
-                        result.append((label, logical_text, logical_start, logical_end))
+                    label = str(logical_start) if logical_start == logical_end else f"{logical_start}-{logical_end}"
+                    result.append((label, logical_text, logical_start, logical_end))
             current = {"start": verse, "end": verse, "text": text, "placeholder": False}
         if current is not None:
             logical_start = current["start"]
             logical_end = current["end"]
             logical_text = current["text"]
             if not (logical_start == logical_end and current.get("placeholder")):
-                if (start_verse is None or logical_end >= int(start_verse)) and (end_verse is None or logical_start <= int(end_verse)):
-                    label = str(logical_start) if logical_start == logical_end else f"{logical_start}-{logical_end}"
-                    result.append((label, logical_text, logical_start, logical_end))
+                label = str(logical_start) if logical_start == logical_end else f"{logical_start}-{logical_end}"
+                result.append((label, logical_text, logical_start, logical_end))
+        self._chapter_logical_cache[key] = result
+        return result
+
+    def get_logical_verses(self, book_name, chapter, start_verse=None, end_verse=None):
+        """读取章节并转换为逻辑经文单位。"""
+        chapter_rows = self._load_chapter_logical(book_name, chapter)
+        if start_verse is None and end_verse is None:
+            return list(chapter_rows)
+        result = []
+        for label, logical_text, logical_start, logical_end in chapter_rows:
+            if start_verse is not None and logical_end < int(start_verse):
+                continue
+            if end_verse is not None and logical_start > int(end_verse):
+                continue
+            result.append((label, logical_text, logical_start, logical_end))
         return result
 
     def get_verse_display_info(self, book_name, chapter, verse):

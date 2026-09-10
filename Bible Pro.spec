@@ -1,25 +1,31 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_submodules
+
 project_root = Path(SPECPATH)
+resources = project_root / "resources"
 
 # Only package files required by the application.
 # User configuration (config.ini) is intentionally NOT included.
 a = Analysis(
-    ['main.py'],
+    ["main.py"],
     pathex=[str(project_root)],
     binaries=[],
     datas=[
-        (str(project_root / '和合本.db'), '.'),
-        (str(project_root / 'icon.ico'), '.'),
-        (str(project_root / 'styles'), 'styles'),
-        (str(project_root / 'install.mark'), '.'),
+        (str(resources / "和合本.db"), "."),
+        (str(resources / "icon.ico"), "."),
+        (str(resources / "styles"), "styles"),
+        (str(resources / "install.mark"), "."),
     ],
     hiddenimports=[
-        'PyQt6',
-        'PyQt6.QtCore',
-        'PyQt6.QtGui',
-        'PyQt6.QtWidgets',
+        "PyQt6",
+        "PyQt6.QtCore",
+        "PyQt6.QtGui",
+        "PyQt6.QtWidgets",
+        *collect_submodules("app"),
+        *collect_submodules("core"),
+        *collect_submodules("ui"),
     ],
     hookspath=[],
     hooksconfig={},
@@ -35,7 +41,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='Bible Pro',
+    name="Bible Pro",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -46,8 +52,8 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(project_root / 'icon.ico'),
-    version=str(project_root / 'file_version_info.txt'),
+    icon=str(resources / "icon.ico"),
+    version=str(project_root / "file_version_info.txt"),
 )
 
 coll = COLLECT(
@@ -57,5 +63,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='Bible Pro',
+    name="Bible Pro",
 )

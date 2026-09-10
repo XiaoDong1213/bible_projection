@@ -4,8 +4,9 @@ from PyQt6.QtWidgets import (
     QLineEdit, QStackedWidget, QButtonGroup, QApplication,
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
-from .history_item import HistoryListWidget
-from .selection import ScriptureSelection
+from core.selection import ScriptureSelection
+from core.logical import normalize_selection
+from ui.history.items import HistoryListWidget
 
 
 class VisibleSpinBox(QSpinBox):
@@ -519,6 +520,7 @@ class NavigationPanel(QWidget):
 
     def sync_from_selection(self, selection: ScriptureSelection):
         """按选择同步左侧模式与控件。"""
+        selection = normalize_selection(self.db, selection)
         self._history_updating = True
         try:
             self.selected_book = selection.book
@@ -612,7 +614,7 @@ class NavigationPanel(QWidget):
         for entry in history_list or []:
             selection = ScriptureSelection.from_history_entry(entry)
             if selection is not None:
-                self.history.append(selection)
+                self.history.append(normalize_selection(self.db, selection))
         self.history = self.history[:30]
         self._update_history_list()
 
@@ -630,6 +632,7 @@ class NavigationPanel(QWidget):
     def add_selection_to_history(self, selection: ScriptureSelection):
         if selection is None:
             return
+        selection = normalize_selection(self.db, selection)
         self.history = [
             item for item in self.history
             if not (

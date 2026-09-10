@@ -180,6 +180,7 @@ class ScriptureDisplay(QWidget):
     def set_scroll_position(self,value): self.text_display.set_scroll_y(value)
     def set_scroll_fraction(self,fraction): self.text_display.set_scroll_fraction(fraction)
     def scroll_by(self,delta): self.text_display.scroll_by(delta)
+    def force_scroll_to(self,value): self.set_scroll_position(value)
     def set_scroll_speed(self,speed):
         try:speed=max(0,min(9,int(speed)))
         except (TypeError,ValueError):speed=0

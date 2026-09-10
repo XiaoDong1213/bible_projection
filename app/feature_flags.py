@@ -1,0 +1,4 @@
+"""开发/发布功能开关。"""
+
+ENABLE_SCRIPTURE_SEARCH = True
+ENABLE_SCRIPTURE_TITLES = True

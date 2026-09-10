@@ -3,7 +3,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPainter, QColor, QBrush
 
 from .scripture_display import ScriptureDisplay
-from .themes import theme_tokens
+from ui.themes import theme_tokens
 
 
 class PreviewHost(QWidget):
