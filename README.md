@@ -227,7 +227,7 @@ bible_projection_v2/
 pip install PyQt6
 ```
 
-在项目根目录 `bible_projection_v2` 下启动：
+在项目根目录 `bible_projection` 下启动：
 
 ```bash
 python main.py
