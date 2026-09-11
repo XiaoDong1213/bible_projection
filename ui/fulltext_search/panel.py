@@ -1,17 +1,87 @@
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QButtonGroup, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QFontMetrics
+from PyQt6.QtWidgets import (
+    QDialog,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
-from .query import BookScopeDialog, search_scripture
+from .query import BookScopeDialog, normalize_search_query, search_scripture
 from .result_item import ScriptureResultWidget
 
 
+class HistoryChipWidget(QWidget):
+    """胶囊形历史词条：点胶囊再搜，右上角小叉单条删除。"""
+
+    activated = pyqtSignal(str)
+    delete_requested = pyqtSignal(str)
+
+    def __init__(self, text, label, parent=None):
+        super().__init__(parent)
+        self._text = text
+        self.setObjectName("historyChip")
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setFixedHeight(30)
+        self.setMinimumWidth(48)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(text)
+
+        self._label = QLabel(label)
+        self._label.setObjectName("historyChipLabel")
+        self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+        self._delete = QPushButton("×")
+        self._delete.setObjectName("historyChipDelete")
+        self._delete.setFixedSize(14, 14)
+        self._delete.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._delete.setToolTip("删除这条记录")
+        self._delete.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._delete.setFlat(True)
+        self._delete.clicked.connect(lambda: self.delete_requested.emit(self._text))
+
+        grid = QGridLayout(self)
+        grid.setContentsMargins(12, 0, 2, 0)
+        grid.setSpacing(0)
+        grid.addWidget(self._label, 0, 0, Qt.AlignmentFlag.AlignCenter)
+        grid.addWidget(
+            self._delete,
+            0,
+            0,
+            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight,
+        )
+
+    def sizeHint(self):
+        fm = QFontMetrics(self._label.font())
+        w = fm.horizontalAdvance(self._label.text()) + 30
+        return QSize(max(48, w), 30)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            if not self._delete.geometry().contains(event.pos()):
+                self.activated.emit(self._text)
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+
 class ScriptureSearchWidget(QWidget):
-    """恢复 676fa674 版本的经文搜索侧边面板外观与交互。"""
+    """经文全文搜索侧边面板。"""
 
     result_activated = pyqtSignal(object)
     result_project_requested = pyqtSignal(object)
     close_requested = pyqtSignal()
     PAGE_SIZE = 10
+    PANEL_WIDTH = 520
+    INPUT_HEIGHT = 40
 
     def __init__(self, db, config=None, parent=None, theme="dark"):
         super().__init__(parent)
@@ -24,143 +94,97 @@ class ScriptureSearchWidget(QWidget):
         self.selected_books = set()
         self.history = (config.load_scripture_search_history() if config else [])[:10]
         self.setObjectName("scriptureSearchPanel")
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
-        self.setFixedWidth(720)
+        self.setFixedWidth(self.PANEL_WIDTH)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         self._build_ui()
         self._apply_style()
         self._update_scope_text()
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 18, 20, 16)
-        root.setSpacing(12)
+        root.setContentsMargins(16, 14, 16, 12)
+        root.setSpacing(10)
 
+        # —— 标题 ——
         header = QHBoxLayout()
+        header.setSpacing(8)
         title_box = QVBoxLayout()
         title_box.setSpacing(2)
         title = QLabel("经文搜索")
         title.setObjectName("scriptureSearchTitle")
         title_box.addWidget(title)
-        subtitle = QLabel("搜索整本圣经中的经文，快速定位、复制或投影")
+        subtitle = QLabel("Ctrl + F · 定位 / 复制 / 投影")
         subtitle.setObjectName("scriptureSearchSubtitle")
         title_box.addWidget(subtitle)
         header.addLayout(title_box, 1)
         close = QPushButton("×")
         close.setObjectName("scriptureSearchClose")
-        close.setFixedSize(34, 34)
+        close.setFixedSize(36, 36)
+        close.setFlat(True)
         close.setCursor(Qt.CursorShape.PointingHandCursor)
+        close.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         close.clicked.connect(self.close_requested.emit)
         header.addWidget(close, 0, Qt.AlignmentFlag.AlignTop)
         root.addLayout(header)
 
-        self.condition_toggle = QPushButton("搜索条件  ▲")
-        self.condition_toggle.setObjectName("searchConditionToggle")
-        self.condition_toggle.setFlat(True)
-        self.condition_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.condition_toggle.clicked.connect(self._toggle_conditions)
-        root.addWidget(self.condition_toggle)
-
-        self.condition_box = QWidget()
-        self.condition_box.setObjectName("scriptureConditionBox")
-        condition = QVBoxLayout(self.condition_box)
-        condition.setContentsMargins(14, 14, 14, 14)
-        condition.setSpacing(10)
-
+        # —— 搜索条（常驻）——
         search_row = QHBoxLayout()
         search_row.setSpacing(8)
         self.search_input = QLineEdit()
         self.search_input.setObjectName("scriptureSearchInput")
-        self.search_input.setPlaceholderText("输入经文关键词，例如：爱 盼望")
-        self.search_input.setFixedHeight(44)
+        self.search_input.setPlaceholderText("例如：爱永不止息（可漏字）")
+        self.search_input.setFixedHeight(self.INPUT_HEIGHT)
         self.search_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.search_input.returnPressed.connect(self.search)
-        search_row.addWidget(self.search_input, 1, Qt.AlignmentFlag.AlignVCenter)
-        search_btn = QPushButton("搜索")
-        search_btn.setObjectName("scriptureSearchButton")
-        search_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        search_btn.setFixedSize(82, 30)
-        search_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        search_btn.clicked.connect(self.search)
-        search_row.addWidget(search_btn, 0, Qt.AlignmentFlag.AlignVCenter)
-        condition.addLayout(search_row)
+        search_row.addWidget(self.search_input, 1)
 
+        self.search_btn = QPushButton("搜索")
+        self.search_btn.setObjectName("scriptureSearchButton")
+        self.search_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.search_btn.setFixedSize(80, self.INPUT_HEIGHT)
+        self.search_btn.clicked.connect(self.search)
+        search_row.addWidget(self.search_btn)
+        root.addLayout(search_row)
+
+        # —— 范围 ——
         options = QHBoxLayout()
-        options.setSpacing(8)
-        match_label = QLabel("匹配方式")
-        match_label.setObjectName("conditionLabel")
-        options.addWidget(match_label)
-        self.fuzzy_radio = QRadioButton("模糊")
-        self.exact_radio = QRadioButton("精确")
-        self.fuzzy_radio.setObjectName("searchOption")
-        self.exact_radio.setObjectName("searchOption")
-        self.fuzzy_radio.setChecked(True)
-        self.match_group = QButtonGroup(self)
-        self.match_group.addButton(self.fuzzy_radio)
-        self.match_group.addButton(self.exact_radio)
-        options.addWidget(self.fuzzy_radio)
-        options.addWidget(self.exact_radio)
-        keyword_label = QLabel("多关键词")
-        keyword_label.setObjectName("conditionLabel")
-        options.addSpacing(8)
-        options.addWidget(keyword_label)
-        self.all_radio = QRadioButton("同时包含")
-        self.any_radio = QRadioButton("任意包含")
-        self.all_radio.setObjectName("searchOption")
-        self.any_radio.setObjectName("searchOption")
-        self.all_radio.setChecked(True)
-        self.keyword_group = QButtonGroup(self)
-        self.keyword_group.addButton(self.all_radio)
-        self.keyword_group.addButton(self.any_radio)
-        options.addWidget(self.all_radio)
-        options.addWidget(self.any_radio)
-        options.addStretch(1)
-        condition.addLayout(options)
+        options.setSpacing(6)
+        hint = QLabel("按字顺序匹配，中间可漏字")
+        hint.setObjectName("searchMatchHint")
+        options.addWidget(hint, 1)
 
-        scope_row = QHBoxLayout()
-        scope_row.setSpacing(8)
-        scope_label = QLabel("搜索范围")
-        scope_label.setObjectName("conditionLabel")
-        scope_row.addWidget(scope_label)
         self.scope_btn = QPushButton("全部书卷")
         self.scope_btn.setObjectName("scriptureScopeButton")
         self.scope_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.scope_btn.setFixedHeight(30)
         self.scope_btn.clicked.connect(self._choose_scope)
-        scope_row.addWidget(self.scope_btn, 1)
-        condition.addLayout(scope_row)
+        options.addWidget(self.scope_btn)
+        root.addLayout(options)
 
-        history_head = QHBoxLayout()
-        history_head.setSpacing(8)
-        history_label = QLabel("最近搜索")
+        # —— 最近搜索（横向 chip）——
+        history_row = QHBoxLayout()
+        history_row.setSpacing(6)
+        history_label = QLabel("最近")
         history_label.setObjectName("searchHistoryLabel")
-        history_head.addWidget(history_label, 1)
+        history_row.addWidget(history_label)
+
+        self.history_chips = QWidget()
+        self.history_chips.setObjectName("scriptureHistoryChips")
+        self.history_layout = QHBoxLayout(self.history_chips)
+        self.history_layout.setContentsMargins(0, 0, 0, 0)
+        self.history_layout.setSpacing(6)
+        self.history_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        history_row.addWidget(self.history_chips, 1)
+
         self.clear_history_btn = QPushButton("清空")
         self.clear_history_btn.setObjectName("historyClearButton")
         self.clear_history_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.clear_history_btn.clicked.connect(self._clear_history)
-        history_head.addWidget(self.clear_history_btn)
-        condition.addLayout(history_head)
-
-        self.history_scroll = QScrollArea()
-        self.history_scroll.setObjectName("scriptureHistoryScroll")
-        self.history_scroll.setWidgetResizable(True)
-        self.history_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.history_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.history_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.history_scroll.setFixedHeight(190)
-
-        self.history_container = QWidget()
-        self.history_container.setObjectName("scriptureHistoryContainer")
-        self.history_layout = QVBoxLayout(self.history_container)
-        self.history_layout.setContentsMargins(4, 4, 4, 4)
-        self.history_layout.setSpacing(4)
-        self.history_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.history_scroll.setWidget(self.history_container)
-        condition.addWidget(self.history_scroll)
+        history_row.addWidget(self.clear_history_btn)
+        root.addLayout(history_row)
         self._refresh_history()
 
-        root.addWidget(self.condition_box)
-
+        # —— 结果区 ——
         result_top = QHBoxLayout()
         self.result_header = QLabel("搜索结果")
         self.result_header.setObjectName("scriptureResultHeader")
@@ -202,10 +226,12 @@ class ScriptureSearchWidget(QWidget):
         root.addLayout(pager)
         self._update_pager()
 
-    def _toggle_conditions(self):
-        visible = not self.condition_box.isVisible()
-        self.condition_box.setVisible(visible)
-        self.condition_toggle.setText("搜索条件  ▲" if visible else "搜索条件  ▼")
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.close_requested.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def _choose_scope(self):
         dialog = BookScopeDialog(self.db, self.selected_books, self, self.theme)
@@ -220,27 +246,32 @@ class ScriptureSearchWidget(QWidget):
         elif len(self.selected_books) == 1:
             self.scope_btn.setText(next(iter(self.selected_books)))
         else:
-            self.scope_btn.setText(f"已选择 {len(self.selected_books)} 卷")
+            self.scope_btn.setText(f"已选 {len(self.selected_books)} 卷")
 
-    def _keywords(self):
-        raw = self.search_input.text().strip()
-        return [x for x in raw.replace("，", " ").split() if x]
+    def _query_text(self):
+        return self.search_input.text().strip()
 
-    def search(self):
-        keywords = self._keywords()
-        if not keywords:
+    def _highlight_terms(self):
+        """高亮用：规范化后的每个字。"""
+        return list(normalize_search_query(self._query_text()))
+
+    def search(self, remember=True):
+        query = self._query_text()
+        if not normalize_search_query(query):
             self.result_header.setText("请输入关键词")
             self.result_hint.setText("")
             return
-        self._remember_search(self.search_input.text().strip())
+        if remember:
+            self._remember_search(query)
         self.page = 0
-        self.total, self.results = search_scripture(self.db, keywords, self.fuzzy_radio.isChecked(), self.all_radio.isChecked(), self.selected_books or None, self.PAGE_SIZE, 0)
-        self._render_results(keywords)
-        self._toggle_conditions_closed()
-
-    def _toggle_conditions_closed(self):
-        self.condition_box.setVisible(False)
-        self.condition_toggle.setText("搜索条件  ▼")
+        self.total, self.results = search_scripture(
+            self.db,
+            query,
+            self.selected_books or None,
+            self.PAGE_SIZE,
+            0,
+        )
+        self._render_results(self._highlight_terms())
 
     def _render_results(self, keywords):
         while self.result_layout.count():
@@ -251,14 +282,14 @@ class ScriptureSearchWidget(QWidget):
         if not self.results:
             empty = QWidget()
             empty_layout = QVBoxLayout(empty)
-            empty_layout.setContentsMargins(20, 50, 20, 50)
+            empty_layout.setContentsMargins(20, 40, 20, 40)
             icon = QLabel("⌕")
             icon.setObjectName("scriptureEmptyIcon")
             icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
             title = QLabel("没有找到相关经文")
             title.setObjectName("scriptureEmptyTitle")
             title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            hint = QLabel("换一个关键词试试，或扩大搜索范围")
+            hint = QLabel("换个关键词，或扩大搜索范围")
             hint.setObjectName("scriptureEmptyHint")
             hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
             empty_layout.addWidget(icon)
@@ -273,28 +304,39 @@ class ScriptureSearchWidget(QWidget):
                 card.project_requested.connect(self.result_project_requested.emit)
                 self.result_layout.addWidget(card)
             self.result_layout.addStretch(1)
-        self.result_header.setText(f"搜索结果  ·  找到 {self.total} 条")
-        self.result_hint.setText("点击经文标题可定位")
+        self.result_header.setText(f"搜索结果 · {self.total} 条")
+        self.result_hint.setText("点击标题定位")
         self._update_pager()
         self.result_scroll.verticalScrollBar().setValue(0)
 
     def _copy_result(self, result):
         from PyQt6.QtWidgets import QApplication
+
         label = result.get("verse_label", result.get("verse"))
-        QApplication.clipboard().setText(f"{result['book']} {result['chapter']}:{label} {result['text']}")
+        QApplication.clipboard().setText(
+            f"{result['book']} {result['chapter']}:{label} {result['text']}"
+        )
 
     def load_page(self, page):
-        keywords = self._keywords()
-        if not keywords:
+        query = self._query_text()
+        if not normalize_search_query(query):
             return
         pages = max(1, (self.total + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
         self.page = max(0, min(page, pages - 1))
-        _, self.results = search_scripture(self.db, keywords, self.fuzzy_radio.isChecked(), self.all_radio.isChecked(), self.selected_books or None, self.PAGE_SIZE, self.page * self.PAGE_SIZE)
-        self._render_results(keywords)
+        _, self.results = search_scripture(
+            self.db,
+            query,
+            self.selected_books or None,
+            self.PAGE_SIZE,
+            self.page * self.PAGE_SIZE,
+        )
+        self._render_results(self._highlight_terms())
 
     def _update_pager(self):
         pages = max(1, (self.total + self.PAGE_SIZE - 1) // self.PAGE_SIZE) if self.total else 0
-        self.page_label.setText(f"第 {self.page + 1} / {pages} 页" if pages else "第 0 / 0 页")
+        self.page_label.setText(
+            f"第 {self.page + 1} / {pages} 页" if pages else "第 0 / 0 页"
+        )
         self.prev_btn.setEnabled(self.page > 0)
         self.next_btn.setEnabled(bool(pages) and self.page < pages - 1)
 
@@ -315,36 +357,32 @@ class ScriptureSearchWidget(QWidget):
                 widget.deleteLater()
 
         self.clear_history_btn.setEnabled(bool(self.history))
-        for text in self.history[:10]:
-            row = QFrame()
-            row.setObjectName("scriptureHistoryRow")
-            row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            row.setFixedHeight(36)
+        if not self.history:
+            empty = QLabel("暂无")
+            empty.setObjectName("historyEmptyLabel")
+            self.history_layout.addWidget(empty)
+            self.history_layout.addStretch(1)
+            return
 
-            layout = QHBoxLayout(row)
-            layout.setContentsMargins(10, 2, 6, 2)
-            layout.setSpacing(6)
+        # 横向胶囊，最多显示 6 条；右上角小叉可单条删除
+        for text in self.history[:6]:
+            chip = HistoryChipWidget(text, self._chip_label(text))
+            chip.activated.connect(self._use_history_text)
+            chip.delete_requested.connect(self._delete_history)
+            self.history_layout.addWidget(chip)
+        self.history_layout.addStretch(1)
 
-            use_btn = QPushButton(text)
-            use_btn.setObjectName("historyUseButton")
-            use_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            use_btn.setToolTip("使用此搜索")
-            use_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-            use_btn.clicked.connect(lambda _, value=text: self._use_history_text(value))
-            layout.addWidget(use_btn, 1)
-
-            delete_btn = QPushButton("×")
-            delete_btn.setObjectName("historyDeleteButton")
-            delete_btn.setFixedSize(26, 26)
-            delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            delete_btn.setToolTip("删除此搜索")
-            delete_btn.clicked.connect(lambda _, value=text: self._delete_history(value))
-            layout.addWidget(delete_btn)
-            self.history_layout.addWidget(row)
+    @staticmethod
+    def _chip_label(text):
+        value = str(text or "").strip()
+        if len(value) <= 8:
+            return value
+        return value[:7] + "…"
 
     def _use_history_text(self, text):
         self.search_input.setText(text)
-        self.search()
+        # 点历史只重搜，不把该项挪到最前，避免胶囊乱跳
+        self.search(remember=False)
 
     def _delete_history(self, text):
         self.history = [x for x in self.history if x != text]
@@ -364,56 +402,103 @@ class ScriptureSearchWidget(QWidget):
         self.theme = theme if theme in ("dark", "light") else "dark"
         self._apply_style()
         if self.results:
-            self._render_results(self._keywords())
+            self._render_results(self._highlight_terms())
         else:
             self._refresh_history()
 
     def _apply_style(self):
         from ui.themes import theme_tokens
+
         t = theme_tokens(self.theme)
-        self.setStyleSheet(f"""
-        QWidget#scriptureSearchPanel {{ background:{t['surface_raised']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:14px; }}
-        QLabel#scriptureSearchTitle {{ color:{t['text']}; font-size:19px; font-weight:600; }}
+        self.setStyleSheet(
+            f"""
+        QWidget#scriptureSearchPanel {{
+            background:{t['surface_raised']}; color:{t['text']};
+            border:none; border-left:1px solid {t['border']}; border-radius:0;
+        }}
+        QLabel#scriptureSearchTitle {{ color:{t['text']}; font-size:18px; font-weight:600; }}
         QLabel#scriptureSearchSubtitle {{ color:{t['text_muted']}; font-size:12px; }}
-        QPushButton#scriptureSearchClose {{ background:transparent; color:{t['text_muted']}; border:none; font-size:22px; }}
-        QPushButton#scriptureSearchClose:hover {{ background:{t['control_hover']}; color:{t['text']}; }}
-        QPushButton#searchConditionToggle {{ background:transparent; color:{t['text_muted']}; border:none; padding:2px 4px; text-align:left; font-size:12px; font-weight:600; }}
-        QPushButton#searchConditionToggle:hover {{ color:{t['accent']}; }}
-        QWidget#scriptureConditionBox {{ background:{t['surface_sunken']}; border:1px solid {t['border']}; border-radius:11px; }}
-        QLineEdit#scriptureSearchInput {{ background:{t['control']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:9px; padding:0 13px; height:44px; min-height:44px; max-height:44px; font-size:14px; }}
+        QPushButton#scriptureSearchClose {{
+            background:transparent; color:{t['text_muted']}; border:none;
+            padding:0; margin:0; min-width:36px; max-width:36px;
+            min-height:36px; max-height:36px; font-size:22px; font-weight:500;
+        }}
+        QPushButton#scriptureSearchClose:hover {{
+            background:{t['control_hover']}; color:{t['text']}; border-radius:8px;
+        }}
+        QLineEdit#scriptureSearchInput {{
+            background:{t['control']}; color:{t['text']}; border:1px solid {t['border']};
+            border-radius:9px; padding:0 12px; font-size:14px;
+        }}
         QLineEdit#scriptureSearchInput:focus {{ border:1px solid {t['focus_ring']}; }}
-        QPushButton#scriptureSearchButton {{ background:{t['accent']}; color:#FFFFFF; border:1px solid {t['accent']}; border-radius:9px; min-width:82px; max-width:82px; height:30px; min-height:30px; max-height:30px; font-size:14px; font-weight:600; }}
+        QPushButton#scriptureSearchButton {{
+            background:{t['accent']}; color:#FFFFFF; border:1px solid {t['accent']};
+            border-radius:9px; font-size:14px; font-weight:600;
+        }}
         QPushButton#scriptureSearchButton:hover {{ background:{t['accent_hover']}; }}
-        QLabel#conditionLabel {{ color:{t['text_muted']}; font-size:12px; }}
-        QRadioButton#searchOption {{ background:{t['control']}; color:{t['text_muted']}; border:1px solid {t['border']}; border-radius:8px; padding:7px 12px; spacing:0px; font-size:12px; min-height:18px; }}
-        QRadioButton#searchOption::indicator {{ width:0px; height:0px; margin:0px; padding:0px; }}
-        QRadioButton#searchOption:checked {{ background:{t['accent_soft']}; color:{t['text']}; border-color:{t['accent']}; }}
-        QPushButton#scriptureScopeButton {{ background:{t['control']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:8px; min-height:34px; padding:0 12px; text-align:left; }}
-        QPushButton#scriptureScopeButton:hover {{ background:{t['control_hover']}; border-color:{t['border_strong']}; }}
+        QLabel#searchMatchHint {{ color:{t['text_muted']}; font-size:12px; }}
+        QPushButton#scriptureScopeButton {{
+            background:{t['control']}; color:{t['text']}; border:1px solid {t['border']};
+            border-radius:8px; padding:0 12px; text-align:left; font-size:12px; min-width:100px;
+        }}
+        QPushButton#scriptureScopeButton:hover {{
+            background:{t['control_hover']}; border-color:{t['border_strong']};
+        }}
         QLabel#searchHistoryLabel {{ color:{t['text_muted']}; font-size:12px; font-weight:600; }}
-        QPushButton#historyClearButton {{ background:transparent; color:{t['text_muted']}; border:none; padding:2px 6px; }}
+        QLabel#historyEmptyLabel {{ color:{t['text_faint']}; font-size:12px; }}
+        QPushButton#historyClearButton {{
+            background:transparent; color:{t['text_muted']}; border:none; padding:2px 6px; font-size:12px;
+        }}
         QPushButton#historyClearButton:hover {{ color:{t['accent']}; }}
-        QScrollArea#scriptureHistoryScroll {{ background:transparent; border:none; }}
-        QWidget#scriptureHistoryContainer {{ background:transparent; }}
-        QFrame#scriptureHistoryRow {{ background:{t['control']}; border:1px solid {t['border']}; border-radius:8px; }}
-        QPushButton#historyUseButton {{ background:transparent; color:{t['text']}; border:none; text-align:left; padding:0; }}
-        QPushButton#historyUseButton:hover {{ color:{t['accent']}; }}
-        QPushButton#historyDeleteButton {{ background:transparent; color:{t['text_muted']}; border:none; font-size:16px; }}
-        QPushButton#historyDeleteButton:hover {{ color:{t['danger']}; }}
+        QWidget#historyChip {{
+            background:{t['control']}; color:{t['text']}; border:1px solid {t['border']};
+            border-radius:15px;
+        }}
+        QWidget#historyChip:hover {{
+            background:{t['accent_soft']}; border-color:{t['accent']};
+        }}
+        QLabel#historyChipLabel {{
+            background:transparent; color:{t['text']}; font-size:12px; border:none;
+            padding-right:8px;
+        }}
+        QWidget#historyChip:hover QLabel#historyChipLabel {{ color:{t['accent_text']}; }}
+        QPushButton#historyChipDelete {{
+            background:transparent; color:{t['text_faint']}; border:none;
+            border-radius:7px; padding:0; margin:0;
+            min-width:14px; max-width:14px; min-height:14px; max-height:14px;
+            font-size:12px; font-weight:700;
+        }}
+        QPushButton#historyChipDelete:hover {{
+            background:{t['control_hover']}; color:{t['text']};
+        }}
         QLabel#scriptureResultHeader {{ color:{t['text']}; font-size:14px; font-weight:600; }}
         QLabel#scriptureResultHint {{ color:{t['text_muted']}; font-size:11px; }}
         QScrollArea#scriptureResultScroll {{ background:transparent; border:none; }}
         QWidget#scriptureResultContainer {{ background:transparent; }}
-        QFrame#scriptureSearchResult {{ background:{t['control']}; border:1px solid {t['border']}; border-radius:10px; }}
-        QPushButton#scriptureResultTitle {{ background:transparent; color:{t['accent']}; border:none; text-align:left; font-size:14px; font-weight:600; padding:0; }}
-        QPushButton#scriptureResultAction {{ background:transparent; color:{t['text_muted']}; border:1px solid {t['border']}; border-radius:7px; padding:4px 10px; }}
-        QPushButton#scriptureResultAction:hover {{ background:{t['control_hover']}; color:{t['text']}; }}
-        QLabel#scriptureResultText {{ color:{t['text']}; font-size:13px; line-height:1.7; }}
-        QLabel#scriptureEmptyIcon {{ color:{t['text_muted']}; font-size:30px; }}
+        QFrame#scriptureSearchResult {{
+            background:{t['control']}; border:1px solid {t['border']}; border-radius:10px;
+        }}
+        QPushButton#scriptureResultTitle {{
+            background:transparent; color:{t['accent']}; border:none;
+            text-align:left; font-size:14px; font-weight:600; padding:0;
+        }}
+        QPushButton#scriptureResultAction {{
+            background:transparent; color:{t['text_muted']}; border:1px solid {t['border']};
+            border-radius:7px; padding:0; font-size:12px;
+        }}
+        QPushButton#scriptureResultAction:hover {{
+            background:{t['control_hover']}; color:{t['text']};
+        }}
+        QLabel#scriptureResultText {{ color:{t['text']}; font-size:13px; }}
+        QLabel#scriptureEmptyIcon {{ color:{t['text_muted']}; font-size:28px; }}
         QLabel#scriptureEmptyTitle {{ color:{t['text']}; font-size:15px; font-weight:600; }}
         QLabel#scriptureEmptyHint {{ color:{t['text_muted']}; font-size:12px; }}
         QLabel#scripturePageLabel {{ color:{t['text_muted']}; font-size:12px; }}
-        QPushButton#scripturePagerButton {{ background:{t['control']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:8px; min-width:34px; min-height:32px; font-size:18px; }}
+        QPushButton#scripturePagerButton {{
+            background:{t['control']}; color:{t['text']}; border:1px solid {t['border']};
+            border-radius:8px; font-size:18px;
+        }}
         QPushButton#scripturePagerButton:hover:enabled {{ background:{t['control_hover']}; }}
-        QPushButton#scripturePagerButton:disabled {{ color:{t['text_disabled']}; }}
-        """)
+        QPushButton#scripturePagerButton:disabled {{ color:{t['text_faint']}; }}
+        """
+        )

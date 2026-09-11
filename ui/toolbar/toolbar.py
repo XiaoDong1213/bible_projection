@@ -1,10 +1,10 @@
-# 顶部工具栏：分组布局 + 速度下拉（冷蓝控制台）
+# 顶部工具栏：分组布局 + 速度档位按钮
 
 from PyQt6.QtWidgets import (
     QToolBar, QPushButton, QLabel, QDialog, QFormLayout,
     QHBoxLayout, QVBoxLayout, QSpinBox, QFontComboBox, QColorDialog,
     QFileDialog, QLineEdit, QDialogButtonBox, QWidget, QSizePolicy,
-    QTabWidget, QGroupBox,
+    QTabWidget, QGroupBox, QFrame, QGridLayout,
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QColor, QPainter, QPen
@@ -56,12 +56,188 @@ class ColorPreview(QWidget):
 
 
 class ToolbarButton(QPushButton):
-    """顶栏按钮：鼠标移出后自动清除焦点，避免焦点轮廓残留。"""
+    """顶栏按钮：统一高度；鼠标移出后清除焦点，避免轮廓残留。"""
+
+    HEIGHT = 48
+    ACTION_MIN_WIDTH = 64
+    SPEED_WIDTH = 56
+
+    def __init__(self, text="", parent=None, *, kind="action"):
+        super().__init__(text, parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedHeight(self.HEIGHT)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        if kind == "speed":
+            self.setFixedWidth(self.SPEED_WIDTH)
+        else:
+            self.setMinimumWidth(self.ACTION_MIN_WIDTH)
 
     def leaveEvent(self, event):
         super().leaveEvent(event)
         self.clearFocus()
         self.update()
+
+
+class HelpShortcutsDialog(QDialog):
+    """快捷键说明（两列卡片，一屏显示无需滚动）。"""
+
+    SECTIONS = (
+        (
+            "搜索与定位",
+            (
+                ("Enter", "打开 / 关闭快速定位"),
+                ("Ctrl + F", "打开 / 关闭全文搜索"),
+                ("↑ / ↓", "搜索时切换候选项"),
+                ("Space", "选择候选项 / 下一段"),
+            ),
+        ),
+        (
+            "滚动",
+            (
+                ("↑ / ↓", "手动向上 / 向下滚动"),
+                ("Home / End", "滚到顶部 / 底部"),
+                ("Space", "暂停 / 继续自动滚动"),
+                ("1 ～ 9", "设置自动滚动速度"),
+                ("0", "暂停（再按可继续）"),
+            ),
+        ),
+        (
+            "投影显示",
+            (
+                ("F12", "开启 / 关闭扩展显示"),
+                ("Esc", "关闭扩展显示"),
+            ),
+        ),
+        (
+            "经文范围",
+            (
+                ("← / →", "减少 / 增加结束节"),
+                ("Ctrl + ← / →", "减少 / 增加起始节"),
+            ),
+        ),
+        (
+            "其他",
+            (("F1", "打开本帮助"),),
+        ),
+    )
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("帮助")
+        self.setObjectName("helpShortcutsDialog")
+        self.setMinimumWidth(640)
+        self._build_ui()
+        self.adjustSize()
+
+        screen = self.screen()
+        if screen:
+            available = screen.availableGeometry()
+            width = min(720, max(640, self.sizeHint().width()))
+            height = min(available.height() - 80, self.sizeHint().height() + 8)
+            self.setFixedSize(width, height)
+            frame = self.frameGeometry()
+            frame.moveCenter(available.center())
+            self.move(frame.topLeft())
+        else:
+            self.setFixedSize(max(640, self.sizeHint().width()), self.sizeHint().height() + 8)
+
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 16, 18, 14)
+        root.setSpacing(10)
+
+        header = QWidget()
+        header.setObjectName("helpHeader")
+        header_layout = QVBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(2)
+
+        title = QLabel("快捷键")
+        title.setObjectName("helpTitle")
+        header_layout.addWidget(title)
+
+        subtitle = QLabel("常用操作一览 · 随时按 F1 打开")
+        subtitle.setObjectName("helpSubtitle")
+        header_layout.addWidget(subtitle)
+        root.addWidget(header)
+
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(10)
+
+        positions = ((0, 0, 1, 1), (0, 1, 1, 1), (1, 0, 1, 1), (1, 1, 1, 1), (2, 0, 1, 2))
+        for (row, col, row_span, col_span), (section_title, rows) in zip(
+            positions, self.SECTIONS
+        ):
+            grid.addWidget(
+                self._make_section(section_title, rows),
+                row,
+                col,
+                row_span,
+                col_span,
+            )
+
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        root.addLayout(grid)
+
+        footer = QWidget()
+        footer.setObjectName("helpFooter")
+        footer_layout = QHBoxLayout(footer)
+        footer_layout.setContentsMargins(0, 2, 0, 0)
+        footer_layout.setSpacing(12)
+
+        tip = QLabel("输入框聚焦时，按键优先由当前控件处理")
+        tip.setObjectName("helpTip")
+        tip.setWordWrap(True)
+        footer_layout.addWidget(tip, 1)
+
+        close_btn = QPushButton("知道了")
+        close_btn.setObjectName("helpCloseBtn")
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setFixedHeight(34)
+        close_btn.setMinimumWidth(88)
+        close_btn.clicked.connect(self.accept)
+        footer_layout.addWidget(
+            close_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        root.addWidget(footer)
+
+    def _make_section(self, title, rows):
+        section = QFrame()
+        section.setObjectName("helpSection")
+        layout = QVBoxLayout(section)
+        layout.setContentsMargins(12, 10, 12, 8)
+        layout.setSpacing(2)
+
+        heading = QLabel(title)
+        heading.setObjectName("helpSectionTitle")
+        layout.addWidget(heading)
+
+        for key, desc in rows:
+            layout.addWidget(self._make_row(key, desc))
+        return section
+
+    def _make_row(self, key, desc):
+        row = QWidget()
+        row.setObjectName("helpRow")
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 2, 0, 2)
+        layout.setSpacing(10)
+
+        keycap = QLabel(key)
+        keycap.setObjectName("helpKeycap")
+        keycap.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        keycap.setMinimumWidth(88)
+        keycap.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        layout.addWidget(keycap, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        description = QLabel(desc)
+        description.setObjectName("helpDesc")
+        description.setWordWrap(False)
+        layout.addWidget(description, 1, Qt.AlignmentFlag.AlignVCenter)
+        return row
 
 
 class DisplaySettingsDialog(QDialog):
@@ -388,9 +564,10 @@ class ToolBarWidget(QToolBar):
         self.settings = {}
         self._speed = 0
 
-        self.extend_btn = ToolbarButton("扩展显示  F12")
+        # —— 投影 ——
+        self.extend_btn = ToolbarButton("扩展显示")
         self.extend_btn.setObjectName("extendBtn")
-        self.extend_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.extend_btn.setToolTip("开启 / 关闭扩展显示  F12")
         self.extend_btn.clicked.connect(self.extend_toggled)
         self.addWidget(self.extend_btn)
 
@@ -399,42 +576,46 @@ class ToolBarWidget(QToolBar):
         self.topmost_btn.setCheckable(True)
         self.topmost_btn.setChecked(True)
         self.topmost_btn.setEnabled(False)
-        self.topmost_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.topmost_btn.setToolTip("扩展窗口始终置顶")
         self.topmost_btn.toggled.connect(self.topmost_toggled)
         self.addWidget(self.topmost_btn)
 
         self.clear_btn = ToolbarButton("清屏")
         self.clear_btn.setObjectName("clearBtn")
-        self.clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.clear_btn.setToolTip("清空预览与扩展屏经文")
         self.clear_btn.clicked.connect(self.clear_requested)
         self.addWidget(self.clear_btn)
 
+        self.addSeparator()
+
+        # —— 显示 ——
         self.show_titles_btn = ToolbarButton("小标题")
         self.show_titles_btn.setObjectName("showTitlesBtn")
         self.show_titles_btn.setCheckable(True)
-        self.show_titles_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.show_titles_btn.setMinimumHeight(30)
         self.show_titles_btn.setToolTip("显示 / 隐藏经文小标题")
         self.show_titles_btn.toggled.connect(self._toggle_scripture_titles)
         self.addWidget(self.show_titles_btn)
 
-        self.addSeparator()
+        # 全文搜索按钮插到此分隔符之前（小标题右侧）
+        self._search_anchor_action = self.addSeparator()
 
+        # —— 滚动速度（暂停 + 1～9 档）——
         scroll_wrap = QWidget()
+        scroll_wrap.setFixedHeight(ToolbarButton.HEIGHT)
         scroll_layout = QHBoxLayout(scroll_wrap)
         scroll_layout.setContentsMargins(0, 0, 0, 0)
-        scroll_layout.setSpacing(8)
-        scroll_layout.addWidget(QLabel("速度"))
+        scroll_layout.setSpacing(4)
+        scroll_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        speed_caption = QLabel("速度")
+        speed_caption.setFixedHeight(ToolbarButton.HEIGHT)
+        speed_caption.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
+        scroll_layout.addWidget(speed_caption)
         self.speed_buttons = []
         for speed, text in [(0, "暂停")] + [(i, f"{i}档") for i in range(1, 10)]:
-            btn = ToolbarButton(text)
+            btn = ToolbarButton(text, kind="speed")
             btn.setObjectName("speedBtn")
             btn.setCheckable(True)
             btn.setAutoExclusive(False)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setMinimumHeight(30)
             btn.setToolTip("暂停自动滚动" if speed == 0 else f"自动滚动 {speed} 档")
             btn.setProperty("speedValue", speed)
             btn.clicked.connect(lambda checked=False, s=speed: self._set_speed(s))
@@ -448,18 +629,25 @@ class ToolBarWidget(QToolBar):
         self.addWidget(spacer)
         self.addSeparator()
 
+        # —— 设置 ——
         self.settings_btn = ToolbarButton("显示设置")
         self.settings_btn.setObjectName("settingsBtn")
-        self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.settings_btn.clicked.connect(self._open_settings)
         self.addWidget(self.settings_btn)
 
         self.theme_btn = ToolbarButton("亮色")
         self.theme_btn.setObjectName("themeBtn")
-        self.theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.theme_btn.setToolTip("切换亮色 / 暗色主题")
         self.theme_btn.clicked.connect(self._toggle_theme)
         self.addWidget(self.theme_btn)
+
+        self.help_btn = ToolbarButton("帮助")
+        self.help_btn.setObjectName("helpBtn")
+        self.help_btn.setToolTip("查看快捷键说明  F1")
+        self.help_btn.clicked.connect(self._open_help)
+        self.addWidget(self.help_btn)
+
+        self._update_theme_button()
 
     def load_settings(self, settings):
         self.settings = dict(settings)
@@ -490,6 +678,9 @@ class ToolBarWidget(QToolBar):
             self.settings = dialog.get_settings()
             self.settings_changed.emit(self.settings)
 
+    def _open_help(self):
+        HelpShortcutsDialog(self.window()).exec()
+
     def _set_speed(self, speed):
         speed = max(0, min(9, int(speed)))
         self._speed = speed
@@ -506,12 +697,18 @@ class ToolBarWidget(QToolBar):
         self.theme_changed.emit(self.theme)
 
     def _update_theme_button(self):
+        # 按钮文案表示「点击后将切换到」的目标主题
         self.theme_btn.setText("暗色" if self.theme == "light" else "亮色")
+        self.theme_btn.setToolTip(
+            "当前亮色，点击切换暗色" if self.theme == "light" else "当前暗色，点击切换亮色"
+        )
 
     def set_extend_active(self, active):
         if active:
-            self.extend_btn.setText("关闭扩展  Esc")
+            self.extend_btn.setText("关闭扩展")
+            self.extend_btn.setToolTip("关闭扩展显示  Esc")
             self.topmost_btn.setEnabled(True)
         else:
-            self.extend_btn.setText("扩展显示  F12")
+            self.extend_btn.setText("扩展显示")
+            self.extend_btn.setToolTip("开启 / 关闭扩展显示  F12")
             self.topmost_btn.setEnabled(False)

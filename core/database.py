@@ -84,8 +84,8 @@ class BibleDatabase:
 
     @staticmethod
     def _clean_scripture_title(value):
-        """删除标题中的经文交叉引用括号，普通括号保留。"""
-        text = str(value or "").strip()
+        """删除标题中的经文交叉引用括号，普通括号保留；库内换行保留为 \\n。"""
+        text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
         if not text:
             return ""
         reference = re.compile(r"\d{1,3}\s*[:：.]\s*\d{1,3}(?:\s*[-–—]\s*\d{1,3})?")
@@ -95,7 +95,11 @@ class BibleDatabase:
             return "" if reference.search(match.group(1).strip()) else match.group(0)
 
         text = pattern.sub(replace, text)
-        return re.sub(r"\s{2,}", " ", text).strip(" \t-—–，,；;：:")
+        # 压平非换行空白，但保留换行（诗篇卷一 / 小节题 等两段式标题）
+        text = re.sub(r"[^\S\n]+", " ", text)
+        text = re.sub(r" *\n *", "\n", text)
+        text = re.sub(r"\n{2,}", "\n", text)
+        return text.strip(" \t-—–，,；;：:")
 
     def get_chapter_titles(self, book_name, chapter):
         """返回指定章节的小标题，键为标题所属节号。"""

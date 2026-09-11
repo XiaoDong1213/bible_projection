@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtWidgets import QPushButton
+from PyQt6.QtWidgets import QPushButton, QSizePolicy
 
 from core.selection import ScriptureSelection
 from .panel import ScriptureSearchWidget
@@ -17,9 +17,15 @@ def attach_fulltext_search(window):
     button = QPushButton("经文搜索")
     button.setObjectName("scriptureSearchToolbarButton")
     button.setCursor(Qt.CursorShape.PointingHandCursor)
+    button.setFixedHeight(48)
+    button.setMinimumWidth(64)
     button.setToolTip("搜索整本圣经经文  Ctrl+F")
     button.clicked.connect(lambda: _toggle(window))
-    window.toolbar.addWidget(button)
+    before = getattr(window.toolbar, "_search_anchor_action", None)
+    if before is not None:
+        window.toolbar.insertWidget(before, button)
+    else:
+        window.toolbar.addWidget(button)
     window.scripture_search_button = button
 
     shortcut = QShortcut(QKeySequence("Ctrl+F"), window)
@@ -27,46 +33,42 @@ def attach_fulltext_search(window):
     shortcut.activated.connect(lambda: _toggle(window))
     window._scripture_search_shortcut = shortcut
 
+    _ensure_panel(window)
+    window._scripture_search_widget.hide()
 
-def _polish_search_panel(widget):
-    search_button = widget.findChild(QPushButton, "scriptureSearchButton")
-    if search_button is not None:
-        search_button.setFixedSize(82, 34)
 
-    widget.search_input.setFixedHeight(44)
-    widget.result_layout.setContentsMargins(0, 4, 4, 0)
-    widget.result_layout.setSpacing(8)
-    widget.history_layout.setContentsMargins(4, 4, 4, 4)
-    widget.history_layout.setSpacing(4)
+def _ensure_panel(window):
+    """把搜索面板嵌进主窗口中央布局，高度随窗口一起变化。"""
+    widget = getattr(window, "_scripture_search_widget", None)
+    if widget is not None:
+        return widget
+
+    central = window.centralWidget()
+    widget = ScriptureSearchWidget(window.db, window.config, central, theme=window.theme)
+    widget.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+    widget.result_activated.connect(lambda result: _activate(window, result))
+    widget.result_project_requested.connect(lambda result: _project(window, result))
+    widget.close_requested.connect(widget.hide)
+
+    layout = central.layout()
+    if layout is not None:
+        layout.addWidget(widget)
+
+    window._scripture_search_widget = widget
+    return widget
 
 
 def _toggle(window):
-    widget = window._scripture_search_widget
-    if widget is not None and widget.isVisible():
-        widget.close()
+    widget = _ensure_panel(window)
+    if widget.isVisible():
+        widget.hide()
         return
 
-    widget = ScriptureSearchWidget(window.db, window.config, window, theme=window.theme)
-    window._scripture_search_widget = widget
-    widget.result_activated.connect(lambda result: _activate(window, result))
-    widget.result_project_requested.connect(lambda result: _project(window, result))
-    widget.close_requested.connect(widget.close)
-    _polish_search_panel(widget)
-
-    panel_width = 480
-    widget.setMinimumWidth(0)
-    widget.setMaximumWidth(panel_width)
-    widget.setFixedWidth(panel_width)
-
-    height = max(480, window.height() - window.toolbar.height() - 18)
-    widget.resize(panel_width, height)
-    global_pos = window.mapToGlobal(
-        QPoint(window.width() - panel_width - 8, window.toolbar.height() + 4)
-    )
-    widget.move(global_pos)
+    widget.apply_theme(window.theme)
     widget.show()
     widget.raise_()
     widget.search_input.setFocus()
+    widget.search_input.selectAll()
 
 
 def _selection_from_result(window, result):
@@ -95,8 +97,6 @@ def _activate(window, result):
     window._load_selection(selection)
     window.nav_panel.add_selection_to_history(selection)
     window.nav_panel.sync_from_selection(selection)
-    if window._scripture_search_widget is not None:
-        window._scripture_search_widget.raise_()
 
 
 def _project(window, result):
@@ -108,5 +108,3 @@ def _project(window, result):
     window.nav_panel.sync_from_selection(selection)
     if not window.extension_window or not window.extension_window.isVisible():
         window._show_extension()
-    if window._scripture_search_widget is not None:
-        window._scripture_search_widget.raise_()

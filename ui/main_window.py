@@ -148,6 +148,7 @@ class MainWindow(QMainWindow):
             (Qt.Key.Key_Enter, self._show_search, False),
             (Qt.Key.Key_Escape, self._close_extension, False),
             (Qt.Key.Key_F12, self._toggle_extension, False),
+            (Qt.Key.Key_F1, self.toolbar._open_help, False),
             (Qt.Key.Key_Right, self._add_verse_end, True),
             (Qt.Key.Key_Left, self._remove_verse_end, True),
             ("Ctrl+Right", self._add_verse_start, True),
@@ -269,7 +270,7 @@ class MainWindow(QMainWindow):
             selection = ScriptureSelection.single_chapter(b, c, s, end, max_verse=max_v)
         self._load_selection(selection)
 
-    def _load_selection(self, selection: ScriptureSelection):
+    def _load_selection(self, selection: ScriptureSelection, reset_scroll=True, restore_scroll_y=None):
         selection = normalize_selection(self.db, selection)
         self.current_selection = selection
         self.current_book = selection.book
@@ -277,11 +278,20 @@ class MainWindow(QMainWindow):
         self.current_start = selection.primary_start
         self.current_end = selection.primary_end
         self.verses = self.db.get_selection_verses(selection)
-        self.scripture_display.set_from_selection(selection, self.verses)
+        self.scripture_display.set_from_selection(
+            selection, self.verses, reset_scroll=reset_scroll
+        )
+        if restore_scroll_y is not None:
+            self.scripture_display.text_display.set_scroll_y(restore_scroll_y, emit=False)
+            self.scripture_display.update()
         if self.extension_window and self.extension_window.isVisible():
-            QApplication.processEvents()
-            self.extension_window.update_from_selection(selection, self.verses)
-            QApplication.processEvents()
+            if reset_scroll:
+                QApplication.processEvents()
+            self.extension_window.update_from_selection(
+                selection, self.verses, reset_scroll=reset_scroll
+            )
+            if reset_scroll:
+                QApplication.processEvents()
             self._sync_extension_scroll()
         self._update_status()
 
@@ -429,15 +439,6 @@ class MainWindow(QMainWindow):
         except (AttributeError, TypeError, ValueError):
             return 0.0
 
-    def _restore_scroll_y(self, scroll_y):
-        def restore():
-            self.scripture_display.text_display.set_scroll_y(scroll_y, emit=False)
-            self.scripture_display.update()
-            if self.extension_window and self.extension_window.isVisible():
-                self._sync_extension_scroll()
-
-        QTimer.singleShot(0, restore)
-
     def _replace_history_selection(self, old_selection, new_selection):
         history = getattr(self.nav_panel, "history", None)
         if not history:
@@ -453,11 +454,12 @@ class MainWindow(QMainWindow):
 
     def _load_and_restore(self, selection, scroll_y):
         old_selection = getattr(self, "current_selection", None)
-        self._load_selection(selection)
+        self._load_selection(
+            selection, reset_scroll=False, restore_scroll_y=scroll_y
+        )
         if old_selection is not None:
             self._replace_history_selection(old_selection, self.current_selection)
         self.nav_panel.sync_from_selection(self.current_selection)
-        self._restore_scroll_y(scroll_y)
 
     def _add_verse_end(self):
         selection = self._simple_selection_or_none()

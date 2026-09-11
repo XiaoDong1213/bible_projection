@@ -82,7 +82,7 @@ class ScriptureDisplay(QWidget):
     def _fit_document_width(self):
         if self._reference_size: self.text_display.set_text_width(max(1,self._reference_size[0]-self._px(self.margin_left)-self._px(self.margin_right)))
         else: self.text_display._fit_text_width(); self.text_display.update()
-    def set_scripture(self,book_name,chapter,start_verse,end_verse,verses,title=None,show_chapter_nums=False):
+    def set_scripture(self,book_name,chapter,start_verse,end_verse,verses,title=None,show_chapter_nums=False,reset_scroll=True):
         self.verses=list(verses or []); self._show_chapter_nums=bool(show_chapter_nums)
         if title: self._set_adaptive_title(title)
         else:
@@ -92,7 +92,10 @@ class ScriptureDisplay(QWidget):
             elif start_verse==end_verse: title_text=f"{book_name}{chapter}{unit}{start_verse}节"
             else: title_text=f"{book_name}{chapter}{unit}{start_verse}-{end_verse}节"
             self._set_adaptive_title(title_text)
-        self._render_scripture(); self.set_scroll_position(0); self.update()
+        self._render_scripture()
+        if reset_scroll: self.set_scroll_position(0)
+        else: self.text_display._clamp_scroll()
+        self.update()
     def _logical_title_from_verses(self, selection, verses):
         """优先使用数据库解析出的逻辑节号，让投影顶部标题与正文连续节显示一致。"""
         if not selection.is_simple or not verses: return selection.title()
@@ -109,9 +112,9 @@ class ScriptureDisplay(QWidget):
                 return f"{selection.book}{span.chapter}{unit}{label}节"
         except (TypeError,ValueError,IndexError): pass
         return selection.title()
-    def set_from_selection(self,selection,verses):
+    def set_from_selection(self,selection,verses,reset_scroll=True):
         title=self._logical_title_from_verses(selection,verses)
-        self.set_scripture(selection.book,selection.primary_chapter,selection.primary_start,selection.primary_end,verses,title=title,show_chapter_nums=selection.is_multi_chapter)
+        self.set_scripture(selection.book,selection.primary_chapter,selection.primary_start,selection.primary_end,verses,title=title,show_chapter_nums=selection.is_multi_chapter,reset_scroll=reset_scroll)
     def clear_scripture(self):
         self.verses=[]; self._show_chapter_nums=False; self._set_adaptive_title(""); self.text_display.set_html(""); self.set_scroll_position(0); self.update()
     def _set_adaptive_title(self,text):
@@ -137,7 +140,7 @@ class ScriptureDisplay(QWidget):
     def _verse_html(self,chapter,n,t):
         safe=str(t).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;"); vn=self._px(self.verse_num_size); fs=self._px(self.font_size); label=f"{chapter}:{n}" if getattr(self,"_show_chapter_nums",False) and chapter is not None else str(n); return f'<span style="color:{self.verse_num_color.name()};font-size:{vn}px;font-family:&quot;{self.verse_num_font_family}&quot;;font-weight:bold;vertical-align:super;">{label}</span>&nbsp;<span style="color:{self.font_color.name()};font-size:{fs}px;font-family:&quot;{self.font_family}&quot;;">{safe}</span>'
     def _title_html(self,text):
-        safe=str(text or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;"); fs=self._px(self.title_size); spacing=self._px(self.title_spacing); return f'<p style="margin:0 0 {spacing}px 0;padding:0;line-height:{self.line_spacing}%;"><span style="color:{self.title_color.name()};font-size:{fs}px;font-family:&quot;{self.title_font_family}&quot;;font-weight:bold;">{safe}</span></p>'
+        safe=str(text or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\n","<br>"); fs=self._px(self.title_size); spacing=self._px(self.title_spacing); return f'<p style="margin:0 0 {spacing}px 0;padding:0;line-height:{self.line_spacing}%;"><span style="color:{self.title_color.name()};font-size:{fs}px;font-family:&quot;{self.title_font_family}&quot;;font-weight:bold;">{safe}</span></p>'
     def _verse_block_html(self,chapter,n,t): return f"<p style='margin:0;padding:0;text-align:justify;line-height:{self.line_spacing}%;'>{self._verse_html(chapter,n,t)}</p>"
     def _render_scripture(self):
         fs=self._px(self.font_size); top=max(10,int(fs*0.35)); bottom=max(12,int(fs*0.45)); html=f"<div style='padding-top:{top}px;padding-bottom:{bottom}px;margin:0;line-height:{self.line_spacing}%;text-align:justify;'>"; rows=[self._verse_row(row) for row in self.verses]

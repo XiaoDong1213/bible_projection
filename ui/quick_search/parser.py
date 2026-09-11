@@ -63,7 +63,10 @@ class SearchParser:
         return self.parse_suffix(book, suffix, chapter_count, verse_count)
 
     def parse_suffix(self, book, suffix, chapter_count, verse_count):
-        """仅解析同章：整章 / 单节 / 连续节。未写完的「节-」返回 None。"""
+        """仅解析同章：整章 / 单节 / 连续节。
+
+        「章:节-」（分隔符后无结束节）表示从该节到本章末节。
+        """
         value = self.normalize(suffix).strip()
         if not value:
             return None
@@ -83,8 +86,9 @@ class SearchParser:
                 book, chapter, 1, max_v, max_verse=max_v
             )
 
+        # 3:16 / 3:16-18 / 3:16-（到末节）
         match = re.fullmatch(
-            r"(\d+)\s*[:.]\s*(\d+)(?:\s*-\s*(\d+))?",
+            r"(\d+)\s*[:.]\s*(\d+)(?:\s*-\s*(\d+)?)?",
             value,
         )
         if not match:
@@ -100,6 +104,10 @@ class SearchParser:
             return None
 
         if end is None:
+            if re.search(r"-\s*$", value):
+                return ScriptureSelection.single_chapter(
+                    book, chapter, verse, max_v, max_verse=max_v
+                )
             return ScriptureSelection.single_chapter(book, chapter, verse, verse)
 
         end_v = int(end)
@@ -111,7 +119,7 @@ class SearchParser:
     def parse_reference(value):
         """解析纯章节预览。"""
         value = SearchParser.normalize(value)
-        # 未完成的「3:16-」不当作完整引用
+        # 「3:16-」由 parse_suffix / 界面 trailing_range 处理为到末节
         if re.search(r"-\s*$", value):
             return None
         match = re.fullmatch(
