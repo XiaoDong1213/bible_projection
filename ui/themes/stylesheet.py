@@ -229,22 +229,174 @@ QToolBar {{
 }}
 QToolBar QLabel {{
     color: {t['text_muted']};
-    font-size: 12px;
-    padding: 0 4px;
+    font-size: 13px;
+    padding: 0 6px;
 }}
 QToolBar QPushButton {{
     background: {t['control']};
     color: {t['text']};
     border: 1px solid {t['border']};
-    border-radius: {r['sm']}px;
-    padding: 7px 12px;
-    font-size: 12px;
-    min-height: 30px;
+    border-radius: {r['md']}px;
+    padding: 0 16px;
+    font-size: 13px;
+    font-weight: 400;
+    min-height: 48px;
+    max-height: 48px;
+    min-width: 64px;
 }}
 QToolBar QPushButton#speedBtn {{
-    padding: 6px 10px;
-    min-width: 40px;
+    padding: 0 4px;
+    min-width: 56px;
+    max-width: 56px;
+    font-weight: 400;
+    font-size: 13px;
 }}
+QDialog#helpShortcutsDialog {{
+    background: {t['surface']};
+}}
+QDialog#helpShortcutsDialog QLabel#helpTitle {{
+    color: {t['text']};
+    font-size: 20px;
+    font-weight: 600;
+}}
+QDialog#helpShortcutsDialog QLabel#helpSubtitle {{
+    color: {t['text_muted']};
+    font-size: 12px;
+}}
+QDialog#helpShortcutsDialog QWidget#helpBody {{
+    background: transparent;
+}}
+QDialog#helpShortcutsDialog QFrame#helpSection {{
+    background: {t['surface_sunken']};
+    border: 1px solid {t['border']};
+    border-radius: {r['md']}px;
+}}
+QDialog#helpShortcutsDialog QLabel#helpSectionTitle {{
+    color: {t['text']};
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 0 2px 0;
+}}
+QDialog#helpShortcutsDialog QLabel#helpKeycap {{
+    color: {t['accent_text']};
+    background: {t['accent_soft']};
+    border: 1px solid {t['accent']};
+    border-radius: {r['sm']}px;
+    padding: 4px 8px;
+    font-size: 12px;
+    font-weight: 600;
+}}
+QDialog#helpShortcutsDialog QLabel#helpDesc {{
+    color: {t['text']};
+    font-size: 13px;
+}}
+QDialog#helpShortcutsDialog QLabel#helpTip {{
+    color: {t['text_muted']};
+    font-size: 12px;
+}}
+QDialog#helpShortcutsDialog QPushButton#helpCloseBtn {{
+    background: {t['accent']};
+    color: #FFFFFF;
+    border: 1px solid {t['accent']};
+    border-radius: {r['sm']}px;
+    padding: 0 18px;
+    font-size: 13px;
+}}
+QDialog#helpShortcutsDialog QPushButton#helpCloseBtn:hover {{
+    background: {t['accent_hover']};
+    border-color: {t['accent_hover']};
+}}
+QDialog#helpShortcutsDialog QPushButton#helpCloseBtn:pressed {{
+    background: {t['accent_pressed']};
+}}
+
+/* ---------- Scripture search scope dialog ---------- */
+QDialog#scriptureScopeDialog {{
+    background: {t['surface_raised']};
+    color: {t['text']};
+}}
+QDialog#scriptureScopeDialog QLabel#scopeDialogTitle {{
+    color: {t['text']};
+    font-size: 18px;
+    font-weight: 600;
+}}
+QDialog#scriptureScopeDialog QLabel#scopeDialogHint {{
+    color: {t['text_muted']};
+    font-size: 12px;
+}}
+QDialog#scriptureScopeDialog QLabel#scopeTitle {{
+    color: {t['text']};
+    font-size: 14px;
+    font-weight: 600;
+}}
+QDialog#scriptureScopeDialog QLineEdit#scopeFilter {{
+    background: {t['control']};
+    color: {t['text']};
+    border: 1px solid {t['border']};
+    border-radius: 12px;
+    padding: 0 14px;
+    min-height: 40px;
+}}
+QDialog#scriptureScopeDialog QLineEdit#scopeFilter:focus {{
+    border: 1px solid {t['focus_ring']};
+}}
+QDialog#scriptureScopeDialog QPushButton#scopeAction {{
+    background: {t['control']};
+    color: {t['text_muted']};
+    border: 1px solid {t['border']};
+    border-radius: 12px;
+    padding: 0 14px;
+    min-height: 28px;
+}}
+QDialog#scriptureScopeDialog QPushButton#scopeAction:hover {{
+    background: {t['control_hover']};
+    color: {t['text']};
+    border-color: {t['border_strong']};
+}}
+QDialog#scriptureScopeDialog QFrame#scopeChipPanel {{
+    background: {t['surface_sunken']};
+    border: 1px solid {t['border']};
+    border-radius: 16px;
+}}
+QDialog#scriptureScopeDialog QScrollArea#scopeChipScroll {{
+    background: transparent;
+    border: none;
+}}
+QDialog#scriptureScopeDialog QWidget#scopeChipContainer {{
+    background: transparent;
+}}
+QDialog#scriptureScopeDialog QPushButton#scopeBookChip {{
+    background: {t['control']};
+    color: {t['text']};
+    border: 1px solid {t['border']};
+    border-radius: 18px;
+    padding: 0 14px;
+    font-size: 13px;
+    min-height: 36px;
+    max-height: 36px;
+    min-width: 140px;
+    outline: none;
+}}
+QDialog#scriptureScopeDialog QPushButton#scopeBookChip:hover {{
+    background: {t['control_hover']};
+    border-color: {t['border_strong']};
+}}
+QDialog#scriptureScopeDialog QPushButton#scopeBookChip:checked {{
+    background: {t['accent']};
+    color: #FFFFFF;
+    border: 1px solid {t['accent']};
+    font-weight: 600;
+}}
+QDialog#scriptureScopeDialog QPushButton#scopeBookChip:checked:hover {{
+    background: {t['accent_hover']};
+}}
+QDialog#scriptureScopeDialog QDialogButtonBox QPushButton {{
+    min-width: 88px;
+    min-height: 36px;
+    border-radius: 12px;
+    padding: 0 16px;
+}}
+
 QToolBar QPushButton:hover {{
     background: {t['control_hover']};
     border-color: {t['accent']};
@@ -266,10 +418,12 @@ QToolBar QComboBox {{
     background: {t['control']};
     color: {t['text']};
     border: 1px solid {t['border']};
-    border-radius: {r['sm']}px;
-    padding: 6px 10px;
+    border-radius: {r['md']}px;
+    padding: 6px 12px;
     min-width: 88px;
-    min-height: 30px;
+    min-height: 48px;
+    max-height: 48px;
+    font-size: 13px;
 }}
 QToolBar QComboBox:hover {{
     border-color: {t['accent']};
@@ -287,25 +441,31 @@ QToolBar QComboBox QAbstractItemView {{
     outline: none;
 }}
 
-#extendBtn {{
+QToolBar QPushButton#extendBtn {{
     background: {t['accent']};
     color: #FFFFFF;
     border: 1px solid {t['accent']};
-    font-weight: 600;
-    padding: 7px 16px;
+    font-weight: 400;
+    padding: 0 16px;
+    min-height: 48px;
+    max-height: 48px;
+    min-width: 64px;
 }}
-#extendBtn:hover {{
+QToolBar QPushButton#extendBtn:hover {{
     background: {t['accent_hover']};
     border-color: {t['accent_hover']};
+    color: #FFFFFF;
 }}
-#extendBtn:pressed {{
+QToolBar QPushButton#extendBtn:pressed {{
     background: {t['accent_pressed']};
+    color: #FFFFFF;
 }}
-#topmostBtn {{
-    min-width: 52px;
-}}
-#themeBtn, #settingsBtn {{
-    background: {t['control']};
+QToolBar QPushButton#scriptureSearchToolbarButton {{
+    min-width: 64px;
+    max-height: 48px;
+    min-height: 48px;
+    padding: 0 16px;
+    font-size: 13px;
 }}
 
 /* ---------- Navigation ---------- */

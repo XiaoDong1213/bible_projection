@@ -58,8 +58,19 @@ def _apply_display_settings(self, settings):
         self.set_scroll_fraction(old)
 
 
+def _escape_title_html(text):
+    """转义小标题，并把库内换行渲染为 <br>。"""
+    safe = (
+        str(text or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+    return safe.replace("\n", "<br>")
+
+
 def _title_html(self, text):
-    safe = str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    safe = _escape_title_html(text)
     fs = self._px(self.scripture_title_size)
     return (
         '<p style="margin:0 0 8px 0;padding:0;line-height:%s%%;">'
@@ -69,7 +80,7 @@ def _title_html(self, text):
 
 
 def _title_inline_html(self, text):
-    safe = str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    safe = _escape_title_html(text)
     fs = self._px(self.scripture_title_size)
     return (
         '<br><span style="color:%s;font-size:%spx;font-family:&quot;%s&quot;;font-weight:bold;">%s</span><br>'

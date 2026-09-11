@@ -55,7 +55,7 @@ class SearchWidget(QWidget):
     search_triggered = pyqtSignal(object)
     close_requested = pyqtSignal()
     ALLOWED = re.compile(r"[A-Za-z0-9 :：.．。\-]")
-    DEFAULT_HINT = "↑↓ 选择　·　Space 下一段　·　Enter 确认　·　同章如 3:16-18（跨章/跳节请用左侧）"
+    DEFAULT_HINT = "↑↓ 选择　·　Space 下一段　·　Enter 确认　·　同章如 3:16-18 或 3:16-（到末节；跨章/跳节请用左侧）"
 
     def __init__(self, db, parent=None, theme="dark"):
         super().__init__(parent)
@@ -283,8 +283,10 @@ class SearchWidget(QWidget):
             return
         self._current_chapter = chapter
         self.state.space_mode = True
-        self._set_text(f"{self.state.selected_book} {chapter}:{verse}-")
-        self._update_hint(f"请输入结束节　·　范围 {verse}–{maximum}")
+        suffix = f" {chapter}:{verse}-"
+        self._set_text(f"{self.state.selected_book}{suffix}")
+        # formatting 屏蔽了 textEdited，需手动刷新；不填结束节 = 到本章末节
+        self._refresh_selected(self.state.selected_book, suffix)
 
     def _delete_segment(self, key=Qt.Key.Key_Backspace):
         edit = self.search_input
@@ -420,7 +422,7 @@ class SearchWidget(QWidget):
         elif self.state.stage == "verse":
             self._update_hint("请输入开始节　·　Space 生成节范围")
         elif self.state.space_mode:
-            self._update_hint("请输入结束节")
+            self._update_hint("请输入结束节　·　不填则到本章末节　·　Enter 确认")
 
     def _on_special_key(self, key):
         if key == Qt.Key.Key_Escape:

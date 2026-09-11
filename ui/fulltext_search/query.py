@@ -1,18 +1,18 @@
 import html
+import re
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QButtonGroup,
     QDialog,
     QDialogButtonBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
-    QRadioButton,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
@@ -22,10 +22,28 @@ from PyQt6.QtWidgets import (
 from ui.themes import theme_tokens
 
 
-def search_scripture(db, keywords, fuzzy=True, match_all=True, books=None, limit=10, offset=0):
-    """使用 SQL 分页查询经文，连续节数据库记录统一显示逻辑节号。"""
-    terms = [str(k).strip() for k in keywords if str(k).strip()]
-    if not terms:
+_SPACE_RE = re.compile(r"[\s，,、]+")
+
+
+def normalize_search_query(text):
+    """去掉空白与常见分隔符，得到可夹字匹配用的连续字符。"""
+    value = _SPACE_RE.sub("", str(text or "").strip())
+    # LIKE 通配符不当作搜索字
+    return "".join(ch for ch in value if ch not in "%_")
+
+
+def gap_like_pattern(text):
+    """爱永不止息 → %爱%永%不%止%息%，中间允许夹字。"""
+    chars = list(normalize_search_query(text))
+    if not chars:
+        return ""
+    return "%" + "%".join(chars) + "%"
+
+
+def search_scripture(db, query, books=None, limit=10, offset=0, **_legacy):
+    """可夹字模糊搜索：输入「爱永不止息」可命中「爱是永不止息」。"""
+    pattern = gap_like_pattern(query)
+    if not pattern:
         return 0, []
 
     table = db._quote(db.verse_table)
@@ -33,18 +51,9 @@ def search_scripture(db, keywords, fuzzy=True, match_all=True, books=None, limit
     chapter_col = db._quote(db.chapter_col)
     verse_col = db._quote(db.verse_col)
     text_col = db._quote(db.text_col)
-    conditions = []
-    params = []
-    for term in terms:
-        if fuzzy:
-            conditions.append(f"{text_col} LIKE ?")
-            params.append(f"%{term}%")
-        else:
-            conditions.append(f"instr({text_col}, ?) > 0")
-            params.append(term)
 
-    joiner = " AND " if match_all else " OR "
-    where = f"({joiner.join(conditions)})"
+    where = f"{text_col} LIKE ?"
+    params = [pattern]
     if books:
         values = [db.book_meta.get(book, {}).get("id", book) for book in books]
         placeholders = ",".join("?" for _ in values)
@@ -89,20 +98,24 @@ def search_scripture(db, keywords, fuzzy=True, match_all=True, books=None, limit
 
 
 class BookScopeDialog(QDialog):
-    """选择经文搜索范围。"""
+    """选择经文搜索范围（chip 点选，无复选框）。"""
+
+    CHIP_COLS = 2
 
     def __init__(self, db, selected=None, parent=None, theme="dark"):
         super().__init__(parent)
         self.db = db
         self.selected = set(selected or [])
         self.theme = theme if theme in ("dark", "light") else "dark"
-        self._lists = {}
+        self._chips = {}
+        self._chip_meta = {}
         self.setObjectName("scriptureScopeDialog")
         self.setWindowTitle("选择搜索范围")
-        # 与经文搜索面板保持一致的宽度。
-        self.setFixedSize(400, 560)
+        self.setMinimumSize(820, 600)
+        self.resize(880, 640)
         self._build_ui()
         self._apply_style()
+        self._update_count()
 
     def _build_ui(self):
         root = QVBoxLayout(self)
@@ -113,57 +126,37 @@ class BookScopeDialog(QDialog):
         heading.setObjectName("scopeDialogTitle")
         root.addWidget(heading)
 
-        hint = QLabel("点击书卷即可选择或取消选择，选中的书卷会整行高亮。")
-        hint.setObjectName("scopeDialogHint")
-        root.addWidget(hint)
+        self.count_label = QLabel("")
+        self.count_label.setObjectName("scopeDialogHint")
+        root.addWidget(self.count_label)
+
+        presets = QHBoxLayout()
+        presets.setSpacing(8)
+        for text, handler in (
+            ("全选", self._select_all),
+            ("只旧约", lambda: self._select_category("old")),
+            ("只新约", lambda: self._select_category("new")),
+            ("清空", self._clear_all),
+        ):
+            btn = QPushButton(text)
+            btn.setObjectName("scopeAction")
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(32)
+            btn.clicked.connect(handler)
+            presets.addWidget(btn)
+        presets.addStretch(1)
+        root.addLayout(presets)
 
         self.filter_input = QLineEdit()
         self.filter_input.setObjectName("scopeFilter")
-        self.filter_input.setPlaceholderText("搜索书卷名称…")
+        self.filter_input.setPlaceholderText("筛选书卷名称…")
         self.filter_input.textChanged.connect(self._filter_books)
         root.addWidget(self.filter_input)
 
         columns = QHBoxLayout()
         columns.setSpacing(16)
         for title, category in (("旧约", "old"), ("新约", "new")):
-            box = QVBoxLayout()
-            label = QLabel(title)
-            label.setObjectName("scopeTitle")
-            box.addWidget(label)
-
-            actions = QHBoxLayout()
-            actions.setSpacing(8)
-            select_all = QPushButton("全选")
-            clear = QPushButton("清空")
-            select_all.setObjectName("scopeAction")
-            clear.setObjectName("scopeAction")
-            select_all.setFixedSize(72, 32)
-            clear.setFixedSize(72, 32)
-            select_all.clicked.connect(lambda _, c=category: self._set_all(c, True))
-            clear.clicked.connect(lambda _, c=category: self._set_all(c, False))
-            actions.addWidget(select_all)
-            actions.addWidget(clear)
-            actions.addStretch(1)
-            box.addLayout(actions)
-
-            lst = QListWidget()
-            lst.setObjectName("scopeBookList")
-            lst.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
-            lst.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-            lst.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            lst.itemClicked.connect(self._toggle_book)
-            self._lists[category] = lst
-
-            for book, short in self.db.get_books(category):
-                item = QListWidgetItem()
-                item.setData(Qt.ItemDataRole.UserRole, book)
-                item.setData(Qt.ItemDataRole.UserRole + 1, short)
-                lst.addItem(item)
-                self._set_item_checked(item, book in self.selected)
-
-            box.addWidget(lst, 1)
-            columns.addLayout(box, 1)
-
+            columns.addWidget(self._build_category_column(title, category), 1)
         root.addLayout(columns, 1)
 
         buttons = QDialogButtonBox(
@@ -176,91 +169,146 @@ class BookScopeDialog(QDialog):
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
 
-    @staticmethod
-    def _set_item_checked(item, checked):
-        checked = bool(checked)
-        item.setData(Qt.ItemDataRole.UserRole + 2, checked)
-        book = str(item.data(Qt.ItemDataRole.UserRole) or "")
-        short = str(item.data(Qt.ItemDataRole.UserRole + 1) or "")
-        item.setText(f"{book}  ·  {short}")
-        item.setSelected(checked)
+    def _build_category_column(self, title, category):
+        box = QWidget()
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
 
-    def _toggle_book(self, item):
-        self._set_item_checked(item, item.isSelected())
+        header = QHBoxLayout()
+        label = QLabel(title)
+        label.setObjectName("scopeTitle")
+        header.addWidget(label, 1)
+        select_all = QPushButton("全选")
+        clear = QPushButton("清空")
+        select_all.setObjectName("scopeAction")
+        clear.setObjectName("scopeAction")
+        select_all.setFixedHeight(28)
+        clear.setFixedHeight(28)
+        select_all.setCursor(Qt.CursorShape.PointingHandCursor)
+        clear.setCursor(Qt.CursorShape.PointingHandCursor)
+        select_all.clicked.connect(lambda: self._set_category(category, True))
+        clear.clicked.connect(lambda: self._set_category(category, False))
+        header.addWidget(select_all)
+        header.addWidget(clear)
+        layout.addLayout(header)
 
-    def _set_all(self, category, checked):
-        for i in range(self._lists[category].count()):
-            self._set_item_checked(self._lists[category].item(i), checked)
+        scroll = QScrollArea()
+        scroll.setObjectName("scopeChipScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        container = QWidget()
+        container.setObjectName("scopeChipContainer")
+        grid = QGridLayout(container)
+        grid.setContentsMargins(10, 10, 10, 10)
+        grid.setSpacing(10)
+        grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+
+        for i, (book, short) in enumerate(self.db.get_books(category)):
+            chip = QPushButton(book)
+            chip.setObjectName("scopeBookChip")
+            chip.setCheckable(True)
+            chip.setChecked(book in self.selected)
+            chip.setCursor(Qt.CursorShape.PointingHandCursor)
+            chip.setToolTip(f"{book}（{short}）" if short else book)
+            chip.setFixedHeight(36)
+            chip.setMinimumWidth(140)
+            chip.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            chip.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            chip.toggled.connect(lambda _checked, b=book: self._on_chip_toggled(b))
+            self._chips[book] = chip
+            self._chip_meta[book] = (category, short or "")
+            grid.addWidget(chip, i // self.CHIP_COLS, i % self.CHIP_COLS)
+
+        scroll.setWidget(container)
+
+        panel = QFrame()
+        panel.setObjectName("scopeChipPanel")
+        panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(0, 0, 0, 0)
+        panel_layout.setSpacing(0)
+        panel_layout.addWidget(scroll)
+        layout.addWidget(panel, 1)
+        return box
+
+    def _on_chip_toggled(self, book):
+        chip = self._chips.get(book)
+        if chip is None:
+            return
+        if chip.isChecked():
+            self.selected.add(book)
+        else:
+            self.selected.discard(book)
+        self._update_count()
+
+    def _set_category(self, category, checked):
+        for book, chip in self._chips.items():
+            meta = self._chip_meta.get(book)
+            if not meta or meta[0] != category:
+                continue
+            chip.blockSignals(True)
+            chip.setChecked(checked)
+            chip.blockSignals(False)
+            if checked:
+                self.selected.add(book)
+            else:
+                self.selected.discard(book)
+        self._update_count()
+
+    def _select_all(self):
+        for book, chip in self._chips.items():
+            chip.blockSignals(True)
+            chip.setChecked(True)
+            chip.blockSignals(False)
+            self.selected.add(book)
+        self._update_count()
+
+    def _clear_all(self):
+        for book, chip in self._chips.items():
+            chip.blockSignals(True)
+            chip.setChecked(False)
+            chip.blockSignals(False)
+        self.selected.clear()
+        self._update_count()
+
+    def _select_category(self, category):
+        for book, chip in self._chips.items():
+            meta = self._chip_meta.get(book)
+            want = bool(meta and meta[0] == category)
+            chip.blockSignals(True)
+            chip.setChecked(want)
+            chip.blockSignals(False)
+            if want:
+                self.selected.add(book)
+            else:
+                self.selected.discard(book)
+        self._update_count()
 
     def _filter_books(self, text):
         q = text.strip().lower()
-        for lst in self._lists.values():
-            for i in range(lst.count()):
-                item = lst.item(i)
-                book = str(item.data(Qt.ItemDataRole.UserRole) or "")
-                short = str(item.data(Qt.ItemDataRole.UserRole + 1) or "")
-                item.setHidden(bool(q) and q not in book.lower() and q not in short.lower())
+        for book, chip in self._chips.items():
+            short = (self._chip_meta.get(book) or ("", ""))[1]
+            visible = (not q) or (q in book.lower()) or (q in short.lower())
+            chip.setVisible(visible)
+
+    def _update_count(self):
+        n = len(self.selected)
+        total = len(self._chips)
+        if n == 0 or n == total:
+            self.count_label.setText(f"当前：全部书卷（共 {total} 卷）· 点选 chip 切换")
+        else:
+            self.count_label.setText(f"已选 {n} / {total} 卷 · 点选 chip 切换")
 
     def selected_books(self):
-        result = set()
-        for lst in self._lists.values():
-            for i in range(lst.count()):
-                item = lst.item(i)
-                if bool(item.data(Qt.ItemDataRole.UserRole + 2)):
-                    result.add(str(item.data(Qt.ItemDataRole.UserRole)))
-        return result
+        return {book for book, chip in self._chips.items() if chip.isChecked()}
 
     def _apply_style(self):
-        t = theme_tokens(self.theme)
-        self.setStyleSheet(f"""
-        QDialog#scriptureScopeDialog {{
-            background:{t['surface_raised']}; color:{t['text']};
-        }}
-        QLabel#scopeDialogTitle {{
-            color:{t['text']}; font-size:18px; font-weight:600;
-        }}
-        QLabel#scopeDialogHint {{
-            color:{t['text_muted']}; font-size:12px;
-        }}
-        QLineEdit#scopeFilter {{
-            background:{t['control']}; color:{t['text']};
-            border:1px solid {t['border']}; border-radius:9px;
-            padding:0 12px; min-height:40px;
-        }}
-        QLineEdit#scopeFilter:focus {{ border:1px solid {t['focus_ring']}; }}
-        QLabel#scopeTitle {{ color:{t['text']}; font-size:14px; font-weight:600; }}
-        QPushButton#scopeAction {{
-            background:{t['control']}; color:{t['text_muted']};
-            border:1px solid {t['border']}; border-radius:7px; padding:0 12px;
-        }}
-        QPushButton#scopeAction:hover {{
-            background:{t['control_hover']}; color:{t['text']};
-            border-color:{t['border_strong']};
-        }}
-        QListWidget#scopeBookList {{
-            background:{t['surface_sunken']}; color:{t['text']};
-            border:1px solid {t['border']}; border-radius:9px;
-            padding:5px; outline:none;
-        }}
-        QListWidget#scopeBookList::item {{
-            background:{t['control']}; min-height:38px;
-            padding:6px 10px; margin:2px 0;
-            border:1px solid {t['border']}; border-radius:7px;
-            color:{t['text']}; font-size:13px;
-        }}
-        QListWidget#scopeBookList::item:hover {{
-            background:{t['control_hover']}; border-color:{t['border_strong']};
-        }}
-        QListWidget#scopeBookList::item:selected {{
-            background:{t['accent']}; color:#FFFFFF;
-            border:1px solid {t['accent']};
-        }}
-        QDialogButtonBox QPushButton {{
-            min-width:84px; min-height:34px; border-radius:8px;
-            background:{t['control']}; color:{t['text']}; border:1px solid {t['border']};
-        }}
-        QDialogButtonBox QPushButton:hover {{ background:{t['control_hover']}; }}
-        """)
+        # 圆角写在全局 stylesheet（QDialog#scriptureScopeDialog …），
+        # 这里不再 setStyleSheet，避免冲掉 app 样式。
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
 
 class ScriptureSearchDialog(QDialog):
@@ -273,8 +321,6 @@ class ScriptureSearchDialog(QDialog):
         self.history = list(history or [])
         self.theme = theme if theme in ("dark", "light") else "dark"
         self.scope = None
-        self.fuzzy = True
-        self.match_all = True
         self.page = 0
         self.page_size = 10
         self.total = 0
@@ -315,19 +361,17 @@ class ScriptureSearchDialog(QDialog):
         root.addLayout(page_row)
 
     def _search(self):
-        keywords = [x for x in self.input.text().split() if x]
-        if not keywords:
+        query = self.input.text().strip()
+        if not normalize_search_query(query):
             self.status.setText("请输入搜索关键词")
             return
         self.page = 0
-        self._load_results(keywords)
+        self._load_results(query)
 
-    def _load_results(self, keywords):
+    def _load_results(self, query):
         self.total, self.results = search_scripture(
             self.db,
-            keywords,
-            fuzzy=self.fuzzy,
-            match_all=self.match_all,
+            query,
             books=self.scope,
             limit=self.page_size,
             offset=self.page * self.page_size,
@@ -359,16 +403,14 @@ class ScriptureSearchDialog(QDialog):
     def _prev_page(self):
         if self.page <= 0:
             return
-        keywords = [x for x in self.input.text().split() if x]
         self.page -= 1
-        self._load_results(keywords)
+        self._load_results(self.input.text())
 
     def _next_page(self):
         if (self.page + 1) * self.page_size >= self.total:
             return
-        keywords = [x for x in self.input.text().split() if x]
         self.page += 1
-        self._load_results(keywords)
+        self._load_results(self.input.text())
 
     def _apply_style(self):
         t = theme_tokens(self.theme)

@@ -47,7 +47,7 @@ class ExtensionWindow(QWidget):
         self.scripture_display.set_scripture(book_name, chapter, start, end, verses)
         self.force_sync_scroll()
 
-    def update_from_selection(self, selection, verses):
+    def update_from_selection(self, selection, verses, reset_scroll=True):
         """按多段选择更新副屏。"""
         self.current_data = (
             selection.book,
@@ -56,8 +56,12 @@ class ExtensionWindow(QWidget):
             selection.primary_end,
             list(verses or []),
         )
-        self.scripture_display.set_from_selection(selection, verses)
-        self.force_sync_scroll()
+        self.scripture_display.set_from_selection(
+            selection, verses, reset_scroll=reset_scroll
+        )
+        # 方向键调整时由主窗口在恢复滚动后再 _sync_extension_scroll
+        if reset_scroll:
+            self.force_sync_scroll()
 
     def apply_settings(self, settings):
         """应用经文显示设置。"""

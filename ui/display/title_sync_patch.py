@@ -44,7 +44,7 @@ def install_title_sync_patch():
     """替换 ScriptureDisplay 的选择标题生成逻辑。"""
     from .scripture_display import ScriptureDisplay
 
-    def set_from_selection(self, selection, verses):
+    def set_from_selection(self, selection, verses, reset_scroll=True):
         title = _logical_title(selection, verses)
         self.set_scripture(
             selection.book,
@@ -54,6 +54,7 @@ def install_title_sync_patch():
             verses,
             title=title,
             show_chapter_nums=selection.is_multi_chapter,
+            reset_scroll=reset_scroll,
         )
 
     ScriptureDisplay.set_from_selection = set_from_selection
