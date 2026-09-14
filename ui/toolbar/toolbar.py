@@ -4,9 +4,9 @@ from PyQt6.QtWidgets import (
     QToolBar, QPushButton, QLabel, QDialog, QFormLayout,
     QHBoxLayout, QVBoxLayout, QSpinBox, QFontComboBox, QColorDialog,
     QFileDialog, QLineEdit, QDialogButtonBox, QWidget, QSizePolicy,
-    QTabWidget, QGroupBox, QFrame, QGridLayout,
+    QTabWidget, QGroupBox, QFrame, QGridLayout, QComboBox,
 )
-from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QSize, QEvent, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QColor, QPainter, QPen
 
 
@@ -58,9 +58,9 @@ class ColorPreview(QWidget):
 class ToolbarButton(QPushButton):
     """顶栏按钮：统一高度；鼠标移出后清除焦点，避免轮廓残留。"""
 
-    HEIGHT = 48
+    HEIGHT = 44
     ACTION_MIN_WIDTH = 64
-    SPEED_WIDTH = 56
+    SPEED_WIDTH = 52
 
     def __init__(self, text="", parent=None, *, kind="action"):
         super().__init__(text, parent)
@@ -240,6 +240,114 @@ class HelpShortcutsDialog(QDialog):
         return row
 
 
+class SettingsFontComboBox(QFontComboBox):
+    """原生 QFontComboBox 样式；过滤旧字体；弹出宽度与输入框同宽（无闪宽）。"""
+
+    _BLOCKED_FAMILIES = {
+        "ms sans serif",
+        "ms serif",
+        "ms shell dlg",
+        "ms shell dlg 2",
+        "system",
+        "fixedsys",
+        "terminal",
+        "small fonts",
+        "roman",
+        "script",
+        "modern",
+        "8514oem",
+        "system bold",
+    }
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMinimumWidth(0)
+        self.setFontFilters(QFontComboBox.FontFilter.ScalableFonts)
+        view = self.view()
+        view.setTextElideMode(Qt.TextElideMode.ElideRight)
+        view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        view.installEventFilter(self)
+        self._popup_filter_installed = False
+        QTimer.singleShot(0, self._purge_blocked_fonts)
+
+    def _purge_blocked_fonts(self):
+        blocked = self._BLOCKED_FAMILIES
+        for i in range(self.count() - 1, -1, -1):
+            data = self.itemData(i)
+            if isinstance(data, QFont):
+                name = (data.family() or "").strip().casefold()
+            else:
+                name = (self.itemText(i) or "").strip().casefold()
+            if name in blocked:
+                self.removeItem(i)
+
+    def _target_width(self) -> int:
+        return max(self.width(), 120)
+
+    def _lock_popup_width(self):
+        width = self._target_width()
+        view = self.view()
+        # 先关重绘，锁完再开，避免用户看到「先宽后窄」
+        view.setUpdatesEnabled(False)
+        view.setMinimumWidth(width)
+        view.setMaximumWidth(width)
+        view.setFixedWidth(width)
+        container = view.parentWidget()
+        if container is not None:
+            container.setUpdatesEnabled(False)
+            container.setMinimumWidth(0)
+            container.setMaximumWidth(width)
+            container.setFixedWidth(width)
+        popup = view.window()
+        if popup is not None and popup is not self.window():
+            popup.setUpdatesEnabled(False)
+            popup.setMinimumWidth(0)
+            popup.setMaximumWidth(width)
+            popup.setFixedWidth(width)
+            popup.setUpdatesEnabled(True)
+        if container is not None:
+            container.setUpdatesEnabled(True)
+        view.setUpdatesEnabled(True)
+
+    def eventFilter(self, obj, event):
+        et = event.type()
+        if et in (
+            QEvent.Type.Show,
+            QEvent.Type.Resize,
+            QEvent.Type.LayoutRequest,
+            QEvent.Type.PolishRequest,
+        ):
+            view = self.view()
+            popup = view.window() if view is not None else None
+            if obj is view or obj is popup or obj is (view.parentWidget() if view else None):
+                width = self._target_width()
+                if getattr(obj, "width", lambda: width)() != width:
+                    self._lock_popup_width()
+        return super().eventFilter(obj, event)
+
+    def showPopup(self):
+        self._purge_blocked_fonts()
+        width = self._target_width()
+        view = self.view()
+        view.setMinimumWidth(width)
+        view.setMaximumWidth(width)
+        view.setFixedWidth(width)
+        super().showPopup()
+        self._lock_popup_width()
+        popup = view.window()
+        container = view.parentWidget()
+        if container is not None:
+            container.installEventFilter(self)
+        if (
+            popup is not None
+            and popup is not self.window()
+            and not self._popup_filter_installed
+        ):
+            popup.installEventFilter(self)
+            self._popup_filter_installed = True
+
+
 class DisplaySettingsDialog(QDialog):
     def __init__(self, settings, parent=None):
         super().__init__(parent)
@@ -262,6 +370,25 @@ class DisplaySettingsDialog(QDialog):
                 available.y() + (available.height() - height) // 2,
             )
 
+    @staticmethod
+    def _make_settings_form(page):
+        form = QFormLayout(page)
+        form.setContentsMargins(20, 20, 20, 20)
+        form.setHorizontalSpacing(18)
+        form.setVerticalSpacing(12)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        return form
+
+    @staticmethod
+    def _make_spin(lo, hi):
+        spin = QSpinBox()
+        spin.setRange(lo, hi)
+        spin.setSuffix(" px")
+        spin.setMinimumWidth(0)
+        spin.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        return spin
+
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 12)
@@ -281,14 +408,9 @@ class DisplaySettingsDialog(QDialog):
         text_tabs.setDocumentMode(True)
 
         body_page = QWidget()
-        body_form = QFormLayout(body_page)
-        body_form.setContentsMargins(20, 20, 20, 20)
-        body_form.setHorizontalSpacing(18)
-        body_form.setVerticalSpacing(12)
-        self.font_combo = QFontComboBox()
-        self.font_size = QSpinBox()
-        self.font_size.setRange(12, 300)
-        self.font_size.setSuffix(" px")
+        body_form = self._make_settings_form(body_page)
+        self.font_combo = SettingsFontComboBox()
+        self.font_size = self._make_spin(12, 300)
         self.font_color_btn = ColorPreview("#FFFFFF")
         body_form.addRow("正文字体", self.font_combo)
         body_form.addRow("正文字号", self.font_size)
@@ -296,14 +418,9 @@ class DisplaySettingsDialog(QDialog):
         text_tabs.addTab(body_page, "正文")
 
         title_page = QWidget()
-        title_form = QFormLayout(title_page)
-        title_form.setContentsMargins(20, 20, 20, 20)
-        title_form.setHorizontalSpacing(18)
-        title_form.setVerticalSpacing(12)
-        self.title_font_combo = QFontComboBox()
-        self.title_size = QSpinBox()
-        self.title_size.setRange(12, 300)
-        self.title_size.setSuffix(" px")
+        title_form = self._make_settings_form(title_page)
+        self.title_font_combo = SettingsFontComboBox()
+        self.title_size = self._make_spin(12, 300)
         self.title_color_btn = ColorPreview("#FFFFFF")
         title_form.addRow("标题字体", self.title_font_combo)
         title_form.addRow("标题字号", self.title_size)
@@ -311,14 +428,9 @@ class DisplaySettingsDialog(QDialog):
         text_tabs.addTab(title_page, "标题")
 
         scripture_title_page = QWidget()
-        scripture_title_form = QFormLayout(scripture_title_page)
-        scripture_title_form.setContentsMargins(20, 20, 20, 20)
-        scripture_title_form.setHorizontalSpacing(18)
-        scripture_title_form.setVerticalSpacing(12)
-        self.scripture_title_font_combo = QFontComboBox()
-        self.scripture_title_size = QSpinBox()
-        self.scripture_title_size.setRange(10, 200)
-        self.scripture_title_size.setSuffix(" px")
+        scripture_title_form = self._make_settings_form(scripture_title_page)
+        self.scripture_title_font_combo = SettingsFontComboBox()
+        self.scripture_title_size = self._make_spin(10, 200)
         self.scripture_title_color_btn = ColorPreview("#87CEEB")
         scripture_title_form.addRow("小标题字体", self.scripture_title_font_combo)
         scripture_title_form.addRow("小标题字号", self.scripture_title_size)
@@ -326,14 +438,9 @@ class DisplaySettingsDialog(QDialog):
         text_tabs.addTab(scripture_title_page, "小标题")
 
         verse_page = QWidget()
-        verse_form = QFormLayout(verse_page)
-        verse_form.setContentsMargins(20, 20, 20, 20)
-        verse_form.setHorizontalSpacing(18)
-        verse_form.setVerticalSpacing(12)
-        self.verse_font_combo = QFontComboBox()
-        self.verse_size = QSpinBox()
-        self.verse_size.setRange(10, 200)
-        self.verse_size.setSuffix(" px")
+        verse_form = self._make_settings_form(verse_page)
+        self.verse_font_combo = SettingsFontComboBox()
+        self.verse_size = self._make_spin(10, 200)
         self.verse_color_btn = ColorPreview("#FFFFFF")
         verse_form.addRow("节号字体", self.verse_font_combo)
         verse_form.addRow("节号字号", self.verse_size)
@@ -341,14 +448,9 @@ class DisplaySettingsDialog(QDialog):
         text_tabs.addTab(verse_page, "节号")
 
         footer_page = QWidget()
-        footer_form = QFormLayout(footer_page)
-        footer_form.setContentsMargins(20, 20, 20, 20)
-        footer_form.setHorizontalSpacing(18)
-        footer_form.setVerticalSpacing(12)
-        self.footer_font_combo = QFontComboBox()
-        self.footer_size = QSpinBox()
-        self.footer_size.setRange(10, 100)
-        self.footer_size.setSuffix(" px")
+        footer_form = self._make_settings_form(footer_page)
+        self.footer_font_combo = SettingsFontComboBox()
+        self.footer_size = self._make_spin(10, 100)
         self.footer_color_btn = ColorPreview("#FFFFFF")
         footer_form.addRow("底注字体", self.footer_font_combo)
         footer_form.addRow("底注字号", self.footer_size)
@@ -498,7 +600,9 @@ class DisplaySettingsDialog(QDialog):
         self.font_size.setValue(int(s.get("font_size", 24)))
         self.title_font_combo.setCurrentFont(QFont(s.get("title_font_family", "微软雅黑")))
         self.title_size.setValue(int(s.get("title_size", 36)))
-        self.scripture_title_font_combo.setCurrentFont(QFont(s.get("scripture_title_font_family", "微软雅黑")))
+        self.scripture_title_font_combo.setCurrentFont(
+            QFont(s.get("scripture_title_font_family", "微软雅黑"))
+        )
         self.scripture_title_size.setValue(int(s.get("scripture_title_size", 30)))
         self.verse_font_combo.setCurrentFont(QFont(s.get("verse_num_font_family", "微软雅黑")))
         self.verse_size.setValue(int(s.get("verse_num_size", 24)))
@@ -560,6 +664,7 @@ class ToolBarWidget(QToolBar):
         self.setMovable(False)
         self.setIconSize(QSize(18, 18))
         self.setFloatable(False)
+        self.setMinimumHeight(64)
         self.theme = "dark"
         self.settings = {}
         self._speed = 0
@@ -601,14 +706,17 @@ class ToolBarWidget(QToolBar):
 
         # —— 滚动速度（暂停 + 1～9 档）——
         scroll_wrap = QWidget()
-        scroll_wrap.setFixedHeight(ToolbarButton.HEIGHT)
+        scroll_wrap.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         scroll_layout = QHBoxLayout(scroll_wrap)
         scroll_layout.setContentsMargins(0, 0, 0, 0)
         scroll_layout.setSpacing(4)
-        scroll_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        scroll_layout.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
         speed_caption = QLabel("速度")
-        speed_caption.setFixedHeight(ToolbarButton.HEIGHT)
-        speed_caption.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
+        speed_caption.setAlignment(
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight
+        )
         scroll_layout.addWidget(speed_caption)
         self.speed_buttons = []
         for speed, text in [(0, "暂停")] + [(i, f"{i}档") for i in range(1, 10)]:
