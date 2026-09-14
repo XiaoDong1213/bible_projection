@@ -17,7 +17,7 @@ def attach_fulltext_search(window):
     button = QPushButton("经文搜索")
     button.setObjectName("scriptureSearchToolbarButton")
     button.setCursor(Qt.CursorShape.PointingHandCursor)
-    button.setFixedHeight(48)
+    button.setFixedHeight(44)
     button.setMinimumWidth(64)
     button.setToolTip("搜索整本圣经经文  Ctrl+F")
     button.clicked.connect(lambda: _toggle(window))

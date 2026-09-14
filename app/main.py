@@ -6,8 +6,8 @@ import os
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
+from PyQt6.QtCore import Qt, QLoggingCategory
+from PyQt6.QtGui import QFont, QFontDatabase, QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import QApplication
 
 from app.feature_flags import ENABLE_SCRIPTURE_SEARCH
@@ -41,8 +41,16 @@ def main():
     except OSError:
         pass
 
+    # 压掉 DirectWrite 加载旧位图字体时的噪音日志（不影响功能）
+    QLoggingCategory.setFilterRules("qt.qpa.fonts=false")
+
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    # 默认 UI 字体，减少回退到 MS Sans Serif
+    for family in ("Microsoft YaHei UI", "微软雅黑", "Segoe UI"):
+        if family in QFontDatabase.families():
+            app.setFont(QFont(family, 10))
+            break
 
     icon_file = icon_path()
     app_icon = QIcon(str(icon_file)) if icon_file.exists() else QIcon()

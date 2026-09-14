@@ -224,8 +224,9 @@ QToolBar {{
     background: {t['surface']};
     border: none;
     border-bottom: 1px solid {t['border']};
-    padding: 10px 14px;
+    padding: 8px 14px;
     spacing: 8px;
+    min-height: 64px;
 }}
 QToolBar QLabel {{
     color: {t['text_muted']};
@@ -240,14 +241,14 @@ QToolBar QPushButton {{
     padding: 0 16px;
     font-size: 13px;
     font-weight: 400;
-    min-height: 48px;
-    max-height: 48px;
+    min-height: 44px;
+    max-height: 44px;
     min-width: 64px;
 }}
 QToolBar QPushButton#speedBtn {{
     padding: 0 4px;
-    min-width: 56px;
-    max-width: 56px;
+    min-width: 52px;
+    max-width: 52px;
     font-weight: 400;
     font-size: 13px;
 }}
@@ -421,8 +422,8 @@ QToolBar QComboBox {{
     border-radius: {r['md']}px;
     padding: 6px 12px;
     min-width: 88px;
-    min-height: 48px;
-    max-height: 48px;
+    min-height: 44px;
+    max-height: 44px;
     font-size: 13px;
 }}
 QToolBar QComboBox:hover {{
@@ -445,10 +446,10 @@ QToolBar QPushButton#extendBtn {{
     background: {t['accent']};
     color: #FFFFFF;
     border: 1px solid {t['accent']};
-    font-weight: 400;
+    font-weight: 600;
     padding: 0 16px;
-    min-height: 48px;
-    max-height: 48px;
+    min-height: 44px;
+    max-height: 44px;
     min-width: 64px;
 }}
 QToolBar QPushButton#extendBtn:hover {{
@@ -462,8 +463,8 @@ QToolBar QPushButton#extendBtn:pressed {{
 }}
 QToolBar QPushButton#scriptureSearchToolbarButton {{
     min-width: 64px;
-    max-height: 48px;
-    min-height: 48px;
+    max-height: 44px;
+    min-height: 44px;
     padding: 0 16px;
     font-size: 13px;
 }}
@@ -855,6 +856,7 @@ QComboBox QAbstractItemView, QFontComboBox QAbstractItemView {{
     border: 1px solid {t['border']};
     selection-background-color: {t['accent']};
     selection-color: #FFFFFF;
+    outline: none;
 }}
 QComboBox::drop-down, QFontComboBox::drop-down {{
     subcontrol-origin: padding;
