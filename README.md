@@ -86,6 +86,7 @@ Bible Pro 提供 **经文全文搜索** 侧栏（可由功能开关启用），�
 
 - 正文字体、字号、颜色。
 - 标题字体、字号、颜色。
+- 小标题字体、字号、颜色。
 - 节号字体、字号、颜色。
 - 底注字体、字号、颜色。
 - 行距。
@@ -174,6 +175,7 @@ bible_projection/
 ├── requirements.txt                # Python 依赖
 ├── app/                            # 启动与功能开关
 │   ├── main.py
+│   ├── splash.py                   # 启动页（图标 + 标题）
 │   └── feature_flags.py
 ├── core/                           # 业务核心
 │   ├── config.py                   # 配置、显示设置、历史数据
