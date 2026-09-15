@@ -7,11 +7,10 @@ from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import QPushButton, QSizePolicy
 
 from core.selection import ScriptureSelection
-from .panel import ScriptureSearchWidget
 
 
 def attach_fulltext_search(window):
-    """在主窗口工具栏挂载「经文搜索」按钮与 Ctrl+F。"""
+    """在主窗口工具栏挂载「经文搜索」按钮与 Ctrl+F（面板首次打开时再创建）。"""
     window._scripture_search_widget = None
 
     button = QPushButton("经文搜索")
@@ -33,15 +32,15 @@ def attach_fulltext_search(window):
     shortcut.activated.connect(lambda: _toggle(window))
     window._scripture_search_shortcut = shortcut
 
-    _ensure_panel(window)
-    window._scripture_search_widget.hide()
-
 
 def _ensure_panel(window):
-    """把搜索面板嵌进主窗口中央布局，高度随窗口一起变化。"""
+    """首次打开时再创建搜索面板并挂到中央布局。"""
     widget = getattr(window, "_scripture_search_widget", None)
     if widget is not None:
         return widget
+
+    # 延迟导入重模块，避免拖慢冷启动
+    from .panel import ScriptureSearchWidget
 
     central = window.centralWidget()
     widget = ScriptureSearchWidget(window.db, window.config, central, theme=window.theme)
@@ -49,6 +48,7 @@ def _ensure_panel(window):
     widget.result_activated.connect(lambda result: _activate(window, result))
     widget.result_project_requested.connect(lambda result: _project(window, result))
     widget.close_requested.connect(widget.hide)
+    widget.hide()
 
     layout = central.layout()
     if layout is not None:

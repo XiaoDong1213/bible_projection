@@ -10,6 +10,25 @@ from PyQt6.QtGui import (
     QFont, QColor, QPixmap, QFontMetrics, QPainter, QTextDocument, QShortcut, QKeySequence,
 )
 
+from app.feature_flags import ENABLE_SCRIPTURE_TITLES
+
+
+def _coerce_color(value, fallback="#87CEEB"):
+    if isinstance(value, QColor):
+        return value if value.isValid() else QColor(fallback)
+    color = QColor(str(value) if value is not None else fallback)
+    return color if color.isValid() else QColor(fallback)
+
+
+def _coerce_bool(value, default=False):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() in {"true", "1", "yes", "on"}
+
 
 class ScriptureBody(QWidget):
     """经文正文区：用浮点 scroll_y 平移绘制，观感接近网页提词器。"""
@@ -31,6 +50,17 @@ class ScriptureBody(QWidget):
         if abs(y-self._scroll_y)<1e-4: self._scroll_y=y; return
         self._scroll_y=y; self.update()
         if emit: self.scroll_changed.emit(self._scroll_y)
+    def _clamp_scroll(self):
+        self.set_scroll_y(self._scroll_y, emit=False)
+    def scroll_fraction(self):
+        maximum = self.max_scroll()
+        return 0.0 if maximum <= 0 else self._scroll_y / maximum
+    def set_scroll_fraction(self, fraction):
+        try:
+            value = max(0.0, min(1.0, float(fraction)))
+        except (TypeError, ValueError):
+            return
+        self.set_scroll_y(value * self.max_scroll())
     def scroll_by(self,delta):
         try: delta=float(delta)
         except (TypeError,ValueError): return
@@ -54,7 +84,7 @@ class ScriptureBody(QWidget):
 class ScriptureDisplay(QWidget):
     scroll_changed=pyqtSignal(int); scroll_finished=pyqtSignal(); _TICK_MS_LEGACY=30.0
     def __init__(self,parent=None):
-        super().__init__(parent); self.font_family="微软雅黑"; self.font_size=24; self.font_color=QColor("#FFFFFF"); self.bg_color=QColor("#000000"); self.bg_image=None; self._bg_pixmap=None; self._bg_pixmap_path=None; self._bg_scaled=None; self._bg_scaled_size=None; self.line_spacing=160; self.margin_left=60; self.margin_right=60; self.title_font_family="微软雅黑"; self.title_color=QColor("#87CEEB"); self.title_size=36; self.title_min_size=12; self.title_spacing=12; self.show_scripture_titles=False; self.verse_num_color=QColor("#FFD700"); self.verse_num_size=24; self.verse_num_font_family="微软雅黑"; self.footer_text=""; self.footer_height=45; self.footer_size=14; self.footer_color=QColor("#AAAAAA"); self.footer_font_family="微软雅黑"; self.scroll_speed=0; self._scroll_anim=None; self._scroll_clock=QElapsedTimer(); self._refresh_hz=60.0; self._screen_hooked=False; self._title_text=""; self.verses=[]; self.verse_segmentation=False; self._show_chapter_nums=False; self._reference_size=None; self._design_height=1080; self.scroll_timer=QTimer(self); self.scroll_timer.setTimerType(Qt.TimerType.PreciseTimer); self.scroll_timer.timeout.connect(self._auto_scroll); self._apply_refresh_interval(); self._init_ui(); self.setFocusPolicy(Qt.FocusPolicy.StrongFocus); self._home_shortcut=QShortcut(QKeySequence(Qt.Key.Key_Home),self); self._home_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut); self._home_shortcut.activated.connect(self._scroll_to_top); self._end_shortcut=QShortcut(QKeySequence(Qt.Key.Key_End),self); self._end_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut); self._end_shortcut.activated.connect(self._scroll_to_bottom)
+        super().__init__(parent); self.font_family="微软雅黑"; self.font_size=24; self.font_color=QColor("#FFFFFF"); self.bg_color=QColor("#000000"); self.bg_image=None; self._bg_pixmap=None; self._bg_pixmap_path=None; self._bg_scaled=None; self._bg_scaled_size=None; self.line_spacing=160; self.margin_left=60; self.margin_right=60; self.title_font_family="微软雅黑"; self.title_color=QColor("#87CEEB"); self.title_size=36; self.title_min_size=12; self.title_spacing=12; self.show_scripture_titles=False; self.scripture_title_font_family="微软雅黑"; self.scripture_title_size=30; self.scripture_title_color=QColor("#87CEEB"); self.scripture_title_spacing=8; self.scripture_title_line_spacing=120; self.verse_num_color=QColor("#FFD700"); self.verse_num_size=24; self.verse_num_font_family="微软雅黑"; self.footer_text=""; self.footer_height=45; self.footer_size=14; self.footer_color=QColor("#AAAAAA"); self.footer_font_family="微软雅黑"; self.scroll_speed=0; self._scroll_anim=None; self._scroll_clock=QElapsedTimer(); self._refresh_hz=60.0; self._screen_hooked=False; self._title_text=""; self.verses=[]; self.verse_segmentation=False; self._show_chapter_nums=False; self._reference_size=None; self._design_height=1080; self.scroll_timer=QTimer(self); self.scroll_timer.setTimerType(Qt.TimerType.PreciseTimer); self.scroll_timer.timeout.connect(self._auto_scroll); self._apply_refresh_interval(); self._init_ui(); self.setFocusPolicy(Qt.FocusPolicy.StrongFocus); self._home_shortcut=QShortcut(QKeySequence(Qt.Key.Key_Home),self); self._home_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut); self._home_shortcut.activated.connect(self._scroll_to_top); self._end_shortcut=QShortcut(QKeySequence(Qt.Key.Key_End),self); self._end_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut); self._end_shortcut.activated.connect(self._scroll_to_bottom)
     def _init_ui(self):
         layout=QVBoxLayout(self); layout.setContentsMargins(0,0,0,0); layout.setSpacing(0); self.title_bar=QLabel(""); self.title_bar.setAlignment(Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter); layout.addWidget(self.title_bar); self.text_display=ScriptureBody(); self.text_display.scroll_changed.connect(self._on_body_scroll_changed); layout.addWidget(self.text_display,1); self.footer_label=QLabel(self); self.footer_label.setAlignment(Qt.AlignmentFlag.AlignCenter); self.footer_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents); self.footer_label.show(); self._update_footer_style(); self._update_viewport_margins()
     def _scroll_to_top(self):
@@ -97,21 +127,39 @@ class ScriptureDisplay(QWidget):
         else: self.text_display._clamp_scroll()
         self.update()
     def _logical_title_from_verses(self, selection, verses):
-        """优先使用数据库解析出的逻辑节号，让投影顶部标题与正文连续节显示一致。"""
-        if not selection.is_simple or not verses: return selection.title()
-        try:
-            first=verses[0]
-            label=str(first[1]) if len(first)>=2 else ""
-            if not label or "-" not in label: return selection.title()
-            span=selection.spans[0]
-            # 只有当逻辑节号确实落在当前选择范围内时才替换标题。
-            parts=label.split("-",1)
-            start=int(parts[0]); end=int(parts[1])
-            if start<=span.start<=end:
-                unit="篇" if selection.book=="诗篇" else "章"
-                return f"{selection.book}{span.chapter}{unit}{label}节"
-        except (TypeError,ValueError,IndexError): pass
-        return selection.title()
+        """根据当前实际渲染的逻辑经文行生成标题范围。"""
+        if not selection.is_simple or not verses:
+            return selection.title()
+        span = selection.spans[0]
+        starts = []
+        ends = []
+        for row in verses:
+            if row is None or len(row) < 2:
+                continue
+            label = str(row[1] or "").strip()
+            if not label:
+                continue
+            try:
+                if "-" in label:
+                    left, right = label.split("-", 1)
+                    start = int(left)
+                    end = int(right)
+                else:
+                    start = end = int(label)
+            except (TypeError, ValueError):
+                continue
+            starts.append(start)
+            ends.append(end)
+        if not starts:
+            return selection.title()
+        logical_start = min(starts)
+        logical_end = max(ends)
+        unit = "篇" if selection.book == "诗篇" else "章"
+        if logical_start == logical_end:
+            body = str(logical_start)
+        else:
+            body = f"{logical_start}-{logical_end}"
+        return f"{selection.book}{span.chapter}{unit}{body}节"
     def set_from_selection(self,selection,verses,reset_scroll=True):
         title=self._logical_title_from_verses(selection,verses)
         self.set_scripture(selection.book,selection.primary_chapter,selection.primary_start,selection.primary_end,verses,title=title,show_chapter_nums=selection.is_multi_chapter,reset_scroll=reset_scroll)
@@ -128,7 +176,7 @@ class ScriptureDisplay(QWidget):
         old=self.scroll_fraction(); self.verse_segmentation=enabled
         if self.verses:self._render_scripture(); self.set_scroll_fraction(old)
     def set_scripture_titles(self,enabled):
-        enabled=bool(enabled)
+        enabled=bool(enabled) and ENABLE_SCRIPTURE_TITLES
         if self.show_scripture_titles==enabled:return
         old=self.scroll_fraction(); self.show_scripture_titles=enabled
         if self.verses:self._render_scripture(); self.set_scroll_fraction(old)
@@ -140,7 +188,9 @@ class ScriptureDisplay(QWidget):
     def _verse_html(self,chapter,n,t):
         safe=str(t).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;"); vn=self._px(self.verse_num_size); fs=self._px(self.font_size); label=f"{chapter}:{n}" if getattr(self,"_show_chapter_nums",False) and chapter is not None else str(n); return f'<span style="color:{self.verse_num_color.name()};font-size:{vn}px;font-family:&quot;{self.verse_num_font_family}&quot;;font-weight:bold;vertical-align:super;">{label}</span>&nbsp;<span style="color:{self.font_color.name()};font-size:{fs}px;font-family:&quot;{self.font_family}&quot;;">{safe}</span>'
     def _title_html(self,text):
-        safe=str(text or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\n","<br>"); fs=self._px(self.title_size); spacing=self._px(self.title_spacing); return f'<p style="margin:0 0 {spacing}px 0;padding:0;line-height:{self.line_spacing}%;"><span style="color:{self.title_color.name()};font-size:{fs}px;font-family:&quot;{self.title_font_family}&quot;;font-weight:bold;">{safe}</span></p>'
+        safe=str(text or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\n","<br>"); fs=self._px(self.scripture_title_size); return f'<p style="margin:0 0 8px 0;padding:0;line-height:{self.line_spacing}%;"><span style="color:{self.scripture_title_color.name()};font-size:{fs}px;font-family:&quot;{self.scripture_title_font_family}&quot;;font-weight:bold;">{safe}</span></p>'
+    def _title_inline_html(self,text):
+        safe=str(text or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\n","<br>"); fs=self._px(self.scripture_title_size); return f'<br><span style="color:{self.scripture_title_color.name()};font-size:{fs}px;font-family:&quot;{self.scripture_title_font_family}&quot;;font-weight:bold;">{safe}</span><br>'
     def _verse_block_html(self,chapter,n,t): return f"<p style='margin:0;padding:0;text-align:justify;line-height:{self.line_spacing}%;'>{self._verse_html(chapter,n,t)}</p>"
     def _render_scripture(self):
         fs=self._px(self.font_size); top=max(10,int(fs*0.35)); bottom=max(12,int(fs*0.45)); html=f"<div style='padding-top:{top}px;padding-bottom:{bottom}px;margin:0;line-height:{self.line_spacing}%;text-align:justify;'>"; rows=[self._verse_row(row) for row in self.verses]
@@ -196,9 +246,38 @@ class ScriptureDisplay(QWidget):
         if self.scroll_speed<=0:return
         if not self._scroll_clock.isValid():self._scroll_clock.start();return
         elapsed_ms=max(0,self._scroll_clock.restart()); delta=elapsed_ms*self.scroll_speed/self._TICK_MS_LEGACY; current=self.scroll_position(); target=min(self.max_scroll(),current+delta); self.set_scroll_position(target)
-        if target>=self.max_scroll()-0.5:self.set_scroll_speed(0)
+        if target>=self.max_scroll()-0.5:
+            self.set_scroll_speed(0)
+            if self.max_scroll()>0: self.scroll_finished.emit()
     def apply_settings(self,settings):
-        self.font_family=settings.get("font_family",self.font_family); self.font_size=int(settings.get("font_size",self.font_size)); self.font_color=QColor(settings.get("font_color",self.font_color.name())); self.bg_color=QColor(settings.get("bg_color",self.bg_color.name())); self.bg_image=settings.get("bg_image",self.bg_image); self.line_spacing=int(settings.get("line_spacing",self.line_spacing)); self.margin_left=int(settings.get("margin",self.margin_left)); self.margin_right=int(settings.get("margin",self.margin_right)); self.title_font_family=settings.get("title_font_family",self.title_font_family); self.title_color=QColor(settings.get("title_color",self.title_color.name())); self.title_size=int(settings.get("title_size",self.title_size)); self.title_spacing=int(settings.get("title_spacing",self.title_spacing)); self.show_scripture_titles=bool(settings.get("show_scripture_titles",self.show_scripture_titles)); self.verse_num_font_family=settings.get("verse_num_font_family",self.verse_num_font_family); self.verse_num_size=int(settings.get("verse_num_size",self.verse_num_size)); self.verse_num_color=QColor(settings.get("verse_num_color",self.verse_num_color.name())); self.footer_font_family=settings.get("footer_font_family",self.footer_font_family); self.footer_size=int(settings.get("footer_size",self.footer_size)); self.footer_color=QColor(settings.get("footer_color",self.footer_color.name())); self.footer_text=settings.get("footer_text",self.footer_text); self.footer_height=int(settings.get("footer_height",self.footer_height)); self._refresh_layout_metrics(); self._update_footer_style(); self.update()
+        self.font_family=settings.get("font_family",self.font_family)
+        self.font_size=int(settings.get("font_size",self.font_size))
+        self.font_color=_coerce_color(settings.get("font_color",self.font_color),"#FFFFFF")
+        self.bg_color=_coerce_color(settings.get("bg_color",self.bg_color),"#000000")
+        self.bg_image=settings.get("bg_image",self.bg_image)
+        self.line_spacing=int(settings.get("line_spacing",self.line_spacing))
+        self.margin_left=int(settings.get("margin",self.margin_left))
+        self.margin_right=int(settings.get("margin",self.margin_right))
+        self.title_font_family=settings.get("title_font_family",self.title_font_family)
+        self.title_color=_coerce_color(settings.get("title_color",self.title_color),"#87CEEB")
+        self.title_size=int(settings.get("title_size",self.title_size))
+        self.title_spacing=int(settings.get("title_spacing",self.title_spacing))
+        self.show_scripture_titles=_coerce_bool(settings.get("show_scripture_titles",self.show_scripture_titles),self.show_scripture_titles)
+        if not ENABLE_SCRIPTURE_TITLES:
+            self.show_scripture_titles=False
+        self.scripture_title_font_family=str(settings.get("scripture_title_font_family",self.scripture_title_font_family))
+        try: self.scripture_title_size=max(10,min(200,int(settings.get("scripture_title_size",self.scripture_title_size))))
+        except (TypeError,ValueError): self.scripture_title_size=30
+        self.scripture_title_color=_coerce_color(settings.get("scripture_title_color",self.scripture_title_color),"#87CEEB")
+        self.verse_num_font_family=settings.get("verse_num_font_family",self.verse_num_font_family)
+        self.verse_num_size=int(settings.get("verse_num_size",self.verse_num_size))
+        self.verse_num_color=_coerce_color(settings.get("verse_num_color",self.verse_num_color),"#FFD700")
+        self.footer_font_family=settings.get("footer_font_family",self.footer_font_family)
+        self.footer_size=int(settings.get("footer_size",self.footer_size))
+        self.footer_color=_coerce_color(settings.get("footer_color",self.footer_color),"#AAAAAA")
+        self.footer_text=settings.get("footer_text",self.footer_text)
+        self.footer_height=int(settings.get("footer_height",self.footer_height))
+        self._refresh_layout_metrics(); self._update_footer_style(); self.update()
     def set_title(self,title): self._set_adaptive_title(title)
     def _update_overlay_geometry(self):
         if not self.footer_label:return

@@ -14,6 +14,9 @@ build/
 dist/
 dist_installer/
 
+# Codegraph 本地索引
+.codegraph/
+
 # 本地临时
 .local_backup_keep/
 _tmp_*.py
