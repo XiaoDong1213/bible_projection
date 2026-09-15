@@ -208,19 +208,24 @@ class MainWindow(QMainWindow):
         self.config.save_display_settings({"theme": t})
 
     def _show_search(self):
-        if hasattr(self, "search_widget") and self.search_widget.isVisible():
-            self.search_widget.close()
+        existing = getattr(self, "search_widget", None)
+        if existing is not None and existing.isVisible():
+            existing.close()
             return
-        self.search_widget = SearchWidget(self.db, self, theme=self.theme)
-        self.search_widget.search_triggered.connect(self._on_search_result)
-        self.search_widget.close_requested.connect(self._close_search)
+        if existing is None:
+            self.search_widget = SearchWidget(self.db, self, theme=self.theme)
+            self.search_widget.search_triggered.connect(self._on_search_result)
+            self.search_widget.close_requested.connect(self._close_search)
+        else:
+            self.search_widget.apply_theme(self.theme)
         self.search_widget.move(self.mapToGlobal(QPoint(self.width() // 2 - 330, 72)))
         self.search_widget.show()
         self.search_widget.search_input.setFocus()
 
     def _close_search(self):
-        if hasattr(self, "search_widget"):
-            self.search_widget.close()
+        widget = getattr(self, "search_widget", None)
+        if widget is not None:
+            widget.hide()
 
     def _on_search_result(self, selection):
         selection = self._coerce_selection(selection)

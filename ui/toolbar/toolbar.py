@@ -2,14 +2,46 @@
 
 from PyQt6.QtWidgets import (
     QToolBar, QPushButton, QLabel, QDialog, QFormLayout,
-    QHBoxLayout, QVBoxLayout, QSpinBox, QFontComboBox, QColorDialog,
+    QHBoxLayout, QVBoxLayout, QSpinBox, QColorDialog,
     QFileDialog, QLineEdit, QDialogButtonBox, QWidget, QSizePolicy,
-    QTabWidget, QGroupBox, QFrame, QGridLayout, QComboBox,
+    QTabWidget, QGroupBox, QFrame, QGridLayout, QComboBox, QCompleter,
 )
-from PyQt6.QtCore import Qt, QSize, QEvent, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QColor, QPainter, QPen
+from PyQt6.QtCore import Qt, QSize, QStringListModel, QTimer, pyqtSignal
+from PyQt6.QtGui import QFont, QFontDatabase, QColor, QPainter, QPen
 
 from app.feature_flags import ENABLE_SCRIPTURE_TITLES
+
+
+# 全进程共用一份字体列表，避免打开设置时扫 5 遍
+_FONT_FAMILIES_CACHE: list[str] | None = None
+
+_BLOCKED_FONT_FAMILIES = {
+    "ms sans serif",
+    "ms serif",
+    "ms shell dlg",
+    "ms shell dlg 2",
+    "system",
+    "fixedsys",
+    "terminal",
+    "small fonts",
+    "roman",
+    "script",
+    "modern",
+    "8514oem",
+    "system bold",
+}
+
+
+def _font_families() -> list[str]:
+    global _FONT_FAMILIES_CACHE
+    if _FONT_FAMILIES_CACHE is None:
+        blocked = _BLOCKED_FONT_FAMILIES
+        _FONT_FAMILIES_CACHE = [
+            name
+            for name in QFontDatabase.families()
+            if (name or "").strip().casefold() not in blocked
+        ]
+    return _FONT_FAMILIES_CACHE
 
 
 class ColorPreview(QWidget):
@@ -55,6 +87,25 @@ class ColorPreview(QWidget):
         text_color = QColor("#000000" if self._color.lightness() > 160 else "#FFFFFF")
         painter.setPen(text_color)
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, hex_value)
+
+
+class ColorPreviewSlot(QWidget):
+    """固定高度占位框：内部颜色条隐藏时布局高度不变，也不会挡字体下拉。"""
+
+    HEIGHT = 34
+
+    def __init__(self, preview: ColorPreview, parent=None):
+        super().__init__(parent)
+        self.preview = preview
+        self.setFixedHeight(self.HEIGHT)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(preview)
+
+    def set_preview_visible(self, visible: bool):
+        self.preview.setVisible(visible)
 
 
 class ToolbarButton(QPushButton):
@@ -242,112 +293,144 @@ class HelpShortcutsDialog(QDialog):
         return row
 
 
-class SettingsFontComboBox(QFontComboBox):
-    """原生 QFontComboBox 样式；过滤旧字体；弹出宽度与输入框同宽（无闪宽）。"""
-
-    _BLOCKED_FAMILIES = {
-        "ms sans serif",
-        "ms serif",
-        "ms shell dlg",
-        "ms shell dlg 2",
-        "system",
-        "fixedsys",
-        "terminal",
-        "small fonts",
-        "roman",
-        "script",
-        "modern",
-        "8514oem",
-        "system bold",
-    }
+class SettingsFontComboBox(QComboBox):
+    """字体下拉：延迟加载共用列表；弹出前锁宽高，弹出后不再改几何（防闪）。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setMinimumWidth(0)
-        self.setFontFilters(QFontComboBox.FontFilter.ScalableFonts)
+        self.setEditable(True)
+        self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.setMaxVisibleItems(14)
+        self.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.setMinimumContentsLength(10)
+        self._populated = False
+        self._pending_family = "微软雅黑"
+
         view = self.view()
         view.setTextElideMode(Qt.TextElideMode.ElideRight)
         view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        view.installEventFilter(self)
-        self._popup_filter_installed = False
-        QTimer.singleShot(0, self._purge_blocked_fonts)
+        view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        view.setUniformItemSizes(True)
 
-    def _purge_blocked_fonts(self):
-        blocked = self._BLOCKED_FAMILIES
-        for i in range(self.count() - 1, -1, -1):
-            data = self.itemData(i)
-            if isinstance(data, QFont):
-                name = (data.family() or "").strip().casefold()
-            else:
-                name = (self.itemText(i) or "").strip().casefold()
-            if name in blocked:
-                self.removeItem(i)
+        self._completer = QCompleter(self)
+        self._completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self._completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self._completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        self.setCompleter(self._completer)
+
+        self.clear()
+        self.addItem(self._pending_family)
+        self.setCurrentIndex(0)
+        self.setEditText(self._pending_family)
+
+    def currentFont(self) -> QFont:
+        family = (self.currentText() or self._pending_family or "微软雅黑").strip()
+        return QFont(family)
+
+    def setCurrentFont(self, font: QFont):
+        family = (font.family() if font is not None else "") or "微软雅黑"
+        family = family.strip() or "微软雅黑"
+        self._pending_family = family
+        if self._populated:
+            self._select_family(family)
+            return
+        blocked = self.blockSignals(True)
+        self.clear()
+        self.addItem(family)
+        self.setCurrentIndex(0)
+        self.setEditText(family)
+        self.blockSignals(blocked)
+
+    def _select_family(self, family: str):
+        blocked = self.blockSignals(True)
+        idx = self.findText(family, Qt.MatchFlag.MatchFixedString)
+        if idx < 0:
+            self.setEditText(family)
+        else:
+            self.setCurrentIndex(idx)
+            self.setEditText(family)
+        self.blockSignals(blocked)
+
+    def _ensure_populated(self):
+        if self._populated:
+            return
+        families = _font_families()
+        current = (self.currentText() or self._pending_family or "").strip()
+        blocked = self.blockSignals(True)
+        was_updating = self.updatesEnabled()
+        self.setUpdatesEnabled(False)
+        self.clear()
+        self.addItems(families)
+        self._completer.setModel(QStringListModel(families, self._completer))
+        self._populated = True
+        self.setUpdatesEnabled(was_updating)
+        self.blockSignals(blocked)
+        if current:
+            self._select_family(current)
+        elif self._pending_family:
+            self._select_family(self._pending_family)
 
     def _target_width(self) -> int:
-        return max(self.width(), 120)
+        return max(int(self.width()), 160)
 
-    def _lock_popup_width(self):
+    def _prepare_popup_geometry(self):
+        """仅在弹出前设置列表宽高；弹出后不再改，避免空白大框闪一下。"""
         width = self._target_width()
         view = self.view()
-        # 先关重绘，锁完再开，避免用户看到「先宽后窄」
-        view.setUpdatesEnabled(False)
-        view.setMinimumWidth(width)
-        view.setMaximumWidth(width)
-        view.setFixedWidth(width)
+        row = view.sizeHintForRow(0)
+        if row <= 0:
+            row = max(24, self.fontMetrics().height() + 8)
+        visible = min(self.maxVisibleItems(), max(1, self.count()))
+        height = row * visible + 4
+        view.setMinimumSize(width, 0)
+        view.setMaximumSize(width, height)
+        view.setFixedSize(width, height)
         container = view.parentWidget()
         if container is not None:
-            container.setUpdatesEnabled(False)
-            container.setMinimumWidth(0)
-            container.setMaximumWidth(width)
-            container.setFixedWidth(width)
-        popup = view.window()
-        if popup is not None and popup is not self.window():
-            popup.setUpdatesEnabled(False)
-            popup.setMinimumWidth(0)
-            popup.setMaximumWidth(width)
-            popup.setFixedWidth(width)
-            popup.setUpdatesEnabled(True)
-        if container is not None:
-            container.setUpdatesEnabled(True)
-        view.setUpdatesEnabled(True)
+            container.setMinimumSize(0, 0)
+            container.setMaximumSize(width, height)
+            container.setFixedSize(width, height)
 
-    def eventFilter(self, obj, event):
-        et = event.type()
-        if et in (
-            QEvent.Type.Show,
-            QEvent.Type.Resize,
-            QEvent.Type.LayoutRequest,
-            QEvent.Type.PolishRequest,
-        ):
-            view = self.view()
-            popup = view.window() if view is not None else None
-            if obj is view or obj is popup or obj is (view.parentWidget() if view else None):
-                width = self._target_width()
-                if getattr(obj, "width", lambda: width)() != width:
-                    self._lock_popup_width()
-        return super().eventFilter(obj, event)
+    def _color_bars(self):
+        dialog = self.window()
+        if dialog is None:
+            return []
+        return list(dialog.findChildren(ColorPreview))
+
+    def _set_color_bars_suppressed(self, suppressed: bool):
+        # 只藏内部颜色条；外层 ColorPreviewSlot 保持高度，标签不跳
+        visible = not suppressed
+        for bar in self._color_bars():
+            bar.setVisible(visible)
 
     def showPopup(self):
-        self._purge_blocked_fonts()
-        width = self._target_width()
+        # 避免和输入补全弹层叠在一起
+        completer = self.completer()
+        if completer is not None and completer.popup() is not None:
+            completer.popup().hide()
+
+        self._ensure_populated()
+        self._prepare_popup_geometry()
+
+        # 占位保留、不绘制颜色条，避免挡菜单且不挤动「正文颜色」标签
+        self._set_color_bars_suppressed(True)
+
         view = self.view()
-        view.setMinimumWidth(width)
-        view.setMaximumWidth(width)
-        view.setFixedWidth(width)
+        view.setAutoFillBackground(True)
         super().showPopup()
-        self._lock_popup_width()
+
         popup = view.window()
-        container = view.parentWidget()
-        if container is not None:
-            container.installEventFilter(self)
-        if (
-            popup is not None
-            and popup is not self.window()
-            and not self._popup_filter_installed
-        ):
-            popup.installEventFilter(self)
-            self._popup_filter_installed = True
+        if popup is not None and popup is not self.window():
+            popup.setAutoFillBackground(True)
+            popup.raise_()
+
+    def hidePopup(self):
+        super().hidePopup()
+        self._set_color_bars_suppressed(False)
 
 
 class DisplaySettingsDialog(QDialog):
@@ -358,19 +441,56 @@ class DisplaySettingsDialog(QDialog):
         self.setMinimumSize(680, 560)
         self.resize(760, 620)
         self.settings = dict(settings)
+        self._fonts_warmed = False
         self._build_ui()
         self._load_settings()
+        self._center_on_screen()
 
+    def reload(self, settings):
+        """复用对话框时刷新当前设置。"""
+        self.settings = dict(settings)
+        self._load_settings()
+        self._center_on_screen()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # 先只暖缓存；稍后再静默灌列表，避免打开瞬间 clear() 闪空白
+        QTimer.singleShot(0, self._warmup_font_cache)
+        QTimer.singleShot(50, self._populate_font_combos_quietly)
+
+    def _font_combos(self):
+        return (
+            self.font_combo,
+            self.title_font_combo,
+            self.scripture_title_font_combo,
+            self.verse_font_combo,
+            self.footer_font_combo,
+        )
+
+    def _warmup_font_cache(self):
+        _font_families()
+
+    def _populate_font_combos_quietly(self):
+        if self._fonts_warmed:
+            return
+        self._fonts_warmed = True
+        for combo in self._font_combos():
+            combo.setUpdatesEnabled(False)
+            combo._ensure_populated()
+            combo.setUpdatesEnabled(True)
+
+    def _center_on_screen(self):
         screen = self.screen()
-        if screen:
-            available = screen.availableGeometry()
-            width = min(760, max(680, available.width() - 80))
-            height = min(620, max(560, available.height() - 80))
-            self.resize(width, height)
-            self.move(
-                available.x() + (available.width() - width) // 2,
-                available.y() + (available.height() - height) // 2,
-            )
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        width = min(760, max(680, available.width() - 80))
+        height = min(620, max(560, available.height() - 80))
+        self.resize(width, height)
+        self.move(
+            available.x() + (available.width() - width) // 2,
+            available.y() + (available.height() - height) // 2,
+        )
 
     @staticmethod
     def _make_settings_form(page):
@@ -416,7 +536,7 @@ class DisplaySettingsDialog(QDialog):
         self.font_color_btn = ColorPreview("#FFFFFF")
         body_form.addRow("正文字体", self.font_combo)
         body_form.addRow("正文字号", self.font_size)
-        body_form.addRow("正文颜色", self.font_color_btn)
+        body_form.addRow("正文颜色", ColorPreviewSlot(self.font_color_btn))
         text_tabs.addTab(body_page, "正文")
 
         title_page = QWidget()
@@ -426,7 +546,7 @@ class DisplaySettingsDialog(QDialog):
         self.title_color_btn = ColorPreview("#FFFFFF")
         title_form.addRow("标题字体", self.title_font_combo)
         title_form.addRow("标题字号", self.title_size)
-        title_form.addRow("标题颜色", self.title_color_btn)
+        title_form.addRow("标题颜色", ColorPreviewSlot(self.title_color_btn))
         text_tabs.addTab(title_page, "标题")
 
         scripture_title_page = QWidget()
@@ -436,7 +556,7 @@ class DisplaySettingsDialog(QDialog):
         self.scripture_title_color_btn = ColorPreview("#87CEEB")
         scripture_title_form.addRow("小标题字体", self.scripture_title_font_combo)
         scripture_title_form.addRow("小标题字号", self.scripture_title_size)
-        scripture_title_form.addRow("小标题颜色", self.scripture_title_color_btn)
+        scripture_title_form.addRow("小标题颜色", ColorPreviewSlot(self.scripture_title_color_btn))
         text_tabs.addTab(scripture_title_page, "小标题")
 
         verse_page = QWidget()
@@ -446,7 +566,7 @@ class DisplaySettingsDialog(QDialog):
         self.verse_color_btn = ColorPreview("#FFFFFF")
         verse_form.addRow("节号字体", self.verse_font_combo)
         verse_form.addRow("节号字号", self.verse_size)
-        verse_form.addRow("节号颜色", self.verse_color_btn)
+        verse_form.addRow("节号颜色", ColorPreviewSlot(self.verse_color_btn))
         text_tabs.addTab(verse_page, "节号")
 
         footer_page = QWidget()
@@ -456,7 +576,7 @@ class DisplaySettingsDialog(QDialog):
         self.footer_color_btn = ColorPreview("#FFFFFF")
         footer_form.addRow("底注字体", self.footer_font_combo)
         footer_form.addRow("底注字号", self.footer_size)
-        footer_form.addRow("底注颜色", self.footer_color_btn)
+        footer_form.addRow("底注颜色", ColorPreviewSlot(self.footer_color_btn))
         text_tabs.addTab(footer_page, "底注")
 
         text_root.addWidget(text_tabs)
@@ -500,7 +620,7 @@ class DisplaySettingsDialog(QDialog):
         bg_row.addWidget(self.bg_image, 1)
         bg_row.addWidget(bg_choose)
         bg_row.addWidget(bg_clear)
-        bg_layout.addRow("背景颜色", self.bg_color_btn)
+        bg_layout.addRow("背景颜色", ColorPreviewSlot(self.bg_color_btn))
         bg_layout.addRow("背景图片", bg_row)
         tabs.addTab(bg_page, "背景")
 
@@ -528,6 +648,7 @@ class DisplaySettingsDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
+
 
     def _localize_color_dialog(self, dialog):
         translations = {
@@ -691,6 +812,7 @@ class ToolBarWidget(QToolBar):
         self.theme = "dark"
         self.settings = {}
         self._speed = 0
+        self._settings_dialog = None
 
         # —— 投影 ——
         self.extend_btn = ToolbarButton("扩展显示")
@@ -812,9 +934,13 @@ class ToolBarWidget(QToolBar):
         self.settings_changed.emit(dict(self.settings))
 
     def _open_settings(self):
-        dialog = DisplaySettingsDialog(self.settings, self.window())
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.settings = dialog.get_settings()
+        parent = self.window()
+        if self._settings_dialog is None:
+            self._settings_dialog = DisplaySettingsDialog(self.settings, parent)
+        else:
+            self._settings_dialog.reload(self.settings)
+        if self._settings_dialog.exec() == QDialog.DialogCode.Accepted:
+            self.settings = self._settings_dialog.get_settings()
             self.settings_changed.emit(self.settings)
 
     def _open_help(self):
