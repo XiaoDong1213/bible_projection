@@ -16,6 +16,8 @@ class BibleDatabase:
         self.conn.row_factory = sqlite3.Row
         try:
             self.conn.execute("PRAGMA cache_size=-8000")
+            self.conn.execute("PRAGMA temp_store=MEMORY")
+            self.conn.execute("PRAGMA mmap_size=268435456")
         except sqlite3.Error:
             pass
         self._chapter_logical_cache = {}

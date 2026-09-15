@@ -143,12 +143,14 @@ class NavigationPanel(QWidget):
         self.tab_widget = QTabWidget()
         self.tab_widget.setDocumentMode(True)
         self.tab_widget.setTabBar(EqualTabBar())
-        self.old_list = self._create_book_list("old", 2)
+        # 启动只填充当前页书卷按钮，其余 tab 首次点开再创建
+        self.old_list = self._create_book_list("old", 2, populate=True)
         self.tab_widget.addTab(self.old_list, "旧约")
-        self.new_list = self._create_book_list("new", 2)
+        self.new_list = self._create_book_list("new", 2, populate=False)
         self.tab_widget.addTab(self.new_list, "新约")
-        self.short_list = self._create_book_list("all", 4, short=True)
+        self.short_list = self._create_book_list("all", 4, short=True, populate=False)
         self.tab_widget.addTab(self.short_list, "简称")
+        self.tab_widget.currentChanged.connect(self._on_book_tab_changed)
 
         history_widget = QWidget()
         hl = QVBoxLayout(history_widget)
@@ -357,15 +359,48 @@ class NavigationPanel(QWidget):
         if emit_signal:
             self.verse_segmentation_changed.emit(enabled)
 
-    def _create_book_list(self, category, columns, short=False):
+    def _create_book_list(self, category, columns, short=False, populate=True):
         w = BookGridWidget(columns=columns)
-        w.set_books(self.db.get_books(category), short=short)
+        w._book_category = category
+        w._book_short = short
+        w._populated = False
         w.book_clicked.connect(self._on_book_name_clicked)
+        if populate:
+            self._populate_book_grid(w)
         return w
+
+    def _populate_book_grid(self, grid):
+        if grid is None or getattr(grid, "_populated", False):
+            return
+        grid.set_books(
+            self.db.get_books(grid._book_category),
+            short=bool(grid._book_short),
+        )
+        grid._populated = True
+        if self.selected_book:
+            grid.select_book(self.selected_book)
+
+    def _on_book_tab_changed(self, index):
+        grids = (self.old_list, self.new_list, self.short_list)
+        if 0 <= index < len(grids):
+            self._populate_book_grid(grids[index])
+
+    def warm_book_tabs(self):
+        """后台补齐未填充的书卷页（不改变当前 tab）。"""
+        for grid in self._iter_book_grids(populated_only=False):
+            self._populate_book_grid(grid)
+
+    def _iter_book_grids(self, populated_only=False):
+        for grid in (self.old_list, self.new_list, self.short_list):
+            if grid is None:
+                continue
+            if populated_only and not getattr(grid, "_populated", False):
+                continue
+            yield grid
 
     def _on_book_name_clicked(self, book):
         self._set_selected_book(book, whole_chapter=True)
-        for grid in (self.old_list, self.new_list, self.short_list):
+        for grid in self._iter_book_grids(populated_only=True):
             grid.select_book(book)
         self.book_selected.emit(book, self.chapter_spin.value())
 
@@ -497,7 +532,7 @@ class NavigationPanel(QWidget):
         self._history_updating = True
         try:
             self.selected_book = book
-            for grid in (self.old_list, self.new_list, self.short_list):
+            for grid in self._iter_book_grids(populated_only=True):
                 grid.select_book(book)
             self._set_mode(self.MODE_SINGLE)
             max_ch = max(1, self.db.get_chapter_count(book))
@@ -524,7 +559,7 @@ class NavigationPanel(QWidget):
         self._history_updating = True
         try:
             self.selected_book = selection.book
-            for grid in (self.old_list, self.new_list, self.short_list):
+            for grid in self._iter_book_grids(populated_only=True):
                 grid.select_book(selection.book)
             max_ch = max(1, self.db.get_chapter_count(selection.book))
 

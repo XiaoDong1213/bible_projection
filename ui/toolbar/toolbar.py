@@ -9,6 +9,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QSize, QEvent, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QColor, QPainter, QPen
 
+from app.feature_flags import ENABLE_SCRIPTURE_TITLES
+
 
 class ColorPreview(QWidget):
     """显示设置里的整条颜色预览条，仅显示 HEX 色号。"""
@@ -557,7 +559,13 @@ class DisplaySettingsDialog(QDialog):
 
     def _choose_color(self, key, button):
         current = self.settings.get(key, "#FFFFFF")
-        dialog = QColorDialog(QColor(current), self)
+        if isinstance(current, QColor):
+            start = current if current.isValid() else QColor("#FFFFFF")
+        else:
+            start = QColor(str(current))
+            if not start.isValid():
+                start = QColor("#FFFFFF")
+        dialog = QColorDialog(start, self)
         dialog.setOption(QColorDialog.ColorDialogOption.DontUseNativeDialog, True)
         dialog.setWindowTitle("选择颜色")
         QTimer.singleShot(0, lambda: self._localize_color_dialog(dialog))
@@ -569,10 +577,13 @@ class DisplaySettingsDialog(QDialog):
                 self._set_color_button(button, value)
 
     def _set_color_button(self, button, color):
-        button.set_color(color)
-        qcolor = QColor(color)
-        if qcolor.isValid():
-            button.setToolTip(f"当前颜色：{qcolor.name().upper()}，点击修改")
+        if isinstance(color, QColor):
+            value = color.name().upper() if color.isValid() else "#FFFFFF"
+        else:
+            q = QColor(str(color) if color is not None else "#FFFFFF")
+            value = q.name().upper() if q.isValid() else "#FFFFFF"
+        button.set_color(value)
+        button.setToolTip(f"当前颜色：{value}，点击修改")
 
     def _choose_bg(self):
         dialog = QFileDialog(self, "选择背景图片")
@@ -613,34 +624,46 @@ class DisplaySettingsDialog(QDialog):
         self.footer_height.setValue(int(s.get("footer_height", 45)))
         self.footer_text.setText(str(s.get("footer_text", "")))
         self.bg_image.setText(str(s.get("bg_image", "") or ""))
-        for key, attr in [
-            ("font_color", "font_color_btn"),
-            ("title_color", "title_color_btn"),
-            ("scripture_title_color", "scripture_title_color_btn"),
-            ("verse_num_color", "verse_color_btn"),
-            ("footer_color", "footer_color_btn"),
-            ("bg_color", "bg_color_btn"),
+        for key, attr, fallback in [
+            ("font_color", "font_color_btn", "#FFFFFF"),
+            ("title_color", "title_color_btn", "#87CEEB"),
+            ("scripture_title_color", "scripture_title_color_btn", "#87CEEB"),
+            ("verse_num_color", "verse_color_btn", "#FFD700"),
+            ("footer_color", "footer_color_btn", "#AAAAAA"),
+            ("bg_color", "bg_color_btn", "#000000"),
         ]:
-            self._set_color_button(getattr(self, attr), s.get(key, "#FFFFFF"))
+            self._set_color_button(getattr(self, attr), s.get(key, fallback))
+
+    def _color_hex(self, key, fallback="#FFFFFF"):
+        value = self.settings.get(key, fallback)
+        if isinstance(value, QColor):
+            return value.name().upper() if value.isValid() else fallback
+        color = QColor(str(value) if value is not None else fallback)
+        return color.name().upper() if color.isValid() else fallback
 
     def get_settings(self):
         s = dict(self.settings)
         s.update({
             "font_family": self.font_combo.currentFont().family(),
             "font_size": self.font_size.value(),
+            "font_color": self._color_hex("font_color", "#FFFFFF"),
             "title_font_family": self.title_font_combo.currentFont().family(),
             "title_size": self.title_size.value(),
+            "title_color": self._color_hex("title_color", "#87CEEB"),
             "scripture_title_font_family": self.scripture_title_font_combo.currentFont().family(),
             "scripture_title_size": self.scripture_title_size.value(),
-            "scripture_title_color": self.settings.get("scripture_title_color", "#87CEEB"),
+            "scripture_title_color": self._color_hex("scripture_title_color", "#87CEEB"),
             "verse_num_font_family": self.verse_font_combo.currentFont().family(),
             "verse_num_size": self.verse_size.value(),
+            "verse_num_color": self._color_hex("verse_num_color", "#FFD700"),
             "footer_font_family": self.footer_font_combo.currentFont().family(),
             "footer_size": self.footer_size.value(),
+            "footer_color": self._color_hex("footer_color", "#AAAAAA"),
             "line_spacing": self.line_spacing.value(),
             "margin": self.margin.value(),
             "footer_height": self.footer_height.value(),
             "footer_text": self.footer_text.text(),
+            "bg_color": self._color_hex("bg_color", "#000000"),
             "bg_image": self.bg_image.text(),
         })
         return s
@@ -699,7 +722,10 @@ class ToolBarWidget(QToolBar):
         self.show_titles_btn.setCheckable(True)
         self.show_titles_btn.setToolTip("显示 / 隐藏经文小标题")
         self.show_titles_btn.toggled.connect(self._toggle_scripture_titles)
-        self.addWidget(self.show_titles_btn)
+        if ENABLE_SCRIPTURE_TITLES:
+            self.addWidget(self.show_titles_btn)
+        else:
+            self.show_titles_btn.hide()
 
         # 全文搜索按钮插到此分隔符之前（小标题右侧）
         self._search_anchor_action = self.addSeparator()
@@ -765,7 +791,9 @@ class ToolBarWidget(QToolBar):
         self.topmost_btn.blockSignals(blocked)
 
         raw_titles = settings.get("show_scripture_titles", False)
-        if isinstance(raw_titles, str):
+        if not ENABLE_SCRIPTURE_TITLES:
+            show_titles = False
+        elif isinstance(raw_titles, str):
             show_titles = raw_titles.strip().lower() in {"true", "1", "yes", "on"}
         else:
             show_titles = bool(raw_titles)
@@ -774,9 +802,12 @@ class ToolBarWidget(QToolBar):
         blocked = self.show_titles_btn.blockSignals(True)
         self.show_titles_btn.setChecked(show_titles)
         self.show_titles_btn.blockSignals(blocked)
+        self.show_titles_btn.setVisible(ENABLE_SCRIPTURE_TITLES)
         self._update_theme_button()
 
     def _toggle_scripture_titles(self, checked):
+        if not ENABLE_SCRIPTURE_TITLES:
+            return
         self.settings["show_scripture_titles"] = bool(checked)
         self.settings_changed.emit(dict(self.settings))
 

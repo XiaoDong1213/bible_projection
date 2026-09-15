@@ -56,19 +56,27 @@ class MainWindow(QMainWindow):
         else:
             self.resize(1200, 800)
 
+        # 先套主题，再建大量控件：避免「先造百余按钮再全局 polish」
+        self._load_theme_style()
         self._create_central_widget()
         self._create_toolbar()
         self._create_shortcuts()
         self._create_statusbar()
-        self._load_theme_style()
-        self.nav_panel.load_history(config.load_history())
-        self.nav_panel.history_changed.connect(self._save_history)
         self._apply_settings(self.settings)
+
+        # 历史与非当前书卷页：窗口显示后再补
+        QTimer.singleShot(0, self._deferred_startup)
 
         # v1：16ms 定时 + scroll_changed 持续按比例同步副屏；副屏自身不滚
         self._extension_sync_timer = QTimer(self)
         self._extension_sync_timer.setInterval(16)
         self._extension_sync_timer.timeout.connect(self._sync_extension_scroll)
+
+    def _deferred_startup(self):
+        self.nav_panel.load_history(self.config.load_history())
+        self.nav_panel.history_changed.connect(self._save_history)
+        # 稍后再补齐其余书卷页，避免和首屏抢同一帧
+        QTimer.singleShot(50, self.nav_panel.warm_book_tabs)
 
     def _save_history(self, h):
         self.config.save_history(h)
@@ -117,6 +125,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.nav_panel)
         self.preview_host = PreviewHost()
         self.scripture_display = self.preview_host.display
+        self.preview_host.apply_theme(theme_tokens(self.theme))
         splitter.addWidget(self.preview_host)
         splitter.setSizes([360, 840])
         splitter.setStretchFactor(0, 0)

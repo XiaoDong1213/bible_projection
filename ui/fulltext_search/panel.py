@@ -1,6 +1,7 @@
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QFontMetrics
 from PyQt6.QtWidgets import (
+    QButtonGroup,
     QDialog,
     QFrame,
     QGridLayout,
@@ -8,13 +9,20 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QRadioButton,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
-from .query import BookScopeDialog, normalize_search_query, search_scripture
+from .query import (
+    MODE_CONTIGUOUS,
+    MODE_GAP,
+    BookScopeDialog,
+    normalize_search_query,
+    search_scripture,
+)
 from .result_item import ScriptureResultWidget
 
 
@@ -132,7 +140,7 @@ class ScriptureSearchWidget(QWidget):
         search_row.setSpacing(8)
         self.search_input = QLineEdit()
         self.search_input.setObjectName("scriptureSearchInput")
-        self.search_input.setPlaceholderText("例如：爱永不止息（可漏字）")
+        self.search_input.setPlaceholderText("例如：爱永不止息　或　爱 盼望")
         self.search_input.setFixedHeight(self.INPUT_HEIGHT)
         self.search_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.search_input.returnPressed.connect(self.search)
@@ -146,12 +154,23 @@ class ScriptureSearchWidget(QWidget):
         search_row.addWidget(self.search_btn)
         root.addLayout(search_row)
 
-        # —— 范围 ——
+        # —— 匹配方式 + 范围 ——
         options = QHBoxLayout()
         options.setSpacing(6)
-        hint = QLabel("按字顺序匹配，中间可漏字")
-        hint.setObjectName("searchMatchHint")
-        options.addWidget(hint, 1)
+
+        self.gap_radio = QRadioButton("相近")
+        self.contiguous_radio = QRadioButton("一致")
+        self.gap_radio.setObjectName("searchOption")
+        self.contiguous_radio.setObjectName("searchOption")
+        self.gap_radio.setChecked(True)
+        self.gap_radio.setToolTip("按字顺序找，中间可以少几个字；空格表示多个条件都要满足")
+        self.contiguous_radio.setToolTip("要跟输入连着一样出现；空格表示多个条件都要满足")
+        self.match_group = QButtonGroup(self)
+        self.match_group.addButton(self.gap_radio)
+        self.match_group.addButton(self.contiguous_radio)
+        options.addWidget(self.gap_radio)
+        options.addWidget(self.contiguous_radio)
+        options.addStretch(1)
 
         self.scope_btn = QPushButton("全部书卷")
         self.scope_btn.setObjectName("scriptureScopeButton")
@@ -251,6 +270,11 @@ class ScriptureSearchWidget(QWidget):
     def _query_text(self):
         return self.search_input.text().strip()
 
+    def _match_mode(self):
+        if self.contiguous_radio.isChecked():
+            return MODE_CONTIGUOUS
+        return MODE_GAP
+
     def _highlight_terms(self):
         """高亮用：规范化后的每个字。"""
         return list(normalize_search_query(self._query_text()))
@@ -270,6 +294,7 @@ class ScriptureSearchWidget(QWidget):
             self.selected_books or None,
             self.PAGE_SIZE,
             0,
+            mode=self._match_mode(),
         )
         self._render_results(self._highlight_terms())
 
@@ -329,6 +354,7 @@ class ScriptureSearchWidget(QWidget):
             self.selected_books or None,
             self.PAGE_SIZE,
             self.page * self.PAGE_SIZE,
+            mode=self._match_mode(),
         )
         self._render_results(self._highlight_terms())
 
@@ -436,7 +462,14 @@ class ScriptureSearchWidget(QWidget):
             border-radius:9px; font-size:14px; font-weight:600;
         }}
         QPushButton#scriptureSearchButton:hover {{ background:{t['accent_hover']}; }}
-        QLabel#searchMatchHint {{ color:{t['text_muted']}; font-size:12px; }}
+        QRadioButton#searchOption {{
+            background:{t['control']}; color:{t['text_muted']}; border:1px solid {t['border']};
+            border-radius:8px; padding:6px 10px; spacing:0px; font-size:12px;
+        }}
+        QRadioButton#searchOption::indicator {{ width:0px; height:0px; }}
+        QRadioButton#searchOption:checked {{
+            background:{t['accent_soft']}; color:{t['accent_text']}; border-color:{t['accent']};
+        }}
         QPushButton#scriptureScopeButton {{
             background:{t['control']}; color:{t['text']}; border:1px solid {t['border']};
             border-radius:8px; padding:0 12px; text-align:left; font-size:12px; min-width:100px;

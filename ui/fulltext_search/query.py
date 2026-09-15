@@ -1,4 +1,3 @@
-import html
 import re
 
 from PyQt6.QtCore import Qt
@@ -10,8 +9,6 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -19,31 +16,62 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ui.themes import theme_tokens
-
 
 _SPACE_RE = re.compile(r"[\s，,、]+")
 
+# 相近：字序匹配、中间可夹字；一致：整段连续出现
+MODE_GAP = "gap"
+MODE_CONTIGUOUS = "contiguous"
+
+
+def split_search_terms(text):
+    """空格 / 逗号分隔为多个条件；每段去掉通配符。"""
+    parts = _SPACE_RE.split(str(text or "").strip())
+    terms = []
+    for part in parts:
+        term = "".join(ch for ch in part if ch not in "%_")
+        if term:
+            terms.append(term)
+    return terms
+
 
 def normalize_search_query(text):
-    """去掉空白与常见分隔符，得到可夹字匹配用的连续字符。"""
-    value = _SPACE_RE.sub("", str(text or "").strip())
-    # LIKE 通配符不当作搜索字
-    return "".join(ch for ch in value if ch not in "%_")
+    """合并所有条件字（用于空查询判断与高亮）。"""
+    return "".join(split_search_terms(text))
 
 
-def gap_like_pattern(text):
+def gap_like_pattern(term):
     """爱永不止息 → %爱%永%不%止%息%，中间允许夹字。"""
-    chars = list(normalize_search_query(text))
+    chars = list(str(term or ""))
+    chars = [ch for ch in chars if ch not in "%_"]
     if not chars:
         return ""
     return "%" + "%".join(chars) + "%"
 
 
-def search_scripture(db, query, books=None, limit=10, offset=0, **_legacy):
-    """可夹字模糊搜索：输入「爱永不止息」可命中「爱是永不止息」。"""
-    pattern = gap_like_pattern(query)
-    if not pattern:
+def contiguous_like_pattern(term):
+    """爱永不止息 → %爱永不止息%，必须连着出现。"""
+    value = "".join(ch for ch in str(term or "") if ch not in "%_")
+    if not value:
+        return ""
+    return f"%{value}%"
+
+
+def search_pattern(term, mode=MODE_GAP):
+    if mode == MODE_CONTIGUOUS:
+        return contiguous_like_pattern(term)
+    return gap_like_pattern(term)
+
+
+def search_scripture(db, query, books=None, limit=10, offset=0, mode=MODE_GAP, **_legacy):
+    """经文搜索。mode=gap 相近；mode=contiguous 一致。空格分隔的多段为 AND。"""
+    if "fuzzy" in _legacy and not _legacy.get("fuzzy", True):
+        mode = MODE_CONTIGUOUS
+
+    terms = split_search_terms(query)
+    patterns = [search_pattern(term, mode) for term in terms]
+    patterns = [p for p in patterns if p]
+    if not patterns:
         return 0, []
 
     table = db._quote(db.verse_table)
@@ -52,8 +80,9 @@ def search_scripture(db, query, books=None, limit=10, offset=0, **_legacy):
     verse_col = db._quote(db.verse_col)
     text_col = db._quote(db.text_col)
 
-    where = f"{text_col} LIKE ?"
-    params = [pattern]
+    conditions = [f"{text_col} LIKE ?" for _ in patterns]
+    params = list(patterns)
+    where = f"({' AND '.join(conditions)})"
     if books:
         values = [db.book_meta.get(book, {}).get("id", book) for book in books]
         placeholders = ",".join("?" for _ in values)
@@ -309,120 +338,3 @@ class BookScopeDialog(QDialog):
         # 圆角写在全局 stylesheet（QDialog#scriptureScopeDialog …），
         # 这里不再 setStyleSheet，避免冲掉 app 样式。
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-
-
-class ScriptureSearchDialog(QDialog):
-    """经文搜索弹窗。"""
-
-    def __init__(self, db, on_select, history=None, theme="dark", parent=None):
-        super().__init__(parent)
-        self.db = db
-        self.on_select = on_select
-        self.history = list(history or [])
-        self.theme = theme if theme in ("dark", "light") else "dark"
-        self.scope = None
-        self.page = 0
-        self.page_size = 10
-        self.total = 0
-        self.results = []
-        self._build_ui()
-        self._apply_style()
-
-    def _build_ui(self):
-        root = QVBoxLayout(self)
-        root.setContentsMargins(18, 18, 18, 16)
-        root.setSpacing(10)
-        title = QLabel("经文搜索")
-        title.setObjectName("searchTitle")
-        root.addWidget(title)
-        row = QHBoxLayout()
-        self.input = QLineEdit()
-        self.input.setPlaceholderText("输入关键词，可用空格分隔多个关键词")
-        self.input.returnPressed.connect(self._search)
-        row.addWidget(self.input, 1)
-        self.search_button = QPushButton("搜索")
-        self.search_button.clicked.connect(self._search)
-        row.addWidget(self.search_button)
-        root.addLayout(row)
-        self.status = QLabel("")
-        self.status.setObjectName("searchStatus")
-        root.addWidget(self.status)
-        self.list = QListWidget()
-        self.list.setObjectName("searchResultList")
-        self.list.itemDoubleClicked.connect(self._activate_result)
-        root.addWidget(self.list, 1)
-        page_row = QHBoxLayout()
-        self.prev_button = QPushButton("上一页")
-        self.next_button = QPushButton("下一页")
-        self.prev_button.clicked.connect(self._prev_page)
-        self.next_button.clicked.connect(self._next_page)
-        page_row.addWidget(self.prev_button)
-        page_row.addWidget(self.next_button)
-        root.addLayout(page_row)
-
-    def _search(self):
-        query = self.input.text().strip()
-        if not normalize_search_query(query):
-            self.status.setText("请输入搜索关键词")
-            return
-        self.page = 0
-        self._load_results(query)
-
-    def _load_results(self, query):
-        self.total, self.results = search_scripture(
-            self.db,
-            query,
-            books=self.scope,
-            limit=self.page_size,
-            offset=self.page * self.page_size,
-        )
-        self.list.clear()
-        for result in self.results:
-            item = QListWidgetItem()
-            item.setData(Qt.ItemDataRole.UserRole, result)
-            item.setText(
-                f"{result['book']} {result['chapter']}:{result.get('verse_label', result['verse'])}\n"
-                f"{result['text']}"
-            )
-            self.list.addItem(item)
-        if self.total:
-            pages = (self.total + self.page_size - 1) // self.page_size
-            self.status.setText(f"共 {self.total} 条 · 第 {self.page + 1}/{pages} 页")
-        else:
-            self.status.setText("没有找到匹配的经文")
-        self.prev_button.setEnabled(self.page > 0)
-        self.next_button.setEnabled((self.page + 1) * self.page_size < self.total)
-
-    def _activate_result(self, item):
-        result = item.data(Qt.ItemDataRole.UserRole)
-        if not result:
-            return
-        self.on_select(result)
-        self.accept()
-
-    def _prev_page(self):
-        if self.page <= 0:
-            return
-        self.page -= 1
-        self._load_results(self.input.text())
-
-    def _next_page(self):
-        if (self.page + 1) * self.page_size >= self.total:
-            return
-        self.page += 1
-        self._load_results(self.input.text())
-
-    def _apply_style(self):
-        t = theme_tokens(self.theme)
-        self.setStyleSheet(f"""
-        QDialog {{ background:{t['surface_raised']}; color:{t['text']}; }}
-        QLabel#searchTitle {{ color:{t['text']}; font-size:18px; font-weight:600; }}
-        QLabel#searchStatus {{ color:{t['text_muted']}; font-size:12px; }}
-        QLineEdit {{ background:{t['control']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:9px; padding:0 12px; min-height:40px; }}
-        QLineEdit:focus {{ border:1px solid {t['focus_ring']}; }}
-        QPushButton {{ background:{t['control']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:8px; padding:0 14px; min-height:34px; }}
-        QPushButton:hover {{ background:{t['control_hover']}; }}
-        QListWidget#searchResultList {{ background:{t['surface_sunken']}; color:{t['text']}; border:1px solid {t['border']}; border-radius:9px; padding:6px; outline:none; }}
-        QListWidget#searchResultList::item {{ color:{t['text']}; padding:10px; border-bottom:1px solid {t['border']}; }}
-        QListWidget#searchResultList::item:selected {{ background:{t['accent']}; color:#FFFFFF; }}
-        """)

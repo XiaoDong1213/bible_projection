@@ -187,12 +187,10 @@ def build_stylesheet(name: str = "dark", styles_dir: str | Path | None = None) -
     arrow_down_spin = (styles_dir / f"arrow-down-spin-{suffix}.svg").as_posix()
     arrow_down = (styles_dir / f"arrow-down-{suffix}.svg").as_posix()
 
+    # 不在 QSS 用 * {{ font-family }}：会匹配全部控件并触发字体解析，拖慢启动。
+    # 界面字体由 app.setFont 统一设置。
     return f"""
 /* Bible Pro — unified {name} theme */
-* {{
-    font-family: {FONT_FAMILY};
-}}
-
 QMainWindow, QDialog {{
     background: {t['canvas']};
     color: {t['text']};

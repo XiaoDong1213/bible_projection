@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def project_root() -> Path:
-    """源码包根目录（bible_projection_v2）。"""
+    """源码包根目录（bible_projection）。"""
     return Path(__file__).resolve().parent.parent
 
 
