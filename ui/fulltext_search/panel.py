@@ -143,14 +143,15 @@ class ScriptureSearchWidget(QWidget):
         self.search_input.setPlaceholderText("例如：爱永不止息　或　爱 盼望")
         self.search_input.setFixedHeight(self.INPUT_HEIGHT)
         self.search_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.search_input.returnPressed.connect(self.search)
+        self.search_input.returnPressed.connect(lambda: self.search())
         search_row.addWidget(self.search_input, 1)
 
         self.search_btn = QPushButton("搜索")
         self.search_btn.setObjectName("scriptureSearchButton")
         self.search_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.search_btn.setFixedSize(80, self.INPUT_HEIGHT)
-        self.search_btn.clicked.connect(self.search)
+        # clicked 会传 checked，不能直接连到 search(remember=…)
+        self.search_btn.clicked.connect(lambda: self.search())
         search_row.addWidget(self.search_btn)
         root.addLayout(search_row)
 
@@ -195,9 +196,10 @@ class ScriptureSearchWidget(QWidget):
         self.history_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         history_row.addWidget(self.history_chips, 1)
 
-        self.clear_history_btn = QPushButton("清空")
+        self.clear_history_btn = QPushButton("清空历史")
         self.clear_history_btn.setObjectName("historyClearButton")
         self.clear_history_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_history_btn.setToolTip("清空最近搜索词")
         self.clear_history_btn.clicked.connect(self._clear_history)
         history_row.addWidget(self.clear_history_btn)
         root.addLayout(history_row)
@@ -211,6 +213,13 @@ class ScriptureSearchWidget(QWidget):
         self.result_hint = QLabel("")
         self.result_hint.setObjectName("scriptureResultHint")
         result_top.addWidget(self.result_hint)
+        self.clear_results_btn = QPushButton("清空结果")
+        self.clear_results_btn.setObjectName("resultClearButton")
+        self.clear_results_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_results_btn.setToolTip("清空当前搜索结果，不影响历史")
+        self.clear_results_btn.clicked.connect(self._clear_results)
+        self.clear_results_btn.setEnabled(False)
+        result_top.addWidget(self.clear_results_btn)
         root.addLayout(result_top)
 
         self.result_scroll = QScrollArea()
@@ -280,6 +289,9 @@ class ScriptureSearchWidget(QWidget):
         return list(normalize_search_query(self._query_text()))
 
     def search(self, remember=True):
+        # 防御：误把 clicked(bool) 传到 remember 时仍按「要记住」处理
+        if not isinstance(remember, bool):
+            remember = True
         query = self._query_text()
         if not normalize_search_query(query):
             self.result_header.setText("请输入关键词")
@@ -297,6 +309,21 @@ class ScriptureSearchWidget(QWidget):
             mode=self._match_mode(),
         )
         self._render_results(self._highlight_terms())
+
+    def _clear_results(self):
+        """只清空结果列表，不动搜索历史。"""
+        self.page = 0
+        self.total = 0
+        self.results = []
+        while self.result_layout.count():
+            item = self.result_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        self.result_header.setText("搜索结果")
+        self.result_hint.setText("")
+        self.clear_results_btn.setEnabled(False)
+        self._update_pager()
 
     def _render_results(self, keywords):
         while self.result_layout.count():
@@ -330,7 +357,8 @@ class ScriptureSearchWidget(QWidget):
                 self.result_layout.addWidget(card)
             self.result_layout.addStretch(1)
         self.result_header.setText(f"搜索结果 · {self.total} 条")
-        self.result_hint.setText("点击标题定位")
+        self.result_hint.setText("点击标题定位" if self.results else "")
+        self.clear_results_btn.setEnabled(bool(self.results) or self.total > 0)
         self._update_pager()
         self.result_scroll.verticalScrollBar().setValue(0)
 
@@ -483,6 +511,11 @@ class ScriptureSearchWidget(QWidget):
             background:transparent; color:{t['text_muted']}; border:none; padding:2px 6px; font-size:12px;
         }}
         QPushButton#historyClearButton:hover {{ color:{t['accent']}; }}
+        QPushButton#resultClearButton {{
+            background:transparent; color:{t['text_muted']}; border:none; padding:2px 6px; font-size:12px;
+        }}
+        QPushButton#resultClearButton:hover {{ color:{t['accent']}; }}
+        QPushButton#resultClearButton:disabled {{ color:{t['text_faint']}; }}
         QWidget#historyChip {{
             background:{t['control']}; color:{t['text']}; border:1px solid {t['border']};
             border-radius:15px;
