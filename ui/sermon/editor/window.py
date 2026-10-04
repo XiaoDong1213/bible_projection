@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QBuffer, QIODevice, QPoint, QTimer, pyqtSignal
+from PyQt6.QtCore import QEvent, Qt, QBuffer, QIODevice, QPoint, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractSpinBox,
@@ -30,6 +30,7 @@ from PyQt6.QtWidgets import (
 from core.sermon.model import (
     Background,
     Element,
+    ElementStyle,
     new_document,
     new_image_element,
     new_shape_element,
@@ -84,10 +85,13 @@ class SermonEditorWindow(QWidget):
         self._syncing_from_ctrl = False
         self._wheel_guard_ms = 0
         self._thumb_queue: list[int] = []
+        self._last_text_style = ElementStyle()
+        self._format_sticky = False
+        self._format_ignore = False
 
         self._build_ui()
         self._thumb_timer = QTimer(self)
-        self._thumb_timer.setInterval(0)
+        self._thumb_timer.setInterval(24)
         self._thumb_timer.timeout.connect(self._pump_thumbnails)
         self._build_menus()
         self._build_present_shortcuts()
@@ -106,6 +110,12 @@ class SermonEditorWindow(QWidget):
 
     def apply_theme(self, theme: str = "dark"):
         apply_sermon_theme(self, theme)
+
+    def eventFilter(self, obj, event):
+        if obj is getattr(self, "btn_format", None) and event.type() == QEvent.Type.MouseButtonDblClick:
+            self._start_format_paint(sticky=True)
+            return True
+        return super().eventFilter(obj, event)
 
     def statusBar(self) -> QStatusBar:
         return self._status
@@ -188,11 +198,19 @@ class SermonEditorWindow(QWidget):
         btn_shape.setCheckable(True)
         btn_shape.setToolTip("点一下，再在画布上拖出形状")
         btn_shape.clicked.connect(self._toggle_draw_shape)
+        btn_format = QPushButton("格式刷")
+        btn_format.setObjectName("sermonFormatPaintBtn")
+        btn_format.setCheckable(True)
+        btn_format.setToolTip("先选中文本（含导入的），再点一次刷一个；双击可连续刷。Esc 取消")
+        btn_format.clicked.connect(self._toggle_format_paint)
+        btn_format.installEventFilter(self)
         toolbar.addWidget(btn_text)
         toolbar.addWidget(btn_image)
         toolbar.addWidget(btn_shape)
+        toolbar.addWidget(btn_format)
         self.btn_text = btn_text
         self.btn_shape = btn_shape
+        self.btn_format = btn_format
         toolbar.addSeparator()
 
         btn_save = QPushButton("保存")
@@ -226,6 +244,7 @@ class SermonEditorWindow(QWidget):
             btn_text,
             btn_image,
             btn_shape,
+            btn_format,
             btn_save,
             self.play_btn,
             self.stop_btn,
@@ -262,6 +281,7 @@ class SermonEditorWindow(QWidget):
         self.canvas.slide_modified.connect(self._on_slide_modified)
         self.canvas.rect_drawn.connect(self._on_rect_drawn)
         self.canvas.status_message.connect(self._on_canvas_status)
+        self.canvas.format_paint_target.connect(self._on_format_paint_target)
         self.canvas_stack.addWidget(self.canvas)  # 0 = 编辑
 
         self.present_stage = SlideStage()
@@ -287,6 +307,7 @@ class SermonEditorWindow(QWidget):
         self.bg_panel.background_changed.connect(self._on_bg_changed)
         self.bg_panel.pick_bg_image.connect(self._pick_bg_image)
         self.bg_panel.clear_bg_image.connect(self._clear_bg_image)
+        self.bg_panel.apply_to_all.connect(self._apply_bg_to_all)
         self.side_tabs.addTab(self.bg_panel, "背景")
 
         self.props = PropertyPanel()
@@ -652,6 +673,7 @@ class SermonEditorWindow(QWidget):
             QMessageBox.information(self, "放映", "无法打开扩展显示，请检查屏幕设置。")
             return
         self._presenting = True
+        self._thumb_timer.stop()
         self._set_present_shortcuts_enabled(True)
         self.play_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
@@ -1262,8 +1284,7 @@ class SermonEditorWindow(QWidget):
         self.anim_panel.set_slide(slide)
         self.anim_panel.set_selected_element(None)
         self.transition_panel.set_slide(slide)
-        if not self._presenting:
-            QTimer.singleShot(0, self._refresh_thumbnail)
+        QTimer.singleShot(0, self._refresh_thumbnail)
         if self._presenting and not self._syncing_from_ctrl:
             main = self._main_window()
             if main is not None:
@@ -1279,7 +1300,9 @@ class SermonEditorWindow(QWidget):
     def _add_slide(self):
         self._push_history(full=True)
         self.canvas.commit_geometry()
-        self.doc.slides.append(new_slide())
+        cur = self._current_slide()
+        bg = cur.background if cur is not None else None
+        self.doc.slides.append(new_slide(background=bg))
         self._slide_index = len(self.doc.slides) - 1
         self.slide_list.refresh(self._slide_index)
         self._show_slide(self._slide_index)
@@ -1347,6 +1370,9 @@ class SermonEditorWindow(QWidget):
         self.slide_list.update_thumbnail(self._slide_index, pix)
 
     def _refresh_all_thumbnails(self):
+        if self._presenting:
+            self._thumb_timer.stop()
+            return
         if self.doc is None or not self.doc.slides:
             self._thumb_queue = []
             self._thumb_timer.stop()
@@ -1362,8 +1388,10 @@ class SermonEditorWindow(QWidget):
             self._thumb_timer.start()
 
     def _pump_thumbnails(self):
-        if self.doc is None or not self._thumb_queue:
+        if self._presenting or self.doc is None or not self._thumb_queue:
             self._thumb_timer.stop()
+            if self._presenting:
+                return
             self._thumb_queue = []
             return
         i = self._thumb_queue.pop(0)
@@ -1389,6 +1417,7 @@ class SermonEditorWindow(QWidget):
                 self.canvas.cancel_draw()
             self.statusBar().showMessage("已取消画文本框", 2000)
             return
+        self._end_format_paint(None)
         self.btn_shape.blockSignals(True)
         self.btn_shape.setChecked(False)
         self.btn_shape.blockSignals(False)
@@ -1405,6 +1434,7 @@ class SermonEditorWindow(QWidget):
                 self.canvas.cancel_draw()
             self.statusBar().showMessage("已取消画形状", 2000)
             return
+        self._end_format_paint(None)
         self.btn_text.blockSignals(True)
         self.btn_text.setChecked(False)
         self.btn_text.blockSignals(False)
@@ -1432,7 +1462,12 @@ class SermonEditorWindow(QWidget):
         self._push_history()
         cw, ch = self.doc.canvas_size()
         if kind == "text":
-            el = new_text_element("在此输入", canvas_w=cw, canvas_h=ch)
+            el = new_text_element(
+                "在此输入",
+                canvas_w=cw,
+                canvas_h=ch,
+                style=self._last_text_style,
+            )
             el.x, el.y, el.w, el.h = x, y, w, h
             self.canvas.add_element(el)
             eid = el.id
@@ -1450,15 +1485,14 @@ class SermonEditorWindow(QWidget):
             return
         item.setTextInteractionFlags(Qt.TextInteractionFlag.TextEditorInteraction)
         item.setFocus(Qt.FocusReason.OtherFocusReason)
-        if hasattr(item, "textCursor"):
-            cursor = item.textCursor()
-            cursor.select(cursor.SelectionType.Document)
-            item.setTextCursor(cursor)
+        if hasattr(item, "_place_cursor_for_edit"):
+            item._place_cursor_for_edit()
 
     def _add_text(self):
         """兼容入口：进入拖拽画框。"""
         if self._presenting:
             return
+        self._end_format_paint(None)
         self.btn_text.blockSignals(True)
         self.btn_text.setChecked(True)
         self.btn_text.blockSignals(False)
@@ -1496,6 +1530,7 @@ class SermonEditorWindow(QWidget):
         """兼容入口：进入拖拽画形状。"""
         if self._presenting:
             return
+        self._end_format_paint(None)
         self.btn_shape.blockSignals(True)
         self.btn_shape.setChecked(True)
         self.btn_shape.blockSignals(False)
@@ -1551,8 +1586,116 @@ class SermonEditorWindow(QWidget):
         self._refresh_thumbnail()
         self._push_hot_update()
 
+    def _apply_bg_to_all(self):
+        slide = self._current_slide()
+        if slide is None or not self.doc.slides:
+            return
+        self._push_history(full=True)
+        src = slide.background.clone()
+        for s in self.doc.slides:
+            s.background = src.clone()
+        self.canvas.refresh_background()
+        self._set_dirty(True)
+        self._refresh_all_thumbnails()
+        self._push_hot_update()
+        self.statusBar().showMessage("已将当前背景应用到全部幻灯片，之后仍可单页修改", 4000)
+
+    def _app_config(self):
+        host = self._main_window()
+        return getattr(host, "config", None) if host is not None else None
+
+    def reload_last_text_style(self):
+        cfg = self._app_config()
+        if cfg is None:
+            return
+        self._last_text_style = cfg.load_sermon_text_style()
+
+    def _remember_text_style(self, element):
+        if element is None or getattr(element, "type", None) != "text":
+            return
+        self._last_text_style = element.style.clone()
+        cfg = self._app_config()
+        if cfg is not None:
+            cfg.save_sermon_text_style(self._last_text_style)
+
+    def _toggle_format_paint(self, checked: bool = False):
+        if self._format_ignore:
+            return
+        if self._presenting:
+            self.btn_format.setChecked(False)
+            return
+        if not self.btn_format.isChecked():
+            self._end_format_paint()
+            return
+        self._start_format_paint(sticky=False)
+
+    def _start_format_paint(self, *, sticky: bool):
+        if self._presenting:
+            self._end_format_paint()
+            return
+        src = None
+        for el in self.canvas.selected_elements():
+            if el.type == "text":
+                src = el
+                break
+        if src is None:
+            self._format_ignore = True
+            self.btn_format.setChecked(False)
+            self._format_ignore = False
+            self.statusBar().showMessage("请先选中一个文本框（导入的也可以），再点格式刷", 4000)
+            return
+        self._remember_text_style(src)
+        self._format_sticky = sticky
+        self._format_ignore = True
+        self.btn_format.setChecked(True)
+        self._format_ignore = False
+        self.btn_text.blockSignals(True)
+        self.btn_shape.blockSignals(True)
+        self.btn_text.setChecked(False)
+        self.btn_shape.setChecked(False)
+        self.btn_text.blockSignals(False)
+        self.btn_shape.blockSignals(False)
+        self.canvas.set_format_paint(True)
+        self.canvas_stack.setCurrentIndex(0)
+        self.canvas.setFocus(Qt.FocusReason.OtherFocusReason)
+        if sticky:
+            self.statusBar().showMessage("连续格式刷：点文本框套用样式，Esc 取消", 5000)
+        else:
+            self.statusBar().showMessage("格式刷：点一个文本框套用样式，Esc 取消", 4000)
+
+    def _end_format_paint(self, message: str | None = "已取消格式刷"):
+        self._format_sticky = False
+        self.canvas.set_format_paint(False)
+        self._format_ignore = True
+        self.btn_format.setChecked(False)
+        self._format_ignore = False
+        if message:
+            self.statusBar().showMessage(message, 2500)
+
+    def _on_format_paint_target(self, target):
+        if target is False:
+            self._end_format_paint("已取消格式刷")
+            return
+        if target is None or getattr(target, "type", None) != "text":
+            if not self._format_sticky:
+                self._end_format_paint("已取消格式刷")
+            return
+        self._push_history()
+        target.style = self._last_text_style.clone()
+        self.canvas.update_selected_from_element(target)
+        self.props.set_element(target)
+        self._remember_text_style(target)
+        self._set_dirty(True)
+        self._refresh_thumbnail()
+        self._push_hot_update()
+        if self._format_sticky:
+            self.statusBar().showMessage("已套用格式，可继续点其他文本框", 2500)
+        else:
+            self._end_format_paint("已套用文字格式")
+
     def _on_element_changed(self, element):
         self.canvas.update_selected_from_element(element)
+        self._remember_text_style(element)
         self._set_dirty(True)
         self._refresh_thumbnail()
         self._push_hot_update()

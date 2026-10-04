@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
 
 from core.sermon.image_cache import load_pixmap, scaled_pixmap
 from core.sermon.model import AnimStep, Element, SermonDocument, Slide
+from ui.sermon.text_format import apply_text_line_spacing
 
 FLY_OFFSET = 160
 
@@ -154,6 +155,20 @@ class SlideStage(QGraphicsView):
             if element.id in animated_ids:
                 self._prepare_entrance(item, element, slide)
 
+    def cached_slide_pixmap(
+        self,
+        doc: SermonDocument,
+        slide: Slide,
+        *,
+        prepare_anims: bool = False,
+    ) -> QPixmap:
+        w, h = doc.canvas_size()
+        key = (slide.id, bool(prepare_anims), int(w), int(h), str(self._assets_root or ""))
+        cached = self._render_cache.get(key)
+        if cached is not None and not cached.isNull():
+            return QPixmap(cached)
+        return QPixmap()
+
     def render_slide_pixmap(
         self,
         doc: SermonDocument,
@@ -232,9 +247,10 @@ class SlideStage(QGraphicsView):
             self._old_snap = pix
 
     def take_old_snapshot(self) -> QPixmap:
+        """只返回空闲时记下的图，按键时不再 grab 全屏。"""
         if not self._old_snap.isNull():
-            return self._old_snap
-        return self.grab_slide_pixmap()
+            return QPixmap(self._old_snap)
+        return QPixmap()
 
     def set_old_snapshot(self, pix: QPixmap):
         if pix is not None and not pix.isNull():
@@ -706,6 +722,7 @@ class SlideStage(QGraphicsView):
                 item.setTextWidth(max(40.0, element.w))
             else:
                 item.setTextWidth(-1)
+            apply_text_line_spacing(item, getattr(style, "line_spacing", 120))
             item.setPos(element.x, element.y)
             item.setRotation(element.rotation)
             item.setZValue(element.z)

@@ -58,6 +58,7 @@ class BackgroundPanel(QWidget):
     background_changed = pyqtSignal()
     pick_bg_image = pyqtSignal()
     clear_bg_image = pyqtSignal()
+    apply_to_all = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -100,7 +101,13 @@ class BackgroundPanel(QWidget):
         form.addRow("适应", self.bg_fit)
         layout.addLayout(form)
 
-        hint = QLabel("背景作用于当前页。选图后可用「适应」控制铺满或完整显示。")
+        self.apply_all_btn = QPushButton("应用到全部幻灯片")
+        self.apply_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.apply_all_btn.setToolTip("把当前页背景复制到所有页；之后仍可单独改某一页")
+        self.apply_all_btn.clicked.connect(self.apply_to_all.emit)
+        layout.addWidget(self.apply_all_btn)
+
+        hint = QLabel("默认只改当前页。需要统一背景时点「应用到全部幻灯片」，之后每页仍可单独调整。")
         hint.setWordWrap(True)
         hint.setObjectName("sermonHint")
         layout.addWidget(hint)
@@ -228,6 +235,14 @@ class PropertyPanel(QWidget):
         self.align.addItem("右对齐", "right")
         self.align.currentIndexChanged.connect(self._emit_element)
         text_form.addRow("对齐", self.align)
+
+        self.line_spacing = QSpinBox()
+        self.line_spacing.setRange(80, 300)
+        self.line_spacing.setSuffix("%")
+        self.line_spacing.setValue(120)
+        self.line_spacing.setToolTip("讲篇文字行距，100% 为单倍行距")
+        self.line_spacing.valueChanged.connect(self._emit_element)
+        text_form.addRow("行距", self.line_spacing)
         text_col.addLayout(text_form)
         layout.addWidget(self.text_section)
 
@@ -484,6 +499,11 @@ class PropertyPanel(QWidget):
                 if idx >= 0:
                     self.align.setCurrentIndex(idx)
                 self.wrap_btn.setChecked(bool(getattr(style, "wrap", True)))
+                try:
+                    spacing = int(getattr(style, "line_spacing", 120) or 120)
+                except (TypeError, ValueError):
+                    spacing = 120
+                self.line_spacing.setValue(max(80, min(300, spacing)))
             if is_shape:
                 sk = self.shape_kind.findData(element.shape or "rect")
                 if sk >= 0:
@@ -551,6 +571,7 @@ class PropertyPanel(QWidget):
             el.style.italic = self.italic_btn.isChecked()
             el.style.align = str(self.align.currentData() or "left")
             el.style.wrap = self.wrap_btn.isChecked()
+            el.style.line_spacing = int(self.line_spacing.value())
         elif el.type == "shape":
             el.shape = str(self.shape_kind.currentData() or "rect")
             el.style.color = self._fill_color
