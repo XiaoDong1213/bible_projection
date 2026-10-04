@@ -34,38 +34,68 @@ def attach_fulltext_search(window):
 
 
 def _ensure_panel(window):
-    """首次打开时再创建搜索面板并挂到中央布局。"""
+    """首次打开时再创建搜索面板，挂到主分割条右侧。"""
     widget = getattr(window, "_scripture_search_widget", None)
     if widget is not None:
         return widget
 
-    # 延迟导入重模块，避免拖慢冷启动
     from .panel import ScriptureSearchWidget
 
-    central = window.centralWidget()
-    widget = ScriptureSearchWidget(window.db, window.config, central, theme=window.theme)
+    splitter = getattr(window, "main_splitter", None)
+    parent = splitter if splitter is not None else window.centralWidget()
+    widget = ScriptureSearchWidget(window.db, window.config, parent, theme=window.theme)
     widget.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
     widget.result_activated.connect(lambda result: _activate(window, result))
     widget.result_project_requested.connect(lambda result: _project(window, result))
-    widget.close_requested.connect(widget.hide)
+    widget.close_requested.connect(lambda: _hide_panel(window))
     widget.hide()
 
-    layout = central.layout()
-    if layout is not None:
-        layout.addWidget(widget)
+    if splitter is not None:
+        splitter.addWidget(widget)
+        idx = splitter.count() - 1
+        splitter.setStretchFactor(idx, 0)
+        handle = splitter.handle(idx)
+        if handle is not None:
+            handle.setEnabled(True)
 
     window._scripture_search_widget = widget
     return widget
 
 
+def _hide_panel(window):
+    widget = getattr(window, "_scripture_search_widget", None)
+    if widget is None:
+        return
+    widget.hide()
+    splitter = getattr(window, "main_splitter", None)
+    if splitter is None or splitter.count() < 3:
+        return
+    sizes = splitter.sizes()
+    extra = sizes[2] if len(sizes) > 2 else 0
+    if extra <= 0:
+        return
+    sizes[1] = sizes[1] + extra
+    sizes[2] = 0
+    splitter.setSizes(sizes)
+
+
 def _toggle(window):
     widget = _ensure_panel(window)
     if widget.isVisible():
-        widget.hide()
+        _hide_panel(window)
         return
 
     widget.apply_theme(window.theme)
     widget.show()
+    splitter = getattr(window, "main_splitter", None)
+    if splitter is not None and splitter.count() >= 3:
+        sizes = splitter.sizes()
+        width = int(getattr(widget, "PANEL_WIDTH", 520))
+        if len(sizes) >= 3 and sizes[2] < width // 2:
+            take = min(width, max(0, sizes[1] - 200))
+            sizes[1] = sizes[1] - take
+            sizes[2] = take
+            splitter.setSizes(sizes)
     widget.raise_()
     widget.search_input.setFocus()
     widget.search_input.selectAll()

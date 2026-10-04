@@ -28,6 +28,73 @@ from core.sermon.image_cache import load_pixmap, scaled_pixmap
 from core.sermon.model import Element, SermonDocument, Slide
 
 
+def _render_scene_thumb(scene: QGraphicsScene, logical_w: int, logical_h: int, size: int) -> QPixmap:
+    source = QRectF(0, 0, logical_w, logical_h)
+    aspect = logical_h / max(1, logical_w)
+    w = size
+    h = max(1, int(size * aspect))
+    pix = QPixmap(w, h)
+    pix.fill(QColor("#000000"))
+    painter = QPainter(pix)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    scene.render(painter, QRectF(0, 0, w, h), source)
+    painter.end()
+    return pix
+
+
+def render_slide_thumbnail(
+    doc: SermonDocument,
+    slide: Slide,
+    size: int = 168,
+    assets_root: Path | None = None,
+) -> QPixmap:
+    """用临时场景渲一页预览，不碰编辑画布。"""
+    lw, lh = doc.canvas_size()
+    scene = QGraphicsScene()
+    scene.setSceneRect(0, 0, lw, lh)
+    bg = QGraphicsRectItem(0, 0, lw, lh)
+    bg.setZValue(-1000)
+    bg.setPen(QPen(Qt.PenStyle.NoPen))
+    scene.addItem(bg)
+    background = slide.background
+    if background.type == "image" and background.value:
+        pix = load_pixmap(background.value, assets_root)
+        if pix is not None and not pix.isNull():
+            bg.setBrush(QBrush(QColor("#000000")))
+            item = QGraphicsPixmapItem()
+            item.setZValue(-999)
+            item.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
+            scaled = scaled_pixmap(
+                pix, lw, lh, fit=background.fit or "contain", smooth=True
+            )
+            item.setPixmap(scaled)
+            item.setPos((lw - scaled.width()) / 2, (lh - scaled.height()) / 2)
+            scene.addItem(item)
+        else:
+            color = QColor("#1A1A2E")
+            bg.setBrush(QBrush(color))
+    else:
+        color = QColor(background.value) if background.value else QColor("#1A1A2E")
+        if not color.isValid():
+            color = QColor("#1A1A2E")
+        bg.setBrush(QBrush(color))
+    for element in sorted(slide.elements, key=lambda e: e.z):
+        if element.type == "text":
+            scene.addItem(TextElementItem(element))
+        elif element.type == "image":
+            pix = load_pixmap(element.content, assets_root) or QPixmap(
+                max(1, int(element.w)), max(1, int(element.h))
+            )
+            if pix.isNull():
+                pix = QPixmap(max(1, int(element.w)), max(1, int(element.h)))
+                pix.fill(QColor("#444444"))
+            scene.addItem(ImageElementItem(element, pix))
+        elif element.type == "shape":
+            scene.addItem(ShapeElementItem(element))
+    return _render_scene_thumb(scene, lw, lh, size)
+
+
 class ElementItemMixin:
     """图形项与 Element.id 绑定。"""
 
@@ -689,26 +756,12 @@ class SlideCanvas(QGraphicsView):
             pix = QPixmap(size, int(size * 9 / 16))
             pix.fill(QColor("#333333"))
             return pix
-        source = QRectF(0, 0, self._logical_w, self._logical_h)
-        aspect = self._logical_h / max(1, self._logical_w)
-        w = size
-        h = max(1, int(size * aspect))
-        pix = QPixmap(w, h)
-        pix.fill(QColor("#000000"))
-        painter = QPainter(pix)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        self._scene.render(painter, QRectF(0, 0, w, h), source)
-        painter.end()
-        return pix
+        return _render_scene_thumb(
+            self._scene, self._logical_w, self._logical_h, size
+        )
 
     def render_slide_thumbnail(
         self, doc: SermonDocument, slide: Slide, size: int = 168
     ) -> QPixmap:
-        """渲染任意页缩略图，结束后恢复当前页。"""
-        old_doc, old_slide = self._doc, self._slide
-        self.load_slide(doc, slide)
-        pix = self.render_thumbnail(size)
-        if old_doc is not None and old_slide is not None:
-            self.load_slide(old_doc, old_slide)
-        return pix
+        """离屏渲染任意页，不拆当前画布。"""
+        return render_slide_thumbnail(doc, slide, size, self._assets_root)

@@ -153,6 +153,7 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setHandleWidth(1)
+        self.main_splitter = splitter
         outer.addWidget(splitter, 1)
 
         self.session_bar = SessionBar()
@@ -207,9 +208,8 @@ class MainWindow(QMainWindow):
             return
         if not active:
             self.session_bar.hide()
-            editor = getattr(self, "_sermon_editor", None)
-            if editor is not None and editor.isVisible() and hasattr(editor, "fit_to_parent"):
-                editor.fit_to_parent()
+            self._refit_sermon_chrome()
+            QTimer.singleShot(0, self._refit_sermon_chrome)
             self._set_scripture_nav_shortcuts(True)
             self._set_presenter_shortcuts(False)
             return
@@ -247,25 +247,15 @@ class MainWindow(QMainWindow):
             self.session_bar.raise_()
 
     def _sermon_session_status_text(self) -> str:
-        """底栏附加文案：经文频道不写页码；讲篇写页码+动画进度。"""
+        """底栏附加：讲篇频道只写页码。"""
         if self._projection_channel != "sermon":
             return ""
         ctrl = self.sermon_controller
         if not ctrl.active or ctrl.doc is None or not ctrl.doc.slides:
             return ""
-        from core.sermon.model import ANIM_KIND_LABELS
-
         n = len(ctrl.doc.slides)
         idx = max(0, min(ctrl.index, n - 1))
-        page = f"第 {idx + 1}/{n} 页"
-        anims = ctrl.doc.slides[idx].sorted_animations()
-        if not anims:
-            return page
-        cur = max(0, int(ctrl.anim_cursor))
-        if cur >= len(anims):
-            return f"{page} · 动画完成"
-        kind = ANIM_KIND_LABELS.get(anims[cur].kind, anims[cur].kind)
-        return f"{page} · 动画 {cur}/{len(anims)} · 下一步：{kind}"
+        return f"{idx + 1}/{n}"
 
     def _presenter_next(self):
         if not self.sermon_controller.active:
@@ -331,6 +321,10 @@ class MainWindow(QMainWindow):
             pass
         if ext.isVisible() and getattr(ext, "display_mode", None) == "sermon":
             ext.set_display_mode("scripture", animate=False)
+        try:
+            ext.slide_stage.clear_stage()
+        except Exception:
+            pass
 
     def _on_escape(self):
         if self.sermon_controller.active:
@@ -512,8 +506,6 @@ class MainWindow(QMainWindow):
             self.extension_window.update_from_selection(
                 selection, self.verses, reset_scroll=reset_scroll
             )
-            if reset_scroll:
-                QApplication.processEvents()
             self._sync_extension_scroll()
             # 选了经文就切到经文频道，讲篇页码保留
             if self.extension_window.display_mode == "sermon" or self.sermon_controller.active:
@@ -521,6 +513,8 @@ class MainWindow(QMainWindow):
         self._update_status()
 
     def _update_status(self):
+        if self.sermon_controller.active:
+            return
         if self.current_selection is not None:
             self.status_label.setText(self.current_selection.label())
         elif self.current_book:
@@ -627,9 +621,7 @@ class MainWindow(QMainWindow):
                 self.current_book, self.current_chapter, self.current_start, self.current_end, self.verses
             )
         self.extension_window.set_scroll_speed(0)
-        QApplication.processEvents()
         self.preview_host._fit_view()
-        QApplication.processEvents()
         self._sync_extension_scroll()
         self.toolbar.set_extend_active(True)
         if self.sermon_controller.active and self._projection_channel == "sermon":
@@ -651,6 +643,8 @@ class MainWindow(QMainWindow):
         if not self.extension_window:
             return
         self._projection_channel = "scripture"
+        if self.extension_window.display_mode != "scripture":
+            self.extension_window.set_display_mode("scripture", animate=True)
         editor = getattr(self, "_sermon_editor", None)
         if editor is not None and editor.isVisible():
             if hasattr(editor, "_set_present_shortcuts_enabled"):
@@ -659,17 +653,14 @@ class MainWindow(QMainWindow):
             from ui.sermon.install import _on_editor_closed
 
             _on_editor_closed(self)
-        if self.extension_window.display_mode != "scripture":
-            self.extension_window.set_display_mode("scripture", animate=True)
         self._set_extension_scroll_sync(True)
         self._sync_extension_scroll()
         self._update_session_chrome(sync_editor=False)
-        if self.sermon_controller.active:
-            self.status_label.setText("观众：经文 · 主屏：经文预览（底栏可显示讲篇）")
-        elif self.current_selection is not None:
-            self.status_label.setText(f"扩展屏：经文 · {self.current_selection.label()}")
-        else:
-            self.status_label.setText("扩展屏：经文")
+        if not self.sermon_controller.active:
+            if self.current_selection is not None:
+                self.status_label.setText(f"扩展屏：经文 · {self.current_selection.label()}")
+            else:
+                self.status_label.setText("扩展屏：经文")
 
     def show_sermon_channel(self):
         """扩展屏显示讲篇；主屏打开讲篇叠层，不再留在经文页。"""
@@ -680,21 +671,8 @@ class MainWindow(QMainWindow):
             self.sermon_controller.resume_display()
             self.extension_window.set_display_mode("sermon", animate=True)
             self._set_extension_scroll_sync(False)
-            from ui.sermon.install import _open_editor
-
-            _open_editor(self)
-            editor = getattr(self, "_sermon_editor", None)
-            if editor is not None:
-                editor._presenting = True
-                editor._set_present_shortcuts_enabled(True)
-                editor.play_btn.setEnabled(False)
-                editor.stop_btn.setEnabled(True)
-                if hasattr(editor, "_enter_present_preview"):
-                    editor._enter_present_preview()
-                elif hasattr(editor, "sync_from_controller"):
-                    editor.sync_from_controller()
             self._update_session_chrome(sync_editor=False)
-            self.status_label.setText("观众：讲篇 · 主屏与观众同画")
+            QTimer.singleShot(80, self._restore_sermon_editor_chrome)
             return
 
         editor = getattr(self, "_sermon_editor", None)
@@ -707,6 +685,24 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "讲篇放映", "请先打开讲篇并编辑内容。")
             return
         editor.start_presentation()
+
+    def _restore_sermon_editor_chrome(self):
+        if not self.sermon_controller.active or self._projection_channel != "sermon":
+            return
+        from ui.sermon.install import _open_editor
+
+        _open_editor(self)
+        editor = getattr(self, "_sermon_editor", None)
+        if editor is None:
+            return
+        editor._presenting = True
+        editor._set_present_shortcuts_enabled(True)
+        editor.play_btn.setEnabled(False)
+        editor.stop_btn.setEnabled(True)
+        if hasattr(editor, "_enter_present_preview"):
+            editor._enter_present_preview()
+        elif hasattr(editor, "sync_from_controller"):
+            editor.sync_from_controller()
 
     # —— 讲篇放映 ——
 
@@ -768,7 +764,7 @@ class MainWindow(QMainWindow):
         )
         QTimer.singleShot(
             200,
-            self._after_sermon(gen, lambda: self._prefetch_next_sermon_slide(doc, index)),
+            self._after_sermon(gen, lambda: self._prefetch_adjacent_sermon_slides(doc, index)),
         )
         QTimer.singleShot(
             350, self._after_sermon(gen, ext.slide_stage.snapshot_current)
@@ -780,7 +776,6 @@ class MainWindow(QMainWindow):
                     doc, index, assets_root, prepare_anims=True, anim_cursor=0
                 )
         self._update_session_chrome()
-        self.status_label.setText("观众：讲篇 · 主屏与观众同画")
 
     def _on_sermon_stopped(self):
         self._abort_extension_sermon_layer()
@@ -792,7 +787,7 @@ class MainWindow(QMainWindow):
         self._keep_editor_after_stop = True
         if editor is not None:
             editor.on_presentation_stopped(reshow=keep)
-        self.status_label.setText("讲篇放映已结束")
+        self._update_status()
 
     def _on_sermon_slide_changed(self, doc, index, assets_root):
         if not self.extension_window:
@@ -829,7 +824,7 @@ class MainWindow(QMainWindow):
                     prepare_anims=True,
                     anim_cursor=int(ctrl.anim_cursor),
                 )
-            self._prefetch_next_sermon_slide(doc, index)
+            self._prefetch_adjacent_sermon_slides(doc, index)
             self._update_session_chrome()
             return
 
@@ -882,7 +877,7 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(80, self._after_sermon(gen, ctrl.maybe_auto_start))
             QTimer.singleShot(
                 200,
-                self._after_sermon(gen, lambda: self._prefetch_next_sermon_slide(doc, index)),
+                self._after_sermon(gen, lambda: self._prefetch_adjacent_sermon_slides(doc, index)),
             )
             QTimer.singleShot(400, self._after_sermon(gen, stage.snapshot_current))
 
@@ -899,17 +894,24 @@ class MainWindow(QMainWindow):
         else:
             _commit_scene()
 
-    def _prefetch_next_sermon_slide(self, doc, index: int):
-        if not self.sermon_controller.active:
+    def _prefetch_adjacent_sermon_slides(self, doc, index: int):
+        if not self.sermon_controller.active or doc is None:
             return
+        stages = []
         ext = self.extension_window
-        if ext is None or doc is None:
+        if ext is not None:
+            stages.append(ext.slide_stage)
+        editor = getattr(self, "_sermon_editor", None)
+        if editor is not None and hasattr(editor, "present_stage"):
+            stages.append(editor.present_stage)
+        if not stages:
             return
-        nxt = index + 1
-        if nxt < 0 or nxt >= len(doc.slides):
-            return
-        slide = doc.slides[nxt]
-        ext.slide_stage.prefetch_slide(doc, slide, prepare_anims=True)
+        for nxt in (index + 1, index - 1):
+            if nxt < 0 or nxt >= len(doc.slides):
+                continue
+            slide = doc.slides[nxt]
+            for stage in stages:
+                stage.prefetch_slide(doc, slide, prepare_anims=True)
 
     def _on_sermon_steps(self, steps):
         """同批入场：副屏立刻播；主屏预览与底栏延后，减轻卡顿。"""
@@ -950,41 +952,20 @@ class MainWindow(QMainWindow):
         if index < 0 or index >= len(doc.slides):
             return
         slide = doc.slides[index]
-        self.extension_window.show_sermon_slide(
-            doc, slide, assets_root, prepare_anims=True
-        )
-        played = slide.sorted_animations()[: max(0, int(anim_cursor))]
-        if played:
-            self.extension_window.slide_stage.apply_played_steps(played)
-        editor = getattr(self, "_sermon_editor", None)
-        if editor is not None and hasattr(editor, "mirror_present_slide"):
-            editor.mirror_present_slide(
-                doc,
-                index,
-                assets_root,
-                prepare_anims=True,
-                anim_cursor=int(anim_cursor),
-            )
-        self._update_session_chrome()
+        ext = self.extension_window
+        same = ext.showing_sermon_slide_id() == getattr(slide, "id", None)
+        if not same:
+            ext.show_sermon_slide(doc, slide, assets_root, prepare_anims=True)
+            played = slide.sorted_animations()[: max(0, int(anim_cursor))]
+            if played:
+                ext.slide_stage.apply_played_steps(played)
+        ext.slide_stage.show()
+        ext.slide_stage.lower()
 
     def _on_sermon_status(self, text: str):
-        self._pending_sermon_status = text
-        if not hasattr(self, "_sermon_status_timer"):
-            self._sermon_status_timer = QTimer(self)
-            self._sermon_status_timer.setSingleShot(True)
-            self._sermon_status_timer.timeout.connect(self._flush_sermon_status)
         if self.sermon_controller.active:
-            self._sermon_status_timer.start(180)
-        else:
-            self._flush_sermon_status()
-
-    def _flush_sermon_status(self):
-        text = getattr(self, "_pending_sermon_status", "")
-        if self.sermon_controller.active:
-            channel = "讲篇" if self._projection_channel == "sermon" else "经文"
-            self.status_label.setText(f"观众：{channel} · {text}")
-        else:
-            self.status_label.setText(text)
+            return
+        self.status_label.setText(text or "")
 
     def _toggle_extension_topmost(self, on):
         self.settings["extension_topmost"] = bool(on)
@@ -1178,7 +1159,6 @@ class MainWindow(QMainWindow):
                 self.extension_window.update_from_selection(
                     self.current_selection, self.verses
                 )
-                QApplication.processEvents()
                 self._sync_extension_scroll()
         else:
             self.scripture_display.set_scripture(
@@ -1188,7 +1168,6 @@ class MainWindow(QMainWindow):
                 self.extension_window.update_scripture(
                     self.current_book, self.current_chapter, self.current_start, self.current_end, self.verses
                 )
-                QApplication.processEvents()
                 self._sync_extension_scroll()
         self._update_status()
 

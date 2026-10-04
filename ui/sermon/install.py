@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QEvent, QObject, Qt
+from PyQt6.QtCore import QEvent, QObject, QTimer, Qt
 from PyQt6.QtWidgets import QPushButton
 
 
@@ -61,6 +61,9 @@ def _ensure_editor(window):
 
     filt = _CentralResizeFilter(editor, central)
     central.installEventFilter(filt)
+    splitter = getattr(window, "main_splitter", None)
+    if splitter is not None:
+        splitter.installEventFilter(filt)
     window._sermon_resize_filter = filt
     editor.hide()
     return editor
@@ -91,6 +94,7 @@ def _open_editor(window):
     bar = getattr(window, "session_bar", None)
     if bar is not None and bar.isVisible():
         bar.raise_()
+    QTimer.singleShot(0, editor.fit_to_parent)
     editor.setFocus(Qt.FocusReason.OtherFocusReason)
     # 若仍在放映，叠层回来后恢复编辑器翻页快捷键
     if getattr(editor, "_presenting", False):

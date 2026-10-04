@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QPropertyAnimation, Qt, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QGraphicsOpacityEffect,
     QGridLayout,
+    QLabel,
     QWidget,
 )
 
@@ -46,25 +47,30 @@ class ExtensionWindow(QWidget):
         self.scripture_display = ScriptureDisplay()
         self.slide_stage = SlideStage()
 
-        grid.addWidget(self.scripture_display, 0, 0)
         grid.addWidget(self.slide_stage, 0, 0)
-        self.slide_stage.raise_()
+        grid.addWidget(self.scripture_display, 0, 0)
+        self._cover = QLabel()
+        self._cover.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._cover.setScaledContents(True)
+        self._cover.hide()
+        grid.addWidget(self._cover, 0, 0)
+        self.scripture_display.raise_()
 
         outer = QGridLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(host, 0, 0)
 
-        # 只给经文层做淡入淡出；讲篇舞台挂 OpacityEffect 会导致动画不刷新
-        self._scripture_fx = QGraphicsOpacityEffect(self.scripture_display)
-        self.scripture_display.setGraphicsEffect(self._scripture_fx)
-        self._scripture_fx.setOpacity(1.0)
         self.slide_stage.setGraphicsEffect(None)
         self.slide_stage.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.slide_stage.hide()
         self.slide_stage.page_step_requested.connect(self._on_stage_wheel)
 
-        self._fade_scripture = QPropertyAnimation(self._scripture_fx, b"opacity", self)
-        self._fade_scripture.setDuration(self.FADE_MS)
+        self._cover_fx = QGraphicsOpacityEffect(self._cover)
+        self._cover.setGraphicsEffect(self._cover_fx)
+        self._cover_fx.setOpacity(0.0)
+        self._fade_cover = QPropertyAnimation(self._cover_fx, b"opacity", self)
+        self._fade_cover.setDuration(self.FADE_MS)
+        self._fade_cover.setEasingCurve(QEasingCurve.Type.InOutQuad)
 
         self.current_data = None
         self._main_scroll_fraction = 0.0
@@ -99,7 +105,7 @@ class ExtensionWindow(QWidget):
         key = event.key()
         if key == Qt.Key.Key_Escape:
             if self._mode == "sermon":
-                self.scripture_channel_requested.emit()
+                self.sermon_stop_requested.emit()
             else:
                 self.close_requested.emit()
             event.accept()
@@ -148,7 +154,7 @@ class ExtensionWindow(QWidget):
         except (TypeError, ValueError):
             value = self.FADE_MS
         self._fade_ms = max(0, min(2000, value))
-        self._fade_scripture.setDuration(max(1, self._fade_ms))
+        self._fade_cover.setDuration(max(1, self._fade_ms))
         return self._fade_ms
 
     def set_scroll_speed(self, speed):
@@ -188,72 +194,116 @@ class ExtensionWindow(QWidget):
         root = Path(assets_root) if assets_root else None
         self.slide_stage.set_assets_root(root)
         self.slide_stage.show_slide(doc, slide, prepare_anims=prepare_anims)
+        self.slide_stage.lower()
+        self._cover.raise_()
+
+    def showing_sermon_slide_id(self) -> str | None:
+        slide = getattr(self.slide_stage, "_slide", None)
+        return getattr(slide, "id", None) if slide is not None else None
+
+    def _stop_channel_fade(self):
+        self._fade_cover.stop()
+        try:
+            self._fade_cover.finished.disconnect()
+        except TypeError:
+            pass
+        self._animating = False
+        self._cover.hide()
+        self._cover.clear()
+        self._cover_fx.setOpacity(0.0)
+
+    def _snap_to_mode(self, mode: str):
+        self._stop_channel_fade()
+        self._mode = mode
+        if mode == "sermon":
+            self.scripture_display.hide()
+            self.slide_stage.show()
+            self.slide_stage.setAttribute(
+                Qt.WidgetAttribute.WA_TransparentForMouseEvents, False
+            )
+            self.slide_stage.lower()
+        else:
+            self.scripture_display.show()
+            self.scripture_display.raise_()
+            self.slide_stage.hide()
+            self.slide_stage.setAttribute(
+                Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+            )
+            self.force_sync_scroll()
+
+    def _play_cover_fade(self, pixmap, on_done):
+        if pixmap is None or pixmap.isNull():
+            on_done()
+            return
+        self._cover.setPixmap(pixmap)
+        self._cover_fx.setOpacity(1.0)
+        self._cover.show()
+        self._cover.raise_()
+        self._animating = True
+        self._fade_cover.setDuration(max(1, int(self._fade_ms)))
+        self._fade_cover.setStartValue(1.0)
+        self._fade_cover.setEndValue(0.0)
+
+        def _finished():
+            self._animating = False
+            self._cover.hide()
+            self._cover.clear()
+            try:
+                self._fade_cover.finished.disconnect(_finished)
+            except TypeError:
+                pass
+            on_done()
+
+        self._fade_cover.finished.connect(_finished)
+        self._fade_cover.start()
 
     def set_display_mode(self, mode: str, animate: bool = True):
-        """切换 scripture / sermon。讲篇层直接显隐，只淡经文层。"""
+        """用最上层截图盖布做交叉淡化，避免两层互相 raise。"""
         if mode not in ("scripture", "sermon"):
             return
         animate = bool(animate) and self._fade_ms >= 40
         if mode == self._mode and not self._animating:
-            if mode == "sermon":
-                self.slide_stage.setGraphicsEffect(None)
-                self.slide_stage.show()
-                self.slide_stage.raise_()
-                self._scripture_fx.setOpacity(0.0)
+            self._snap_to_mode(mode)
             return
 
-        target = mode
-        self._fade_scripture.stop()
+        old = self._mode
+        if not animate:
+            self._snap_to_mode(mode)
+            return
 
-        if target == "sermon":
+        if old == mode:
+            self._snap_to_mode(mode)
+            return
+
+        self._stop_channel_fade()
+
+        if mode == "sermon":
+            pix = self.scripture_display.grab()
             self.slide_stage.setGraphicsEffect(None)
             self.slide_stage.show()
-            self.slide_stage.raise_()
-            self.slide_stage.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+            self.slide_stage.setAttribute(
+                Qt.WidgetAttribute.WA_TransparentForMouseEvents, False
+            )
+            self.slide_stage.lower()
+            self.scripture_display.hide()
             self._mode = "sermon"
-            if not animate:
-                self._scripture_fx.setOpacity(0.0)
-                return
-            self._animating = True
-            self._fade_scripture.setStartValue(self._scripture_fx.opacity())
-            self._fade_scripture.setEndValue(0.0)
+            self._play_cover_fade(pix, lambda: None)
+            return
 
-            def _done_sermon():
-                self._animating = False
-                try:
-                    self._fade_scripture.finished.disconnect(_done_sermon)
-                except TypeError:
-                    pass
+        src = self.slide_stage if self.slide_stage.isVisible() else self.scripture_display
+        pix = src.grab()
+        self.scripture_display.show()
+        self.scripture_display.raise_()
+        self._mode = "scripture"
 
-            self._fade_scripture.finished.connect(_done_sermon)
-            self._fade_scripture.start()
-        else:
-            self._mode = "scripture"
-            if not animate:
-                self._scripture_fx.setOpacity(1.0)
-                self.slide_stage.hide()
-                self.slide_stage.clear_stage()
-                self.slide_stage.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-                self.force_sync_scroll()
-                return
-            self._animating = True
-            self.slide_stage.show()
-            self._fade_scripture.setStartValue(self._scripture_fx.opacity())
-            self._fade_scripture.setEndValue(1.0)
+        def _after():
+            self.slide_stage.hide()
+            self.slide_stage.setAttribute(
+                Qt.WidgetAttribute.WA_TransparentForMouseEvents, True
+            )
+            self.force_sync_scroll()
 
-            def _done_scripture():
-                self._animating = False
-                self.slide_stage.hide()
-                self.slide_stage.clear_stage()
-                self.slide_stage.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-                self.force_sync_scroll()
-                try:
-                    self._fade_scripture.finished.disconnect(_done_scripture)
-                except TypeError:
-                    pass
-
-            self._fade_scripture.finished.connect(_done_scripture)
-            self._fade_scripture.start()
+        self._play_cover_fade(pix, _after)
 
     def closeEvent(self, event):
         self.close_requested.emit()
