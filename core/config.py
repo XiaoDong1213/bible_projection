@@ -59,6 +59,8 @@ class AppConfig:
                 self.parser["History"] = {"search_history": "[]"}
             if "ScriptureSearch" not in self.parser:
                 self.parser["ScriptureSearch"] = {"history": "[]"}
+            if "Sermon" not in self.parser:
+                self.parser["Sermon"] = {}
         else:
             self._fill_default_config()
             self._save_ini()
@@ -81,6 +83,7 @@ class AppConfig:
         self.parser["Window"] = {"geometry": ""}
         self.parser["History"] = {"search_history": "[]"}
         self.parser["ScriptureSearch"] = {"history": "[]"}
+        self.parser["Sermon"] = {}
 
     def _save_ini(self):
         """保存当前配置到 INI 文件。"""
@@ -202,3 +205,31 @@ class AppConfig:
             return value if isinstance(value, list) else []
         except json.JSONDecodeError:
             return []
+
+    def save_sermon_text_style(self, style) -> None:
+        """记住讲篇文字上次样式，下次打开继续用。"""
+        from core.sermon.model import ElementStyle
+
+        if not isinstance(style, ElementStyle):
+            return
+        if "Sermon" not in self.parser:
+            self.parser["Sermon"] = {}
+        self.parser["Sermon"]["text_style"] = json.dumps(style.to_dict(), ensure_ascii=False)
+        self._save_ini()
+
+    def load_sermon_text_style(self):
+        """读取讲篇文字上次样式。"""
+        from core.sermon.model import ElementStyle
+
+        if "Sermon" not in self.parser:
+            return ElementStyle()
+        raw = self.parser["Sermon"].get("text_style", "")
+        if not raw:
+            return ElementStyle()
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return ElementStyle()
+        if not isinstance(data, dict):
+            return ElementStyle()
+        return ElementStyle.from_dict(data)

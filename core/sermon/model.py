@@ -120,6 +120,9 @@ class Background:
             fit=str(data.get("fit", "cover") or "cover"),
         )
 
+    def clone(self) -> Background:
+        return Background.from_dict(self.to_dict())
+
 
 @dataclass
 class ElementStyle:
@@ -132,6 +135,7 @@ class ElementStyle:
     v_align: VAlign = "top"
     opacity: float = 1.0  # 0~1，形状填充/文字透明度
     wrap: bool = True  # 文本是否在框内自动换行
+    line_spacing: int = 120  # 行距百分比，100=单倍
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -150,6 +154,10 @@ class ElementStyle:
         except (TypeError, ValueError):
             opacity = 1.0
         opacity = max(0.0, min(1.0, opacity))
+        try:
+            line_spacing = int(data.get("line_spacing", 120) or 120)
+        except (TypeError, ValueError):
+            line_spacing = 120
         return cls(
             font_family=str(data.get("font_family", "微软雅黑")),
             font_size=int(data.get("font_size", 48) or 48),
@@ -160,7 +168,11 @@ class ElementStyle:
             v_align=v_align,
             opacity=opacity,
             wrap=bool(data.get("wrap", True)),
+            line_spacing=max(80, min(300, line_spacing)),
         )
+
+    def clone(self) -> ElementStyle:
+        return ElementStyle.from_dict(self.to_dict())
 
 
 @dataclass
@@ -414,10 +426,15 @@ class SermonDocument:
         self.meta.setdefault("created", self.meta["updated"])
 
 
-def new_slide(background_color: str = "#1A1A2E") -> Slide:
+def new_slide(
+    background_color: str = "#1A1A2E",
+    *,
+    background: Background | None = None,
+) -> Slide:
+    bg = background.clone() if background is not None else Background(type="color", value=background_color)
     return Slide(
         id=_new_id("slide_"),
-        background=Background(type="color", value=background_color),
+        background=bg,
         elements=[],
         animations=[],
         transition=SlideTransition(),
@@ -425,10 +442,11 @@ def new_slide(background_color: str = "#1A1A2E") -> Slide:
 
 
 def new_text_element(
-    text: str = "双击编辑文字",
+    text: str = "在此输入",
     *,
     canvas_w: int = 1920,
     canvas_h: int = 1080,
+    style: ElementStyle | None = None,
 ) -> Element:
     w, h = 800.0, 120.0
     return Element(
@@ -440,7 +458,7 @@ def new_text_element(
         h=h,
         content=text,
         z=0,
-        style=ElementStyle(),
+        style=style.clone() if style is not None else ElementStyle(),
     )
 
 

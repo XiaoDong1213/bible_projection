@@ -26,6 +26,9 @@ from PyQt6.QtWidgets import (
 
 from core.sermon.image_cache import load_pixmap, scaled_pixmap
 from core.sermon.model import Element, SermonDocument, Slide
+from ui.sermon.text_format import apply_text_line_spacing
+
+_TEXT_PLACEHOLDERS = frozenset({"在此输入", "双击编辑文字"})
 
 
 def _render_scene_thumb(scene: QGraphicsScene, logical_w: int, logical_h: int, size: int) -> QPixmap:
@@ -136,17 +139,64 @@ class TextElementItem(QGraphicsTextItem, ElementItemMixin):
             self.setTextWidth(max(40.0, element.w))
         else:
             self.setTextWidth(-1)
+        self._line_spacing = int(getattr(style, "line_spacing", 120) or 120)
+        apply_text_line_spacing(self, self._line_spacing)
         self.setPos(element.x, element.y)
         self.setRotation(element.rotation)
         self.setZValue(element.z)
 
+    def _is_placeholder(self) -> bool:
+        return (self.toPlainText() or "").strip() in _TEXT_PLACEHOLDERS
+
+    def _consume_placeholder(self) -> None:
+        if not self._is_placeholder():
+            return
+        self.setPlainText("")
+        apply_text_line_spacing(self, getattr(self, "_line_spacing", 120))
+        cursor = self.textCursor()
+        cursor.movePosition(cursor.MoveOperation.Start)
+        self.setTextCursor(cursor)
+        scene = self.scene()
+        if scene is None:
+            return
+        for view in scene.views():
+            if hasattr(view, "commit_geometry"):
+                view.commit_geometry()
+                break
+
+    def _place_cursor_for_edit(self) -> None:
+        cursor = self.textCursor()
+        if self._is_placeholder():
+            cursor.clearSelection()
+            cursor.movePosition(cursor.MoveOperation.Start)
+        self.setTextCursor(cursor)
+
     def mouseDoubleClickEvent(self, event):
         self.setTextInteractionFlags(Qt.TextInteractionFlag.TextEditorInteraction)
         self.setFocus(Qt.FocusReason.MouseFocusReason)
-        cursor = self.textCursor()
-        cursor.select(cursor.SelectionType.Document)
-        self.setTextCursor(cursor)
         super().mouseDoubleClickEvent(event)
+        self._place_cursor_for_edit()
+
+    def keyPressEvent(self, event):
+        if (
+            self.textInteractionFlags() != Qt.TextInteractionFlag.NoTextInteraction
+            and self._is_placeholder()
+        ):
+            key = event.key()
+            if key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+                self._consume_placeholder()
+                event.accept()
+                return
+            if event.text() and not (
+                event.modifiers() & Qt.KeyboardModifier.ControlModifier
+            ):
+                self._consume_placeholder()
+        super().keyPressEvent(event)
+
+    def inputMethodEvent(self, event):
+        if event.commitString() or event.preeditString():
+            self._consume_placeholder()
+        super().inputMethodEvent(event)
 
     def focusOutEvent(self, event):
         self.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
@@ -221,6 +271,7 @@ class SlideCanvas(QGraphicsView):
     slide_modified = pyqtSignal()
     status_message = pyqtSignal(str)
     rect_drawn = pyqtSignal(str, float, float, float, float)  # kind, x, y, w, h
+    format_paint_target = pyqtSignal(object)  # Element | None
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -253,6 +304,7 @@ class SlideCanvas(QGraphicsView):
         self._draw_kind: str | None = None  # "text" | "shape"
         self._draw_origin: QPointF | None = None
         self._draw_rubber: QGraphicsRectItem | None = None
+        self._format_paint = False
 
     def set_assets_root(self, root: Path | None):
         self._assets_root = Path(root) if root else None
@@ -580,6 +632,19 @@ class SlideCanvas(QGraphicsView):
     def is_drawing(self) -> bool:
         return self._draw_kind is not None
 
+    def set_format_paint(self, on: bool):
+        self._format_paint = bool(on)
+        if self._format_paint:
+            self.cancel_draw()
+            self.setCursor(Qt.CursorShape.CrossCursor)
+            self.viewport().setCursor(Qt.CursorShape.CrossCursor)
+        else:
+            self.unsetCursor()
+            self.viewport().unsetCursor()
+
+    def is_format_painting(self) -> bool:
+        return self._format_paint
+
     def _clear_draw_rubber(self):
         if self._draw_rubber is not None:
             if self._draw_rubber.scene() is not None:
@@ -587,6 +652,16 @@ class SlideCanvas(QGraphicsView):
             self._draw_rubber = None
 
     def mousePressEvent(self, event):
+        if self._format_paint and event.button() == Qt.MouseButton.LeftButton:
+            item = self.itemAt(event.position().toPoint())
+            el = self._element_from_item(item) if item is not None else None
+            self.format_paint_target.emit(el if el is not None and el.type == "text" else None)
+            event.accept()
+            return
+        if self._format_paint and event.button() == Qt.MouseButton.RightButton:
+            self.format_paint_target.emit(False)
+            event.accept()
+            return
         if (
             self._draw_kind
             and event.button() == Qt.MouseButton.LeftButton
@@ -611,6 +686,9 @@ class SlideCanvas(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        if self._format_paint:
+            event.accept()
+            return
         if self._draw_kind and self._draw_origin is not None and self._draw_rubber is not None:
             pos = self.mapToScene(event.position().toPoint())
             rect = QRectF(self._draw_origin, pos).normalized()
@@ -620,6 +698,9 @@ class SlideCanvas(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        if self._format_paint:
+            event.accept()
+            return
         if (
             self._draw_kind
             and event.button() == Qt.MouseButton.LeftButton
@@ -732,6 +813,10 @@ class SlideCanvas(QGraphicsView):
         self.selection_changed.emit(None)
 
     def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape and self._format_paint:
+            self.format_paint_target.emit(False)
+            event.accept()
+            return
         if self._draw_kind and event.key() == Qt.Key.Key_Escape:
             self.cancel_draw()
             self.status_message.emit("已取消画框")

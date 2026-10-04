@@ -54,6 +54,8 @@ def _ensure_editor(window):
     central = window.centralWidget()
     editor = SermonEditorWindow(SermonStore(), parent=central)
     editor._host_window = window
+    if hasattr(editor, "reload_last_text_style"):
+        editor.reload_last_text_style()
     window._sermon_editor = editor
     editor.closed.connect(lambda: _on_editor_closed(window))
     if hasattr(window, "theme") and hasattr(editor, "apply_theme"):
