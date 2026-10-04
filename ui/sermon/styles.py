@@ -493,7 +493,7 @@ QLabel#sermonPanelTitle {{
     padding: 2px 0 6px 0;
 }}
 QListWidget#sermonSlideListView {{
-    background: transparent;
+    background: {t['surface']};
     border: none;
     outline: none;
     padding: 2px;

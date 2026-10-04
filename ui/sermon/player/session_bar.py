@@ -66,5 +66,5 @@ class SessionBar(QWidget):
             b.style().unpolish(b)
             b.style().polish(b)
         audience = "讲篇" if on_sermon else "经文"
-        extra = f" · {page_text}" if page_text else ""
+        extra = f"  {page_text}" if page_text else ""
         self.status.setText(f"观众：{audience}{extra}")

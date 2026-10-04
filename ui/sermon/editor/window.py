@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QBuffer, QIODevice, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QBuffer, QIODevice, QPoint, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractSpinBox,
@@ -28,7 +28,6 @@ from PyQt6.QtWidgets import (
 )
 
 from core.sermon.model import (
-    ANIM_KIND_LABELS,
     Background,
     Element,
     new_document,
@@ -37,6 +36,7 @@ from core.sermon.model import (
     new_slide,
     new_text_element,
     SermonDocument,
+    Slide,
 )
 from core.sermon.store import (
     LEGACY_FILTER,
@@ -65,6 +65,7 @@ class SermonEditorWindow(QWidget):
         super().__init__(parent)
         self.setObjectName("sermonEditorWindow")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAutoFillBackground(True)
 
         self.store = store or SermonStore()
         self.template_store = TemplateStore()
@@ -76,14 +77,18 @@ class SermonEditorWindow(QWidget):
         self._presenting = False
         self._host_window = None
         self._clip_elements: list[Element] = []
-        self._undo_stack: list[tuple[dict, int]] = []
-        self._redo_stack: list[tuple[dict, int]] = []
+        self._undo_stack: list[tuple] = []
+        self._redo_stack: list[tuple] = []
         self._history_limit = 40
         self._restoring = False
         self._syncing_from_ctrl = False
         self._wheel_guard_ms = 0
+        self._thumb_queue: list[int] = []
 
         self._build_ui()
+        self._thumb_timer = QTimer(self)
+        self._thumb_timer.setInterval(0)
+        self._thumb_timer.timeout.connect(self._pump_thumbnails)
         self._build_menus()
         self._build_present_shortcuts()
         self._wrap_canvas_remove()
@@ -112,12 +117,24 @@ class SermonEditorWindow(QWidget):
         parent = self.parentWidget()
         if parent is None:
             return
-        r = parent.rect()
         main = self._main_window()
+        splitter = getattr(main, "main_splitter", None) if main is not None else None
         bar = getattr(main, "session_bar", None) if main is not None else None
+        if splitter is not None and splitter.parentWidget() is parent:
+            self.setGeometry(splitter.geometry())
+        else:
+            r = parent.rect()
+            if bar is not None and bar.isVisible() and bar.parentWidget() is not None:
+                top = bar.mapTo(parent, QPoint(0, 0))
+                if 0 < top.y() < r.height():
+                    r.setHeight(top.y())
+                else:
+                    h = max(bar.height(), bar.sizeHint().height())
+                    r.setHeight(max(0, r.height() - h))
+            self.setGeometry(r)
+        self.raise_()
         if bar is not None and bar.isVisible():
-            r.setHeight(max(0, r.height() - bar.height()))
-        self.setGeometry(r)
+            bar.raise_()
 
     def _build_ui(self):
         shell = QVBoxLayout(self)
@@ -227,6 +244,7 @@ class SermonEditorWindow(QWidget):
         self.slide_list.add_requested.connect(self._add_slide)
         self.slide_list.delete_requested.connect(self._delete_slide)
         self.slide_list.duplicate_requested.connect(self._duplicate_slide)
+        self.slide_list.slides_reordered.connect(self._on_slides_reordered)
         root.addWidget(self.slide_list)
 
         canvas_host = QWidget()
@@ -355,10 +373,13 @@ class SermonEditorWindow(QWidget):
         act_select_all = QAction("全选", self)
         act_select_all.setShortcut(QKeySequence.StandardKey.SelectAll)
         act_select_all.triggered.connect(self._select_all)
+        act_select_slides = QAction("全选幻灯片", self)
+        act_select_slides.setShortcut(QKeySequence("Ctrl+Shift+A"))
+        act_select_slides.triggered.connect(self._select_all_slides)
         for a in (act_undo, act_redo):
             edit_menu.addAction(a)
         edit_menu.addSeparator()
-        for a in (act_cut, act_copy, act_paste, act_del, act_select_all):
+        for a in (act_cut, act_copy, act_paste, act_del, act_select_all, act_select_slides):
             edit_menu.addAction(a)
 
         present_menu = self._menu_bar.addMenu("放映(&P)")
@@ -416,29 +437,56 @@ class SermonEditorWindow(QWidget):
                 return True
         return False
 
-    def _push_history(self):
+    def _push_history(self, *, full: bool = False):
         if self._restoring:
             return
         try:
             self.canvas.commit_geometry()
         except Exception:
             pass
-        snap = (self.doc.to_dict(), int(self._slide_index))
-        self._undo_stack.append(snap)
+        self._undo_stack.append(self._capture_history(full=full))
         if len(self._undo_stack) > self._history_limit:
             self._undo_stack.pop(0)
         self._redo_stack.clear()
 
-    def _restore_snapshot(self, snap: tuple[dict, int]):
+    def _capture_history(self, *, full: bool = False) -> tuple:
+        idx = int(self._slide_index)
+        if full:
+            return ("doc", self.doc.to_dict(), idx)
+        slide = self._current_slide()
+        if slide is None:
+            return ("doc", self.doc.to_dict(), idx)
+        return ("slide", idx, slide.to_dict())
+
+    def _capture_like(self, snap: tuple) -> tuple:
+        if snap and snap[0] == "slide":
+            idx = int(snap[1])
+            idx = max(0, min(idx, len(self.doc.slides) - 1)) if self.doc.slides else 0
+            if self.doc.slides:
+                return ("slide", idx, self.doc.slides[idx].to_dict())
+        return ("doc", self.doc.to_dict(), int(self._slide_index))
+
+    def _restore_snapshot(self, snap: tuple):
         self._restoring = True
         try:
-            data, idx = snap
-            doc_id = self.doc.id
-            self.doc = SermonDocument.from_dict(data)
-            self.doc.id = doc_id
-            self._slide_index = max(0, min(int(idx), len(self.doc.slides) - 1))
-            self.slide_list.set_document(self.doc, self._slide_index)
-            self._show_slide(self._slide_index)
+            kind = snap[0] if snap else "doc"
+            if kind == "slide":
+                _, idx, slide_data = snap
+                idx = max(0, min(int(idx), len(self.doc.slides) - 1))
+                if self.doc.slides:
+                    self.doc.slides[idx] = Slide.from_dict(slide_data)
+                self._slide_index = idx
+                self.slide_list.refresh(self._slide_index)
+                self._show_slide(self._slide_index)
+            else:
+                data, idx = snap[1], snap[2]
+                doc_id = self.doc.id
+                self.doc = SermonDocument.from_dict(data)
+                self.doc.id = doc_id
+                self._slide_index = max(0, min(int(idx), len(self.doc.slides) - 1))
+                self.slide_list.set_document(self.doc, self._slide_index)
+                self._show_slide(self._slide_index)
+                QTimer.singleShot(0, self._refresh_all_thumbnails)
             self._set_dirty(True)
             self._push_hot_update()
         finally:
@@ -454,9 +502,8 @@ class SermonEditorWindow(QWidget):
             self.canvas.commit_geometry()
         except Exception:
             pass
-        current = (self.doc.to_dict(), int(self._slide_index))
         snap = self._undo_stack.pop()
-        self._redo_stack.append(current)
+        self._redo_stack.append(self._capture_like(snap))
         self._restore_snapshot(snap)
         self.statusBar().showMessage("已撤销", 2000)
 
@@ -470,9 +517,8 @@ class SermonEditorWindow(QWidget):
             self.canvas.commit_geometry()
         except Exception:
             pass
-        current = (self.doc.to_dict(), int(self._slide_index))
         snap = self._redo_stack.pop()
-        self._undo_stack.append(current)
+        self._undo_stack.append(self._capture_like(snap))
         self._restore_snapshot(snap)
         self.statusBar().showMessage("已重做", 2000)
 
@@ -525,8 +571,17 @@ class SermonEditorWindow(QWidget):
         self._push_hot_update()
         self.statusBar().showMessage(f"已粘贴 {len(pasted_ids)} 个图层", 2000)
 
+    def _slide_list_has_focus(self) -> bool:
+        w = QApplication.focusWidget()
+        if w is None:
+            return False
+        return w is self.slide_list or self.slide_list.isAncestorOf(w)
+
     def _delete_selected(self):
         if self._focus_is_text_field():
+            return
+        if self._slide_list_has_focus():
+            self._delete_slide()
             return
         if not self.canvas.selected_elements():
             return
@@ -548,10 +603,22 @@ class SermonEditorWindow(QWidget):
                 cursor.select(QTextCursor.SelectionType.Document)
                 focus.setTextCursor(cursor)
             return
+        if self._slide_list_has_focus():
+            self.slide_list.select_all_slides()
+            n = len(self.slide_list.selected_indexes())
+            if n:
+                self.statusBar().showMessage(f"已全选 {n} 页幻灯片", 2000)
+            return
         self.canvas.select_all()
         els = self.canvas.selected_elements()
         if els:
             self.statusBar().showMessage(f"已全选 {len(els)} 个图层", 2000)
+
+    def _select_all_slides(self):
+        self.slide_list.select_all_slides()
+        n = len(self.slide_list.selected_indexes())
+        if n:
+            self.statusBar().showMessage(f"已全选 {n} 页幻灯片", 2000)
 
     def _set_present_shortcuts_enabled(self, enabled: bool):
         for sc in getattr(self, "_present_shortcuts", []):
@@ -634,8 +701,7 @@ class SermonEditorWindow(QWidget):
             btn.blockSignals(False)
 
     def on_presentation_status(self, text: str):
-        if self._presenting:
-            self.statusBar().showMessage(text)
+        return
 
     def _enter_present_preview(self):
         """放映中：中间区换成与副屏同画的只读舞台。"""
@@ -745,31 +811,11 @@ class SermonEditorWindow(QWidget):
             self.present_stage.reveal_all()
 
     def _update_present_status(self, doc, index: int, anim_cursor: int):
-        n = len(doc.slides)
-        slide = doc.slides[index]
-        anims = slide.sorted_animations()
-        msg = f"放映中 第 {index + 1}/{n} 页"
-        if anims:
-            cur = max(0, int(anim_cursor))
-            if cur >= len(anims):
-                msg += f" · 动画完成（{len(anims)}/{len(anims)}）"
-            else:
-                step = anims[cur]
-                kind = ANIM_KIND_LABELS.get(step.kind, step.kind)
-                el_name = ""
-                for el in slide.elements:
-                    if el.id == step.element_id:
-                        if el.type == "text":
-                            el_name = (el.content or "文本").replace("\n", " ")[:10]
-                        elif el.type == "shape":
-                            el_name = "形状"
-                        else:
-                            el_name = "图片"
-                        break
-                nxt = f"{kind}·{el_name}" if el_name else kind
-                msg += f" · 动画 {cur}/{len(anims)} · 下一步：{nxt}"
-            self.anim_panel.set_play_cursor(cur)
-        self.statusBar().showMessage(msg)
+        if doc is None or not doc.slides:
+            return
+        if index < 0 or index >= len(doc.slides):
+            return
+        self.anim_panel.set_play_cursor(max(0, int(anim_cursor)))
 
     def _present_next(self):
         if not self._presenting:
@@ -830,20 +876,6 @@ class SermonEditorWindow(QWidget):
         if self._presenting and ctrl.doc is not None:
             if self.canvas_stack.currentIndex() != 1:
                 self._enter_present_preview()
-            self._update_present_status(ctrl.doc, idx, int(ctrl.anim_cursor))
-        elif ctrl.doc is not None:
-            n = len(ctrl.doc.slides)
-            anims = (
-                len(ctrl.doc.slides[idx].sorted_animations())
-                if 0 <= idx < n
-                else 0
-            )
-            if anims:
-                self.statusBar().showMessage(
-                    f"放映中 第 {idx + 1}/{n} 页 · 动画 {ctrl.anim_cursor}/{anims}"
-                )
-            elif n:
-                self.statusBar().showMessage(f"放映中 第 {idx + 1}/{n} 页")
 
     def _on_transition_changed(self):
         self._set_dirty(True)
@@ -931,6 +963,7 @@ class SermonEditorWindow(QWidget):
         self._update_title()
         # 导入/打开后稍晚刷缩略图，避免场景未布局时全是灰块
         QTimer.singleShot(80, self._refresh_all_thumbnails)
+        QTimer.singleShot(280, self._refresh_all_thumbnails)
 
     def save_as_template(self):
         self.canvas.commit_geometry()
@@ -1237,12 +1270,14 @@ class SermonEditorWindow(QWidget):
                 main.sermon_presentation_go_to(self._slide_index)
 
     def _on_slide_selected(self, index: int):
-        if index == self._slide_index:
-            return
-        self._show_slide(index)
+        keep_list = self._slide_list_has_focus()
+        if index != self._slide_index:
+            self._show_slide(index)
+        if keep_list:
+            self.slide_list.list.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _add_slide(self):
-        self._push_history()
+        self._push_history(full=True)
         self.canvas.commit_geometry()
         self.doc.slides.append(new_slide())
         self._slide_index = len(self.doc.slides) - 1
@@ -1252,28 +1287,58 @@ class SermonEditorWindow(QWidget):
         self._push_hot_update()
 
     def _delete_slide(self):
-        if len(self.doc.slides) <= 1:
+        idxs = self.slide_list.selected_indexes()
+        if not idxs:
+            idxs = [self._slide_index]
+        if len(self.doc.slides) - len(idxs) < 1:
             QMessageBox.information(self, "提示", "至少保留一页幻灯片。")
             return
-        self._push_history()
-        del self.doc.slides[self._slide_index]
-        self._slide_index = min(self._slide_index, len(self.doc.slides) - 1)
+        self._push_history(full=True)
+        for i in reversed(idxs):
+            del self.doc.slides[i]
+        self._slide_index = min(idxs[0], len(self.doc.slides) - 1)
         self.slide_list.refresh(self._slide_index)
         self._show_slide(self._slide_index)
         self._set_dirty(True)
         self._push_hot_update()
 
     def _duplicate_slide(self):
-        self._push_history()
+        idxs = self.slide_list.selected_indexes()
+        if not idxs:
+            idxs = [self._slide_index]
+        self._push_history(full=True)
         self.canvas.commit_geometry()
-        src = self._current_slide()
-        if src is None:
+        clones = [self.doc.slides[i].clone() for i in idxs if 0 <= i < len(self.doc.slides)]
+        if not clones:
             return
-        clone = src.clone()
-        self.doc.slides.insert(self._slide_index + 1, clone)
-        self._slide_index += 1
+        insert_at = idxs[-1] + 1
+        for i, clone in enumerate(clones):
+            self.doc.slides.insert(insert_at + i, clone)
+        self._slide_index = insert_at + len(clones) - 1
         self.slide_list.refresh(self._slide_index)
         self._show_slide(self._slide_index)
+        self._set_dirty(True)
+        self._push_hot_update()
+
+    def _on_slides_reordered(self, ids: list):
+        if self._restoring or not ids:
+            return
+        by_id = {s.id: s for s in self.doc.slides}
+        if set(ids) != set(by_id):
+            self.slide_list.refresh(self._slide_index)
+            return
+        new_slides = [by_id[i] for i in ids]
+        if [s.id for s in new_slides] == [s.id for s in self.doc.slides]:
+            return
+        self._push_history(full=True)
+        current_id = self.doc.slides[self._slide_index].id if self.doc.slides else None
+        self.doc.slides = new_slides
+        if current_id:
+            for i, s in enumerate(new_slides):
+                if s.id == current_id:
+                    self._slide_index = i
+                    break
+        self.slide_list.refresh(self._slide_index)
         self._set_dirty(True)
         self._push_hot_update()
 
@@ -1283,14 +1348,35 @@ class SermonEditorWindow(QWidget):
 
     def _refresh_all_thumbnails(self):
         if self.doc is None or not self.doc.slides:
+            self._thumb_queue = []
+            self._thumb_timer.stop()
             return
-        current = self._slide_index
-        for i, slide in enumerate(self.doc.slides):
-            pix = self.canvas.render_slide_thumbnail(self.doc, slide, 168 * 2)
+        seen = set()
+        ordered: list[int] = []
+        for i in self.slide_list.visible_indexes() + list(range(len(self.doc.slides))):
+            if 0 <= i < len(self.doc.slides) and i not in seen:
+                seen.add(i)
+                ordered.append(i)
+        self._thumb_queue = ordered
+        if not self._thumb_timer.isActive():
+            self._thumb_timer.start()
+
+    def _pump_thumbnails(self):
+        if self.doc is None or not self._thumb_queue:
+            self._thumb_timer.stop()
+            self._thumb_queue = []
+            return
+        i = self._thumb_queue.pop(0)
+        if 0 <= i < len(self.doc.slides):
+            if i == self._slide_index:
+                pix = self.canvas.render_thumbnail(168 * 2)
+            else:
+                pix = self.canvas.render_slide_thumbnail(
+                    self.doc, self.doc.slides[i], 168 * 2
+                )
             self.slide_list.update_thumbnail(i, pix)
-        # 恢复当前页（render_slide_thumbnail 已尽量还原，再显式对齐一次）
-        if 0 <= current < len(self.doc.slides):
-            self.canvas.load_slide(self.doc, self.doc.slides[current])
+        if not self._thumb_queue:
+            self._thumb_timer.stop()
 
     # —— 元素 / 背景 ——
 

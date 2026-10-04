@@ -139,7 +139,7 @@ class HelpShortcutsDialog(QDialog):
             "搜索与定位",
             (
                 ("Enter", "打开 / 关闭快速定位"),
-                ("Ctrl + F", "打开 / 关闭全文搜索"),
+                ("Ctrl + F", "打开 / 关闭全文搜索（右侧栏）"),
                 ("↑ / ↓", "搜索时切换候选项"),
                 ("Space", "选择候选项 / 下一段"),
             ),
@@ -157,8 +157,8 @@ class HelpShortcutsDialog(QDialog):
         (
             "投影显示",
             (
-                ("F12", "开启 / 关闭扩展显示"),
-                ("Esc", "关闭扩展显示"),
+                ("F12", "开 / 关扩展屏（关时结束放映）"),
+                ("Esc", "先结束放映，再关扩展屏（主屏与副屏一致）"),
             ),
         ),
         (
@@ -169,8 +169,20 @@ class HelpShortcutsDialog(QDialog):
             ),
         ),
         (
+            "讲篇放映",
+            (
+                ("F5", "开始放映当前讲篇"),
+                ("空格 / → / ↓", "下一步或下一页"),
+                ("← / ↑ / 滚轮", "上一页 / 翻页"),
+                ("底栏", "切经文、切讲篇、结束放映"),
+            ),
+        ),
+        (
             "其他",
-            (("F1", "打开本帮助"),),
+            (
+                ("F1", "打开本帮助"),
+                ("Ctrl + A", "讲篇编辑：焦点在左侧列或 Ctrl+Shift+A 全选页；画布上全选图层"),
+            ),
         ),
     )
 
@@ -219,7 +231,14 @@ class HelpShortcutsDialog(QDialog):
         grid.setHorizontalSpacing(10)
         grid.setVerticalSpacing(10)
 
-        positions = ((0, 0, 1, 1), (0, 1, 1, 1), (1, 0, 1, 1), (1, 1, 1, 1), (2, 0, 1, 2))
+        positions = (
+            (0, 0, 1, 1),
+            (0, 1, 1, 1),
+            (1, 0, 1, 1),
+            (1, 1, 1, 1),
+            (2, 0, 1, 1),
+            (2, 1, 1, 1),
+        )
         for (row, col, row_span, col_span), (section_title, rows) in zip(
             positions, self.SECTIONS
         ):
@@ -241,7 +260,7 @@ class HelpShortcutsDialog(QDialog):
         footer_layout.setContentsMargins(0, 2, 0, 0)
         footer_layout.setSpacing(12)
 
-        tip = QLabel("输入框聚焦时，按键优先由当前控件处理")
+        tip = QLabel("输入框内按键交给当前控件。放映中空格和方向键用于步进 / 翻页。讲篇与经文切换的淡化时长在显示设置里。")
         tip.setObjectName("helpTip")
         tip.setWordWrap(True)
         footer_layout.addWidget(tip, 1)
