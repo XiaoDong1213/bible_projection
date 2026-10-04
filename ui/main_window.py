@@ -645,6 +645,9 @@ class MainWindow(QMainWindow):
         self._projection_channel = "scripture"
         if self.extension_window.display_mode != "scripture":
             self.extension_window.set_display_mode("scripture", animate=True)
+        QTimer.singleShot(0, self._after_scripture_channel_chrome)
+
+    def _after_scripture_channel_chrome(self):
         editor = getattr(self, "_sermon_editor", None)
         if editor is not None and editor.isVisible():
             if hasattr(editor, "_set_present_shortcuts_enabled"):
@@ -671,8 +674,8 @@ class MainWindow(QMainWindow):
             self.sermon_controller.resume_display()
             self.extension_window.set_display_mode("sermon", animate=True)
             self._set_extension_scroll_sync(False)
-            self._update_session_chrome(sync_editor=False)
-            QTimer.singleShot(80, self._restore_sermon_editor_chrome)
+            QTimer.singleShot(0, lambda: self._update_session_chrome(sync_editor=False))
+            QTimer.singleShot(self._channel_fade_wait_ms(), self._restore_sermon_editor_chrome)
             return
 
         editor = getattr(self, "_sermon_editor", None)
@@ -753,29 +756,24 @@ class MainWindow(QMainWindow):
         self._last_sermon_index = index
         self._projection_channel = "sermon"
         gen = self.sermon_controller.generation
+        wait = self._channel_fade_wait_ms()
         QTimer.singleShot(
-            0,
+            wait,
             self._after_sermon(
                 gen,
-                lambda: ext.slide_stage.render_slide_pixmap(
-                    doc, slide, prepare_anims=True
-                ),
+                lambda: self._cache_current_and_prefetch(doc, index, slide),
             ),
-        )
-        QTimer.singleShot(
-            200,
-            self._after_sermon(gen, lambda: self._prefetch_adjacent_sermon_slides(doc, index)),
-        )
-        QTimer.singleShot(
-            350, self._after_sermon(gen, ext.slide_stage.snapshot_current)
         )
         editor = getattr(self, "_sermon_editor", None)
         if editor is not None and hasattr(editor, "mirror_present_slide"):
             if getattr(editor, "_presenting", False):
-                editor.mirror_present_slide(
-                    doc, index, assets_root, prepare_anims=True, anim_cursor=0
+                QTimer.singleShot(
+                    self._channel_fade_wait_ms(),
+                    lambda: editor.mirror_present_slide(
+                        doc, index, assets_root, prepare_anims=True, anim_cursor=0
+                    ),
                 )
-        self._update_session_chrome()
+        QTimer.singleShot(0, self._update_session_chrome)
 
     def _on_sermon_stopped(self):
         self._abort_extension_sermon_layer()
@@ -824,7 +822,7 @@ class MainWindow(QMainWindow):
                     prepare_anims=True,
                     anim_cursor=int(ctrl.anim_cursor),
                 )
-            self._prefetch_adjacent_sermon_slides(doc, index)
+            self._prefetch_next_sermon_slide(doc, index)
             self._update_session_chrome()
             return
 
@@ -838,7 +836,9 @@ class MainWindow(QMainWindow):
         prepare = not pending_reveal
 
         old_pix = stage.take_old_snapshot()
-        new_pix = stage.render_slide_pixmap(doc, slide, prepare_anims=prepare)
+        new_pix = stage.cached_slide_pixmap(doc, slide, prepare_anims=prepare)
+        if new_pix.isNull():
+            new_pix = stage.render_slide_pixmap(doc, slide, prepare_anims=prepare)
 
         def _mirror_editor():
             if not self._sermon_alive(gen):
@@ -856,11 +856,9 @@ class MainWindow(QMainWindow):
                     pending_reveal=pending_reveal,
                 )
 
-        def _commit_scene():
+        def _rebuild_live():
             if not self._sermon_alive(gen) or self.extension_window is None:
                 return
-            if not new_pix.isNull():
-                stage.hold_pixmap(new_pix)
             self.extension_window.show_sermon_slide(
                 doc, slide, assets_root, prepare_anims=prepare
             )
@@ -869,17 +867,22 @@ class MainWindow(QMainWindow):
                 if editor is not None and hasattr(editor, "mirror_present_reveal"):
                     editor.mirror_present_reveal()
             stage.release_hold()
-            if not new_pix.isNull():
-                stage.set_old_snapshot(new_pix)
-            QTimer.singleShot(50, self._after_sermon(gen, self._update_session_chrome))
-            QTimer.singleShot(80, _mirror_editor)
             if not pending_reveal and hasattr(ctrl, "maybe_auto_start"):
-                QTimer.singleShot(80, self._after_sermon(gen, ctrl.maybe_auto_start))
+                QTimer.singleShot(50, self._after_sermon(gen, ctrl.maybe_auto_start))
+            QTimer.singleShot(400, self._after_sermon(gen, _mirror_editor))
             QTimer.singleShot(
-                200,
-                self._after_sermon(gen, lambda: self._prefetch_adjacent_sermon_slides(doc, index)),
+                450,
+                self._after_sermon(gen, lambda: self._prefetch_next_sermon_slide(doc, index)),
             )
-            QTimer.singleShot(400, self._after_sermon(gen, stage.snapshot_current))
+            QTimer.singleShot(50, self._after_sermon(gen, self._update_session_chrome))
+
+        def _commit_scene():
+            if not self._sermon_alive(gen) or self.extension_window is None:
+                return
+            if not new_pix.isNull():
+                stage.hold_pixmap(new_pix)
+                stage.set_old_snapshot(new_pix)
+            QTimer.singleShot(0, self._after_sermon(gen, _rebuild_live))
 
         if (
             use_transition
@@ -894,24 +897,34 @@ class MainWindow(QMainWindow):
         else:
             _commit_scene()
 
-    def _prefetch_adjacent_sermon_slides(self, doc, index: int):
+    def _channel_fade_wait_ms(self) -> int:
+        try:
+            ms = int(self.settings.get("channel_fade_ms", 400) or 400)
+        except (TypeError, ValueError):
+            ms = 400
+        if ms < 40:
+            return 80
+        return ms + 50
+
+    def _cache_current_and_prefetch(self, doc, index: int, slide):
+        ext = self.extension_window
+        if ext is None or not self.sermon_controller.active:
+            return
+        pix = ext.slide_stage.render_slide_pixmap(doc, slide, prepare_anims=True)
+        if pix is not None and not pix.isNull():
+            ext.slide_stage.set_old_snapshot(pix)
+        self._prefetch_next_sermon_slide(doc, index)
+
+    def _prefetch_next_sermon_slide(self, doc, index: int):
         if not self.sermon_controller.active or doc is None:
             return
-        stages = []
         ext = self.extension_window
-        if ext is not None:
-            stages.append(ext.slide_stage)
-        editor = getattr(self, "_sermon_editor", None)
-        if editor is not None and hasattr(editor, "present_stage"):
-            stages.append(editor.present_stage)
-        if not stages:
+        if ext is None:
             return
-        for nxt in (index + 1, index - 1):
-            if nxt < 0 or nxt >= len(doc.slides):
-                continue
-            slide = doc.slides[nxt]
-            for stage in stages:
-                stage.prefetch_slide(doc, slide, prepare_anims=True)
+        nxt = index + 1
+        if nxt < 0 or nxt >= len(doc.slides):
+            return
+        ext.slide_stage.prefetch_slide(doc, doc.slides[nxt], prepare_anims=True)
 
     def _on_sermon_steps(self, steps):
         """同批入场：副屏立刻播；主屏预览与底栏延后，减轻卡顿。"""

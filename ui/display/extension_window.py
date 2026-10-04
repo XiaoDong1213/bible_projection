@@ -231,14 +231,31 @@ class ExtensionWindow(QWidget):
             )
             self.force_sync_scroll()
 
-    def _play_cover_fade(self, pixmap, on_done):
+    def _grab_layer(self, widget):
+        """截当前层；空图则整窗再抓一次，避免淡化被跳过。"""
+        pix = None
+        if widget is not None and widget.isVisible() and widget.width() >= 8:
+            widget.repaint()
+            pix = widget.grab()
+        if pix is not None and not pix.isNull():
+            return pix
+        self.repaint()
+        return self.grab()
+
+    def _arm_cover(self, pixmap) -> bool:
         if pixmap is None or pixmap.isNull():
-            on_done()
-            return
+            return False
         self._cover.setPixmap(pixmap)
+        self._cover.setScaledContents(True)
         self._cover_fx.setOpacity(1.0)
         self._cover.show()
         self._cover.raise_()
+        return True
+
+    def _play_cover_fade(self, pixmap, on_done):
+        if not self._arm_cover(pixmap):
+            on_done()
+            return
         self._animating = True
         self._fade_cover.setDuration(max(1, int(self._fade_ms)))
         self._fade_cover.setStartValue(1.0)
@@ -258,7 +275,7 @@ class ExtensionWindow(QWidget):
         self._fade_cover.start()
 
     def set_display_mode(self, mode: str, animate: bool = True):
-        """用最上层截图盖布做交叉淡化，避免两层互相 raise。"""
+        """先盖旧画面，再换层，最后淡出盖布。"""
         if mode not in ("scripture", "sermon"):
             return
         animate = bool(animate) and self._fade_ms >= 40
@@ -267,18 +284,16 @@ class ExtensionWindow(QWidget):
             return
 
         old = self._mode
-        if not animate:
+        if not animate or old == mode:
             self._snap_to_mode(mode)
             return
-
-        if old == mode:
-            self._snap_to_mode(mode)
-            return
-
-        self._stop_channel_fade()
 
         if mode == "sermon":
-            pix = self.scripture_display.grab()
+            pix = self._grab_layer(self.scripture_display)
+            self._stop_channel_fade()
+            if not self._arm_cover(pix):
+                self._snap_to_mode(mode)
+                return
             self.slide_stage.setGraphicsEffect(None)
             self.slide_stage.show()
             self.slide_stage.setAttribute(
@@ -286,14 +301,20 @@ class ExtensionWindow(QWidget):
             )
             self.slide_stage.lower()
             self.scripture_display.hide()
+            self._cover.raise_()
             self._mode = "sermon"
             self._play_cover_fade(pix, lambda: None)
             return
 
         src = self.slide_stage if self.slide_stage.isVisible() else self.scripture_display
-        pix = src.grab()
+        pix = self._grab_layer(src)
+        self._stop_channel_fade()
+        if not self._arm_cover(pix):
+            self._snap_to_mode(mode)
+            return
         self.scripture_display.show()
         self.scripture_display.raise_()
+        self._cover.raise_()
         self._mode = "scripture"
 
         def _after():
