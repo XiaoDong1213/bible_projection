@@ -326,7 +326,9 @@ class SearchWidget(QWidget):
             self._reset_book_search()
             return
         self._set_text(new_text, converted=True, cursor=new_pos)
-        self._refresh_selected(book, new_text[len(book):])
+        suffix = new_text[len(book):]
+        self._sync_stage_from_suffix(book, suffix)
+        self._refresh_selected(book, suffix)
         self.search_input.setFocus()
 
     @staticmethod
@@ -417,12 +419,12 @@ class SearchWidget(QWidget):
         self._update_hint(self.DEFAULT_HINT)
 
     def _update_hint_for_stage(self):
-        if self.state.stage == "chapter":
+        if self.state.space_mode:
+            self._update_hint("请输入结束节　·　不填则到本章末节　·　Enter 确认")
+        elif self.state.stage == "chapter":
             self._update_hint(f"已选择 {self.state.selected_book}　·　请输入章节　·　Space 进入节号")
         elif self.state.stage == "verse":
             self._update_hint("请输入开始节　·　Space 生成节范围")
-        elif self.state.space_mode:
-            self._update_hint("请输入结束节　·　不填则到本章末节　·　Enter 确认")
 
     def _on_special_key(self, key):
         if key == Qt.Key.Key_Escape:
@@ -436,7 +438,7 @@ class SearchWidget(QWidget):
                 self._select_current_book()
             elif self.state.stage == "chapter" and self.state.selected_book:
                 self._space_after_chapter()
-            elif self.state.stage == "verse" and self.state.selected_book:
+            elif self.state.stage == "verse" and self.state.selected_book and not self.state.space_mode:
                 self._space_after_verse()
         elif key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
             self._delete_segment(key)
@@ -470,7 +472,47 @@ class SearchWidget(QWidget):
         if not re.fullmatch(r"[\s0-9:：.．。\-]*", suffix):
             suffix = re.sub(r"[^0-9 :：.．。\-]", "", suffix)
             self._set_text(book + suffix, True)
+        self._sync_stage_from_suffix(book, suffix)
         self._refresh_selected(book, suffix)
+
+    def _sync_stage_from_suffix(self, book, suffix):
+        """按当前后缀回推 stage / space_mode / 章号，保证删改后再输入与 Space 阶段一致。"""
+        if not book:
+            return
+        value = self.parser.normalize(suffix).strip()
+        self.state.selected_book = book
+        self.state.converted_book = True
+
+        if not value:
+            self.state.stage = "chapter"
+            self.state.space_mode = False
+            self._current_chapter = None
+            return
+
+        # 仅章号（尚未 Space 进入节）
+        if re.fullmatch(r"\d+", value):
+            self.state.stage = "chapter"
+            self.state.space_mode = False
+            self._current_chapter = None
+            return
+
+        # 章: / 章:节 / 章:节- / 章:节-节
+        match = re.match(r"^(\d+)\s*[:.]\s*(\d*)(?:\s*-\s*(\d*)?)?\s*$", value)
+        if match:
+            self._current_chapter = int(match.group(1))
+            self.state.stage = "verse"
+            self.state.space_mode = "-" in value
+            return
+
+        if ":" in value or "." in value:
+            self.state.stage = "verse"
+            self.state.space_mode = "-" in value
+            head = re.match(r"^(\d+)", value)
+            self._current_chapter = int(head.group(1)) if head else self._current_chapter
+        else:
+            self.state.stage = "chapter"
+            self.state.space_mode = False
+            self._current_chapter = None
 
     def _refresh_selected(self, book, suffix):
         value = self.parser.normalize(suffix)
@@ -549,7 +591,9 @@ class SearchWidget(QWidget):
             return
         end = int(end_text)
         if end < verse:
-            self._update_hint(f"结束节不能小于开始节 {verse}")
+            # 重输结束节过程中（如 18→1→18）允许继续输入，不打断
+            self._update_hint(f"继续输入结束节（需 ≥ {verse}）")
+            self._resize_result_area()
             return
         if end > max_verse:
             self._update_hint(f"本章最多 {max_verse} 节，不能输入 {end}")
@@ -580,19 +624,25 @@ class SearchWidget(QWidget):
         self.search_triggered.emit(selection)
         self.close_requested.emit()
 
+    def confirm_from_enter(self):
+        """主窗口 Enter 快捷键转交确认，避免与「关搜索」抢键。"""
+        item = self.result_list.currentItem()
+        if item:
+            data = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(data, ScriptureSelection):
+                self._confirm_selection(data)
+                return
+            if data:
+                self._convert_book(data)
+                return
+        if self.state.selected_book:
+            selection = self._parse(self.search_input.text())
+            if selection:
+                self._confirm_selection(selection)
+
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            item = self.result_list.currentItem()
-            if item:
-                data = item.data(Qt.ItemDataRole.UserRole)
-                if isinstance(data, ScriptureSelection):
-                    self._confirm_selection(data)
-                elif data:
-                    self._convert_book(data)
-            elif self.state.selected_book:
-                selection = self._parse(self.search_input.text())
-                if selection:
-                    self._confirm_selection(selection)
+            self.confirm_from_enter()
             event.accept()
             return
         super().keyPressEvent(event)

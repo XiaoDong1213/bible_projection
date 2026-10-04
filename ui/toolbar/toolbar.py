@@ -1,4 +1,4 @@
-# 顶部工具栏：分组布局 + 速度档位按钮
+# 顶部工具栏：分组布局 + 速度档位按钮（档位略窄，利一行排布）
 
 from PyQt6.QtWidgets import (
     QToolBar, QPushButton, QLabel, QDialog, QFormLayout,
@@ -109,11 +109,11 @@ class ColorPreviewSlot(QWidget):
 
 
 class ToolbarButton(QPushButton):
-    """顶栏按钮：统一高度；鼠标移出后清除焦点，避免轮廓残留。"""
+    """顶栏按钮：高度接近原版；速度档位略窄以利一行排布。"""
 
-    HEIGHT = 44
-    ACTION_MIN_WIDTH = 64
-    SPEED_WIDTH = 52
+    HEIGHT = 40
+    ACTION_MIN_WIDTH = 56
+    SPEED_WIDTH = 38
 
     def __init__(self, text="", parent=None, *, kind="action"):
         super().__init__(text, parent)
@@ -165,7 +165,7 @@ class HelpShortcutsDialog(QDialog):
             "经文范围",
             (
                 ("← / →", "减少 / 增加结束节"),
-                ("Ctrl + ← / →", "减少 / 增加起始节"),
+                ("Ctrl + ← / →", "增加 / 减少起始节"),
             ),
         ),
         (
@@ -808,7 +808,7 @@ class ToolBarWidget(QToolBar):
         self.setMovable(False)
         self.setIconSize(QSize(18, 18))
         self.setFloatable(False)
-        self.setMinimumHeight(64)
+        self.setMinimumHeight(56)
         self.theme = "dark"
         self.settings = {}
         self._speed = 0
@@ -852,12 +852,12 @@ class ToolBarWidget(QToolBar):
         # 全文搜索按钮插到此分隔符之前（小标题右侧）
         self._search_anchor_action = self.addSeparator()
 
-        # —— 滚动速度（暂停 + 1～9 档）——
+        # —— 滚动速度（暂停 + 1～9 档；按钮略窄省宽）——
         scroll_wrap = QWidget()
         scroll_wrap.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         scroll_layout = QHBoxLayout(scroll_wrap)
         scroll_layout.setContentsMargins(0, 0, 0, 0)
-        scroll_layout.setSpacing(4)
+        scroll_layout.setSpacing(3)
         scroll_layout.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
