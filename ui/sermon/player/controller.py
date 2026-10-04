@@ -15,9 +15,7 @@ class PresentationController(QObject):
     started = pyqtSignal(object, int, object)  # doc, index, assets_root
     stopped = pyqtSignal()
     slide_changed = pyqtSignal(object, int, object)  # doc, index, assets_root
-    step_requested = pyqtSignal(object)  # AnimStep（兼容）
     steps_requested = pyqtSignal(object)  # list[AnimStep] 同批并行
-    reveal_requested = pyqtSignal()  # 热更新：显示最终态
     resume_requested = pyqtSignal(object, int, object, int)  # doc, index, assets, anim_cursor
     status_changed = pyqtSignal(str)
 
@@ -106,8 +104,6 @@ class PresentationController(QObject):
         if not batch:
             return
         self.steps_requested.emit(batch)
-        if len(batch) == 1:
-            self.step_requested.emit(batch[0])
         self.status_changed.emit(self._status_text())
         self._arm_after_chain(batch)
 
@@ -172,13 +168,6 @@ class PresentationController(QObject):
         gen = self._gen
         self._after_timer.stop()
         self._after_timer.setInterval(wait)
-
-        def _fire():
-            if not self.active or gen != self._gen:
-                return
-            self._play_after_batch()
-
-        # 用 timeout 已连接 _play_after_batch；这里只 start，用 gen 防过期
         self._pending_after_gen = gen
         self._after_timer.start()
 
@@ -194,10 +183,6 @@ class PresentationController(QObject):
             return
         batch = self._collect_with_following(self.anim_cursor)
         self._emit_batch(batch)
-
-    def next_slide(self):
-        """兼容旧调用：等同 advance。"""
-        self.advance()
 
     def prev_slide(self):
         """上一页：直接回到上一张并显示终态（不重播本页动画）。"""

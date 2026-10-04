@@ -598,10 +598,16 @@ class DisplaySettingsDialog(QDialog):
         self.footer_height.setSuffix(" px")
         self.footer_text = QLineEdit()
         self.footer_text.setPlaceholderText("留空则不显示底注")
+        self.channel_fade_ms = QSpinBox()
+        self.channel_fade_ms.setRange(0, 2000)
+        self.channel_fade_ms.setSingleStep(50)
+        self.channel_fade_ms.setSuffix(" ms")
+        self.channel_fade_ms.setToolTip("底栏「显示经文 / 显示讲篇」交叉淡化；0 为立刻切换")
         lf.addRow("行距", self.line_spacing)
         lf.addRow("左右边距", self.margin)
         lf.addRow("底注区域高度", self.footer_height)
         lf.addRow("底注文字", self.footer_text)
+        lf.addRow("讲篇/经文切换", self.channel_fade_ms)
         tabs.addTab(layout_page, "布局与底注")
 
         bg_page = QWidget()
@@ -744,6 +750,11 @@ class DisplaySettingsDialog(QDialog):
         self.margin.setValue(int(s.get("margin", 60)))
         self.footer_height.setValue(int(s.get("footer_height", 45)))
         self.footer_text.setText(str(s.get("footer_text", "")))
+        try:
+            fade_ms = int(s.get("channel_fade_ms", 400) or 400)
+        except (TypeError, ValueError):
+            fade_ms = 400
+        self.channel_fade_ms.setValue(max(0, min(2000, fade_ms)))
         self.bg_image.setText(str(s.get("bg_image", "") or ""))
         for key, attr, fallback in [
             ("font_color", "font_color_btn", "#FFFFFF"),
@@ -786,6 +797,7 @@ class DisplaySettingsDialog(QDialog):
             "footer_text": self.footer_text.text(),
             "bg_color": self._color_hex("bg_color", "#000000"),
             "bg_image": self.bg_image.text(),
+            "channel_fade_ms": int(self.channel_fade_ms.value()),
         })
         return s
 

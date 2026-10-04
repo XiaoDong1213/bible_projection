@@ -26,7 +26,7 @@ class ExtensionWindow(QWidget):
     sermon_stop_requested = pyqtSignal()
     scripture_channel_requested = pyqtSignal()
 
-    FADE_MS = 220
+    FADE_MS = 400
 
     def __init__(self, topmost=True):
         super().__init__()
@@ -36,6 +36,7 @@ class ExtensionWindow(QWidget):
 
         self._mode = "scripture"  # scripture | sermon
         self._animating = False
+        self._fade_ms = self.FADE_MS
 
         host = QWidget(self)
         grid = QGridLayout(host)
@@ -138,6 +139,17 @@ class ExtensionWindow(QWidget):
     def apply_settings(self, settings):
         """应用经文显示设置。"""
         self.scripture_display.apply_settings(settings)
+        if settings:
+            self.set_channel_fade_ms(settings.get("channel_fade_ms", self.FADE_MS))
+
+    def set_channel_fade_ms(self, ms) -> int:
+        try:
+            value = int(ms)
+        except (TypeError, ValueError):
+            value = self.FADE_MS
+        self._fade_ms = max(0, min(2000, value))
+        self._fade_scripture.setDuration(max(1, self._fade_ms))
+        return self._fade_ms
 
     def set_scroll_speed(self, speed):
         # 副屏不独立滚动，只跟随主屏位置
@@ -178,9 +190,10 @@ class ExtensionWindow(QWidget):
         self.slide_stage.show_slide(doc, slide, prepare_anims=prepare_anims)
 
     def set_display_mode(self, mode: str, animate: bool = True):
-        """切换 scripture / sermon。讲篇层直接显隐，不挂透明度特效。"""
+        """切换 scripture / sermon。讲篇层直接显隐，只淡经文层。"""
         if mode not in ("scripture", "sermon"):
             return
+        animate = bool(animate) and self._fade_ms >= 40
         if mode == self._mode and not self._animating:
             if mode == "sermon":
                 self.slide_stage.setGraphicsEffect(None)

@@ -335,11 +335,6 @@ class SlideStage(QGraphicsView):
                 anim.setCurrentTime(anim.duration())
             anim.stop()
 
-    def play_step(self, step: AnimStep) -> bool:
-        """播放单条（会结束上一批动画）。同批并行请用 play_steps。"""
-        self.stop_animations(apply_end=True)
-        return self._start_step(step)
-
     def play_steps(self, steps: list[AnimStep]) -> int:
         """同批并行播放（与上一动画同时）；先结束上一批。"""
         if not steps:

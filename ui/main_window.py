@@ -5,10 +5,8 @@ from __future__ import annotations
 from PyQt6.QtWidgets import (
     QMainWindow,
     QWidget,
-    QHBoxLayout,
     QVBoxLayout,
     QSplitter,
-    QStackedWidget,
     QStatusBar,
     QLabel,
     QApplication,
@@ -66,7 +64,6 @@ class MainWindow(QMainWindow):
         self.sermon_controller.stopped.connect(self._on_sermon_stopped)
         self.sermon_controller.slide_changed.connect(self._on_sermon_slide_changed)
         self.sermon_controller.steps_requested.connect(self._on_sermon_steps)
-        self.sermon_controller.reveal_requested.connect(self._on_sermon_reveal)
         self.sermon_controller.resume_requested.connect(self._on_sermon_resume)
         self.sermon_controller.status_changed.connect(self._on_sermon_status)
         self._projection_channel = "scripture"
@@ -146,13 +143,10 @@ class MainWindow(QMainWindow):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
 
-        self.right_stack = QStackedWidget()
         self.preview_host = PreviewHost()
         self.scripture_display = self.preview_host.display
         self.preview_host.apply_theme(theme_tokens(self.theme))
-        self.right_stack.addWidget(self.preview_host)  # 0 = 经文预览
-        self.right_stack.setCurrentIndex(0)
-        right_layout.addWidget(self.right_stack, 1)
+        right_layout.addWidget(self.preview_host, 1)
 
         splitter.addWidget(right)
         splitter.setSizes([360, 840])
@@ -206,20 +200,11 @@ class MainWindow(QMainWindow):
             ):
                 s.setEnabled(bool(enabled))
 
-    def _show_presenter_ui(self, show: bool):
-        if not hasattr(self, "right_stack"):
-            return
-        # 演讲者视图已弃用：始终留在经文预览栈
-        self.right_stack.setCurrentIndex(0)
-        if not show:
-            self._set_presenter_shortcuts(False)
-
     def _update_session_chrome(self, *, sync_editor: bool = True):
         """放映中：主屏用编辑器叠层看讲篇；底栏控制翻页/切频道。"""
         active = self.sermon_controller.active
         if not hasattr(self, "session_bar"):
             return
-        self._show_presenter_ui(False)
         if not active:
             self.session_bar.hide()
             editor = getattr(self, "_sermon_editor", None)
@@ -649,7 +634,7 @@ class MainWindow(QMainWindow):
         self.toolbar.set_extend_active(True)
         if self.sermon_controller.active and self._projection_channel == "sermon":
             self.sermon_controller.resume_display()
-            self.extension_window.set_display_mode("sermon", animate=False)
+            self.extension_window.set_display_mode("sermon", animate=True)
             self._set_extension_scroll_sync(False)
         else:
             self._projection_channel = "scripture"
@@ -693,7 +678,7 @@ class MainWindow(QMainWindow):
                 return
             self._projection_channel = "sermon"
             self.sermon_controller.resume_display()
-            self.extension_window.set_display_mode("sermon", animate=False)
+            self.extension_window.set_display_mode("sermon", animate=True)
             self._set_extension_scroll_sync(False)
             from ui.sermon.install import _open_editor
 
@@ -767,7 +752,7 @@ class MainWindow(QMainWindow):
             return
         slide = doc.slides[index]
         ext.show_sermon_slide(doc, slide, assets_root, prepare_anims=True)
-        ext.set_display_mode("sermon", animate=False)
+        ext.set_display_mode("sermon", animate=True)
         self._set_extension_scroll_sync(False)
         self._last_sermon_index = index
         self._projection_channel = "sermon"
@@ -958,13 +943,6 @@ class MainWindow(QMainWindow):
             and hasattr(editor, "sync_from_controller")
         ):
             editor.sync_from_controller(rebuild_canvas=False)
-
-    def _on_sermon_reveal(self):
-        if self.extension_window and self._projection_channel == "sermon":
-            self.extension_window.slide_stage.reveal_all()
-        editor = getattr(self, "_sermon_editor", None)
-        if editor is not None and hasattr(editor, "mirror_present_reveal"):
-            editor.mirror_present_reveal()
 
     def _on_sermon_resume(self, doc, index, assets_root, anim_cursor):
         if not self.extension_window:
