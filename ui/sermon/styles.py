@@ -552,22 +552,6 @@ QWidget#sermonSideRail {{
     border-left: 1px solid {t['border']};
 }}
 
-/* 演讲者视图 */
-QWidget#sermonPresenterView {{
-    background: {t['canvas']};
-}}
-QWidget#sermonPresenterView QLabel#sermonPanelTitle {{
-    font-size: 14px;
-    letter-spacing: 0.02em;
-    text-transform: none;
-    font-weight: 600;
-    color: {t['text']};
-}}
-QLabel#sermonStageCaption {{
-    color: {t['text_muted']};
-    font-size: 12px;
-    font-weight: 600;
-}}
 QGraphicsView#sermonSlideStage {{
     background: {t['preview_bg']};
     border: none;

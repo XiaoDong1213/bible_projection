@@ -117,6 +117,7 @@ class AppConfig:
             "bg_color": "#000000", "bg_image": "", "line_spacing": 160, "margin": 60,
             "footer_text": "", "footer_height": 45, "footer_size": 14, "footer_color": "#AAAAAA",
             "footer_font_family": "微软雅黑", "extension_topmost": True, "verse_segmentation": False,
+            "channel_fade_ms": 400,
         }
         result = {}
         sec = self.parser["Display"] if "Display" in self.parser else {}
@@ -126,6 +127,7 @@ class AppConfig:
             "font_size", "verse_num_size", "title_size", "title_spacing",
             "scripture_title_size", "scripture_title_spacing", "scripture_title_line_spacing",
             "line_spacing", "margin", "footer_height", "footer_size",
+            "channel_fade_ms",
         }
         for k, default_val in defaults.items():
             raw = sec.get(k, None) if hasattr(sec, "get") else None
