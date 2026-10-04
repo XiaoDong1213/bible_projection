@@ -8,6 +8,8 @@ venv/
 
 # 本地配置与运行产物
 config.ini
+sermons/
+templates/
 
 # PyInstaller / Inno 产物
 build/

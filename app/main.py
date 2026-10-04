@@ -63,7 +63,7 @@ def main():
     splash.show()
     app.processEvents()
 
-    from app.feature_flags import ENABLE_SCRIPTURE_SEARCH
+    from app.feature_flags import ENABLE_SCRIPTURE_SEARCH, ENABLE_SERMON
     from core.config import AppConfig
     from core.database import BibleDatabase
     from ui.main_window import MainWindow
@@ -99,6 +99,10 @@ def main():
             from ui.fulltext_search import attach_fulltext_search
 
             attach_fulltext_search(window)
+        if ENABLE_SERMON:
+            from ui.sermon import attach_sermon_editor
+
+            attach_sermon_editor(window)
 
     QTimer.singleShot(0, _after_show)
     sys.exit(app.exec())

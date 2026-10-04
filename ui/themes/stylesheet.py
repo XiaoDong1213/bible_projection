@@ -189,7 +189,7 @@ def build_stylesheet(name: str = "dark", styles_dir: str | Path | None = None) -
 
     # 不在 QSS 用 * {{ font-family }}：会匹配全部控件并触发字体解析，拖慢启动。
     # 界面字体由 app.setFont 统一设置。
-    return f"""
+    sheet = f"""
 /* Bible Pro — unified {name} theme */
 QMainWindow, QDialog {{
     background: {t['canvas']};
@@ -217,38 +217,95 @@ QStatusBar QLabel {{
     padding-left: 10px;
 }}
 
+QMenuBar {{
+    background: {t['surface']};
+    color: {t['text']};
+    border-bottom: 1px solid {t['border']};
+    padding: 2px 8px;
+}}
+QMenuBar::item {{
+    background: transparent;
+    color: {t['text']};
+    padding: 6px 10px;
+    border-radius: {r['sm']}px;
+}}
+QMenuBar::item:selected {{
+    background: {t['control_hover']};
+}}
+QMenuBar::item:pressed {{
+    background: {t['accent_soft']};
+    color: {t['accent_text']};
+}}
+QMenu {{
+    background: {t['surface_raised']};
+    color: {t['text']};
+    border: 1px solid {t['border']};
+    padding: 4px;
+}}
+QMenu::item {{
+    background: transparent;
+    color: {t['text']};
+    padding: 7px 22px 7px 14px;
+    border-radius: {r['sm']}px;
+    min-height: 28px;
+}}
+QMenu::item:selected {{
+    background: {t['accent_soft']};
+    color: {t['accent_text']};
+}}
+QMenu::item:disabled {{
+    color: {t['text_faint']};
+}}
+QMenu::separator {{
+    height: 1px;
+    background: {t['border']};
+    margin: 4px 8px;
+}}
+
 /* ---------- Toolbar ---------- */
 QToolBar {{
     background: {t['surface']};
     border: none;
     border-bottom: 1px solid {t['border']};
-    padding: 8px 14px;
-    spacing: 8px;
-    min-height: 64px;
+    padding: 8px 12px;
+    spacing: 6px;
+    min-height: 56px;
+}}
+QToolBar::separator {{
+    background: {t['border']};
+    width: 1px;
+    margin: 8px 4px;
+}}
+/* 一行排不下时不显示右侧折叠竖条 */
+QToolBar::extension {{
+    width: 0;
+    max-width: 0;
+    border: none;
+    background: transparent;
 }}
 QToolBar QLabel {{
     color: {t['text_muted']};
     font-size: 13px;
-    padding: 0 6px;
+    padding: 0 4px;
 }}
 QToolBar QPushButton {{
     background: {t['control']};
     color: {t['text']};
     border: 1px solid {t['border']};
     border-radius: {r['md']}px;
-    padding: 0 16px;
+    padding: 0 12px;
     font-size: 13px;
     font-weight: 400;
-    min-height: 44px;
-    max-height: 44px;
-    min-width: 64px;
+    min-height: 40px;
+    max-height: 40px;
+    min-width: 56px;
 }}
 QToolBar QPushButton#speedBtn {{
-    padding: 0 4px;
-    min-width: 52px;
-    max-width: 52px;
+    padding: 0 2px;
+    min-width: 38px;
+    max-width: 38px;
     font-weight: 400;
-    font-size: 13px;
+    font-size: 12px;
 }}
 QDialog#helpShortcutsDialog {{
     background: {t['surface']};
@@ -445,10 +502,10 @@ QToolBar QPushButton#extendBtn {{
     color: #FFFFFF;
     border: 1px solid {t['accent']};
     font-weight: 600;
-    padding: 0 16px;
-    min-height: 44px;
-    max-height: 44px;
-    min-width: 64px;
+    padding: 0 14px;
+    min-height: 40px;
+    max-height: 40px;
+    min-width: 56px;
 }}
 QToolBar QPushButton#extendBtn:hover {{
     background: {t['accent_hover']};
@@ -460,10 +517,10 @@ QToolBar QPushButton#extendBtn:pressed {{
     color: #FFFFFF;
 }}
 QToolBar QPushButton#scriptureSearchToolbarButton {{
-    min-width: 64px;
-    max-height: 44px;
-    min-height: 44px;
-    padding: 0 16px;
+    min-width: 56px;
+    max-height: 40px;
+    min-height: 40px;
+    padding: 0 12px;
     font-size: 13px;
 }}
 
@@ -839,27 +896,41 @@ QComboBox, QFontComboBox {{
     color: {t['text']};
     border: 1px solid {t['border']};
     border-radius: {r['sm']}px;
-    padding: 5px 8px;
+    padding: 5px 28px 5px 10px;
     min-height: 28px;
 }}
 QComboBox:hover, QFontComboBox:hover {{
     border-color: {t['border_strong']};
 }}
 QComboBox:focus, QFontComboBox:focus {{
-    border-color: {t['focus_ring']};
+    border: 2px solid {t['focus_ring']};
 }}
 QComboBox QAbstractItemView, QFontComboBox QAbstractItemView {{
     background: {t['surface_raised']};
     color: {t['text']};
     border: 1px solid {t['border']};
+    border-radius: {r['sm']}px;
     selection-background-color: {t['accent']};
     selection-color: #FFFFFF;
     outline: none;
+    padding: 4px;
+}}
+QComboBox QAbstractItemView::item, QFontComboBox QAbstractItemView::item {{
+    min-height: 30px;
+    padding: 6px 12px;
+}}
+QComboBox QAbstractItemView::item:hover, QFontComboBox QAbstractItemView::item:hover {{
+    background: {t['control_hover']};
+    color: {t['text']};
+}}
+QComboBox QAbstractItemView::item:selected, QFontComboBox QAbstractItemView::item:selected {{
+    background: {t['accent']};
+    color: #FFFFFF;
 }}
 QComboBox::drop-down, QFontComboBox::drop-down {{
     subcontrol-origin: padding;
     subcontrol-position: top right;
-    width: 32px;
+    width: 28px;
     border: none;
 }}
 QComboBox::down-arrow, QFontComboBox::down-arrow {{
@@ -958,6 +1029,14 @@ QToolTip {{
     border-radius: {r['sm']}px;
 }}
 """
+    # 讲篇模块：会话底栏 / 演讲者视图 / 主栏入口（编辑器另叠完整主题）
+    try:
+        from ui.sermon.styles import build_sermon_stylesheet
+
+        sheet += "\n" + build_sermon_stylesheet(name, arrow_down=arrow_down)
+    except Exception:
+        pass
+    return sheet
 
 
 def write_qss_files(styles_dir: str | Path | None = None) -> None:
