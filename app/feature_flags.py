@@ -5,4 +5,4 @@
 
 ENABLE_SCRIPTURE_SEARCH = True  # 经文全文搜索（Ctrl+F）
 ENABLE_SCRIPTURE_TITLES = True  # 经文小标题
-ENABLE_SERMON = False  # 讲篇编辑与放映
+ENABLE_SERMON = True  # 讲篇编辑与放映
