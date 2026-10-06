@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
-    QStackedWidget,
+    QSplitter,
     QStatusBar,
     QTabWidget,
     QTextEdit,
@@ -76,6 +76,7 @@ class SermonEditorWindow(QWidget):
         self._dirty = False
         self._saved_once = False
         self._presenting = False
+        self._hold_editor_canvas = False
         self._host_window = None
         self._clip_elements: list[Element] = []
         self._undo_stack: list[tuple] = []
@@ -83,16 +84,23 @@ class SermonEditorWindow(QWidget):
         self._history_limit = 40
         self._restoring = False
         self._syncing_from_ctrl = False
+        self._hold_live_output = False
         self._wheel_guard_ms = 0
         self._thumb_queue: list[int] = []
         self._last_text_style = ElementStyle()
+        self._paint_style = None
         self._format_sticky = False
+        self._format_pick_source = False
         self._format_ignore = False
 
         self._build_ui()
         self._thumb_timer = QTimer(self)
         self._thumb_timer.setInterval(24)
         self._thumb_timer.timeout.connect(self._pump_thumbnails)
+        self._style_save_timer = QTimer(self)
+        self._style_save_timer.setSingleShot(True)
+        self._style_save_timer.setInterval(400)
+        self._style_save_timer.timeout.connect(self._flush_last_text_style)
         self._build_menus()
         self._build_present_shortcuts()
         self._wrap_canvas_remove()
@@ -209,6 +217,7 @@ class SermonEditorWindow(QWidget):
         toolbar.addWidget(btn_shape)
         toolbar.addWidget(btn_format)
         self.btn_text = btn_text
+        self.btn_image = btn_image
         self.btn_shape = btn_shape
         self.btn_format = btn_format
         toolbar.addSeparator()
@@ -226,12 +235,18 @@ class SermonEditorWindow(QWidget):
         self.play_btn.setObjectName("sermonPlayBtn")
         self.play_btn.setToolTip("在扩展屏放映当前讲篇  F5")
         self.play_btn.clicked.connect(self.start_presentation)
+        self.edit_btn = QPushButton("编辑")
+        self.edit_btn.setObjectName("sermonPresentEditBtn")
+        self.edit_btn.setToolTip("放映中打开画布：对齐、格式刷、改字")
+        self.edit_btn.clicked.connect(self._toggle_present_edit)
+        self.edit_btn.setEnabled(False)
         self.stop_btn = QPushButton("结束")
         self.stop_btn.setObjectName("sermonStopBtn")
         self.stop_btn.setToolTip("结束放映并淡回经文  Esc")
         self.stop_btn.clicked.connect(self.stop_presentation)
         self.stop_btn.setEnabled(False)
         toolbar.addWidget(self.play_btn)
+        toolbar.addWidget(self.edit_btn)
         toolbar.addWidget(self.stop_btn)
         toolbar.addSeparator()
 
@@ -247,6 +262,7 @@ class SermonEditorWindow(QWidget):
             btn_format,
             btn_save,
             self.play_btn,
+            self.edit_btn,
             self.stop_btn,
             btn_back,
         ):
@@ -275,20 +291,29 @@ class SermonEditorWindow(QWidget):
         self.canvas_caption.setObjectName("sermonCanvasCaption")
         canvas_layout.addWidget(self.canvas_caption)
 
-        self.canvas_stack = QStackedWidget()
+        self.canvas_split = QSplitter(Qt.Orientation.Horizontal)
+        self.canvas_split.setObjectName("sermonCanvasSplit")
+        self.canvas_split.setChildrenCollapsible(True)
         self.canvas = SlideCanvas()
         self.canvas.selection_changed.connect(self._on_canvas_selection)
         self.canvas.slide_modified.connect(self._on_slide_modified)
         self.canvas.rect_drawn.connect(self._on_rect_drawn)
         self.canvas.status_message.connect(self._on_canvas_status)
         self.canvas.format_paint_target.connect(self._on_format_paint_target)
-        self.canvas_stack.addWidget(self.canvas)  # 0 = 编辑
+        self.canvas.edit_finished.connect(self._on_canvas_edit_finished)
+        self.canvas.edit_started.connect(self._on_canvas_edit_started)
+        self.canvas.history_checkpoint.connect(lambda: self._push_history())
+        self.canvas_split.addWidget(self.canvas)
 
         self.present_stage = SlideStage()
         self.present_stage.setObjectName("sermonPresentPreview")
+        self.present_stage.set_preview_quality(True)
+        self.present_stage.set_wheel_pages(True)
         self.present_stage.page_step_requested.connect(self._on_present_stage_step)
-        self.canvas_stack.addWidget(self.present_stage)  # 1 = 放映预览（跟副屏同画）
-        canvas_layout.addWidget(self.canvas_stack, 1)
+        self.present_stage.edit_requested.connect(self._on_present_stage_edit)
+        self.canvas_split.addWidget(self.present_stage)
+        self.present_stage.hide()
+        canvas_layout.addWidget(self.canvas_split, 1)
         root.addWidget(canvas_host, 1)
 
         right = QWidget()
@@ -458,6 +483,42 @@ class SermonEditorWindow(QWidget):
                 return True
         return False
 
+    def consume_escape(self) -> bool:
+        """Esc：先取消格式刷/画框/文字编辑，不关扩展、不结束放映。"""
+        if not self.isVisible():
+            return False
+        if self.canvas.is_format_painting():
+            self._end_format_paint("已取消格式刷")
+            return True
+        if self.canvas.is_drawing():
+            self.canvas.cancel_draw()
+            self.btn_text.blockSignals(True)
+            self.btn_shape.blockSignals(True)
+            self.btn_text.setChecked(False)
+            self.btn_shape.setChecked(False)
+            self.btn_text.blockSignals(False)
+            self.btn_shape.blockSignals(False)
+            self.statusBar().showMessage("已取消画框", 2000)
+            return True
+        scene = self.canvas.scene()
+        focus = scene.focusItem() if scene is not None else None
+        if focus is not None and hasattr(focus, "textInteractionFlags"):
+            flags = focus.textInteractionFlags()
+            if flags != Qt.TextInteractionFlag.NoTextInteraction:
+                focus.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+                focus.clearFocus()
+                self._confirm_live_output()
+                return True
+        w = QApplication.focusWidget()
+        if isinstance(w, (QLineEdit, QTextEdit, QAbstractSpinBox)):
+            self.canvas.setFocus(Qt.FocusReason.OtherFocusReason)
+            return True
+        if self._presenting and self._hold_editor_canvas:
+            self._enter_present_preview()
+            self.statusBar().showMessage("已回到放映预览", 2000)
+            return True
+        return False
+
     def _push_history(self, *, full: bool = False):
         if self._restoring:
             return
@@ -489,6 +550,7 @@ class SermonEditorWindow(QWidget):
 
     def _restore_snapshot(self, snap: tuple):
         self._restoring = True
+        self._hold_live_output = False
         try:
             kind = snap[0] if snap else "doc"
             if kind == "slide":
@@ -509,16 +571,52 @@ class SermonEditorWindow(QWidget):
                 self._show_slide(self._slide_index)
                 QTimer.singleShot(0, self._refresh_all_thumbnails)
             self._set_dirty(True)
-            self._push_hot_update()
+            self._sync_live_preview()
         finally:
             self._restoring = False
 
+    def _text_item_focus(self):
+        scene = self.canvas.scene()
+        focus = scene.focusItem() if scene is not None else None
+        if focus is None or not hasattr(focus, "textInteractionFlags"):
+            return None
+        if focus.textInteractionFlags() == Qt.TextInteractionFlag.NoTextInteraction:
+            return None
+        return focus
+
+    def _try_text_undo(self) -> bool:
+        focus = self._text_item_focus()
+        if focus is None:
+            return False
+        doc = focus.document() if hasattr(focus, "document") else None
+        if doc is not None and doc.isUndoAvailable():
+            doc.undo()
+            return True
+        return False
+
+    def _try_text_redo(self) -> bool:
+        focus = self._text_item_focus()
+        if focus is None:
+            return False
+        doc = focus.document() if hasattr(focus, "document") else None
+        if doc is not None and doc.isRedoAvailable():
+            doc.redo()
+            return True
+        return False
+
     def _undo(self):
-        if self._focus_is_text_field():
+        if not self._require_present_edit():
+            return
+        if self._try_text_undo():
+            self.statusBar().showMessage("已撤销文字", 1500)
             return
         if not self._undo_stack:
             self.statusBar().showMessage("没有可撤销的操作", 2000)
             return
+        focus = self._text_item_focus()
+        if focus is not None:
+            focus.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+            focus.clearFocus()
         try:
             self.canvas.commit_geometry()
         except Exception:
@@ -529,11 +627,18 @@ class SermonEditorWindow(QWidget):
         self.statusBar().showMessage("已撤销", 2000)
 
     def _redo(self):
-        if self._focus_is_text_field():
+        if not self._require_present_edit():
+            return
+        if self._try_text_redo():
+            self.statusBar().showMessage("已重做文字", 1500)
             return
         if not self._redo_stack:
             self.statusBar().showMessage("没有可重做的操作", 2000)
             return
+        focus = self._text_item_focus()
+        if focus is not None:
+            focus.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+            focus.clearFocus()
         try:
             self.canvas.commit_geometry()
         except Exception:
@@ -543,8 +648,16 @@ class SermonEditorWindow(QWidget):
         self._restore_snapshot(snap)
         self.statusBar().showMessage("已重做", 2000)
 
+    def _on_canvas_edit_started(self):
+        if self._syncing_from_ctrl or self._restoring:
+            return
+        self._hold_live_output = True
+        self._push_history()
+
     def _copy_selected(self):
         if self._focus_is_text_field():
+            return
+        if self._presenting and not self._hold_editor_canvas:
             return
         els = self.canvas.selected_elements()
         if not els:
@@ -554,6 +667,8 @@ class SermonEditorWindow(QWidget):
 
     def _cut_selected(self):
         if self._focus_is_text_field():
+            return
+        if not self._require_present_edit():
             return
         els = self.canvas.selected_elements()
         if not els:
@@ -565,6 +680,8 @@ class SermonEditorWindow(QWidget):
 
     def _paste_clipboard(self):
         if self._focus_is_text_field():
+            return
+        if not self._require_present_edit():
             return
         if not self._clip_elements:
             return
@@ -600,6 +717,8 @@ class SermonEditorWindow(QWidget):
 
     def _delete_selected(self):
         if self._focus_is_text_field():
+            return
+        if not self._require_present_edit():
             return
         if self._slide_list_has_focus():
             self._delete_slide()
@@ -673,9 +792,12 @@ class SermonEditorWindow(QWidget):
             QMessageBox.information(self, "放映", "无法打开扩展显示，请检查屏幕设置。")
             return
         self._presenting = True
+        self._hold_editor_canvas = False
         self._thumb_timer.stop()
         self._set_present_shortcuts_enabled(True)
         self.play_btn.setEnabled(False)
+        self.edit_btn.setEnabled(True)
+        self._update_present_edit_btn()
         self.stop_btn.setEnabled(True)
         self._enter_present_preview()
         self.fit_to_parent()
@@ -700,11 +822,13 @@ class SermonEditorWindow(QWidget):
 
     def on_presentation_stopped(self, *, reshow: bool = True):
         self._presenting = False
+        self._hold_editor_canvas = False
         self._set_present_shortcuts_enabled(False)
         self.play_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.anim_panel.set_play_cursor(-1)
         self._exit_present_preview()
+        self._update_present_edit_btn()
         self.statusBar().showMessage("放映已结束", 3000)
         if self.doc.slides:
             self._show_slide(self._slide_index)
@@ -722,19 +846,141 @@ class SermonEditorWindow(QWidget):
             btn.setChecked(True)
             btn.blockSignals(False)
 
-    def on_presentation_status(self, text: str):
-        return
+    def _want_editor_canvas(self) -> bool:
+        if self.canvas.is_drawing() or self.canvas.is_format_painting():
+            return True
+        if self._hold_editor_canvas:
+            return True
+        return self._focus_is_text_field()
+
+    def _apply_stage_layout(self, mode: str):
+        """edit=只画布；present=只放映预览；split=画布+观众画面并排。"""
+        split = self.canvas_split
+
+        def _set(left: int, right: int):
+            total = max(240, split.width())
+            if right <= 0:
+                split.setSizes([total, 0])
+            elif left <= 0:
+                split.setSizes([0, total])
+            else:
+                split.setSizes(
+                    [max(120, int(total * left)), max(80, int(total * right))]
+                )
+
+        if mode == "split":
+            self.canvas.show()
+            self.present_stage.show()
+            _set(0.58, 0.42)
+            QTimer.singleShot(0, lambda: _set(0.58, 0.42))
+            return
+        if mode == "present":
+            self.present_stage.show()
+            self.canvas.hide()
+            _set(0, 1)
+            QTimer.singleShot(0, lambda: _set(0, 1))
+            return
+        self.canvas.show()
+        self.present_stage.hide()
+        _set(1, 0)
+        QTimer.singleShot(0, lambda: _set(1, 0))
+
+    def _open_editor_canvas(self, caption: str | None = None):
+        """放映中也切到可编辑画布，并保留右侧观众预览。"""
+        self._hold_editor_canvas = True
+        if self._presenting and not self._syncing_from_ctrl:
+            main = self._main_window()
+            idx = int(self._slide_index)
+            if main is not None and main.sermon_controller.active:
+                idx = int(main.sermon_controller.index)
+            if 0 <= idx < len(self.doc.slides):
+                same = (
+                    self.canvas.isVisible()
+                    and self.canvas.current_slide() is self.doc.slides[idx]
+                )
+                if not same:
+                    self._syncing_from_ctrl = True
+                    try:
+                        self._show_slide(idx, sync_output=False)
+                        self.slide_list.list.blockSignals(True)
+                        self.slide_list.list.setCurrentRow(idx)
+                        self.slide_list.list.blockSignals(False)
+                    finally:
+                        self._syncing_from_ctrl = False
+        if self._presenting:
+            self._apply_stage_layout("split")
+            self.canvas_caption.setText(caption or "放映中编辑 · 左侧改、右侧跟观众")
+        else:
+            self._apply_stage_layout("edit")
+        self._update_present_edit_btn()
+        self.canvas.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _update_present_edit_btn(self):
+        btn = getattr(self, "edit_btn", None)
+        if btn is None:
+            return
+        if not self._presenting:
+            btn.setEnabled(False)
+            btn.setText("编辑")
+            self._sync_present_mutation_ui(True)
+            return
+        btn.setEnabled(True)
+        if self._hold_editor_canvas:
+            btn.setText("预览")
+            btn.setToolTip("回到与观众同画的放映预览")
+        else:
+            btn.setText("编辑")
+            btn.setToolTip("放映中打开画布：对齐、格式刷、改字")
+        self._sync_present_mutation_ui(self._hold_editor_canvas)
+
+    def _sync_present_mutation_ui(self, enabled: bool):
+        """放映预览态关掉插入/侧栏/比例，避免未点「编辑」就改数据。"""
+        can = bool(enabled)
+        for w in (
+            getattr(self, "btn_text", None),
+            getattr(self, "btn_image", None),
+            getattr(self, "btn_shape", None),
+            getattr(self, "btn_format", None),
+            getattr(self, "aspect_combo", None),
+            getattr(self, "side_tabs", None),
+        ):
+            if w is not None:
+                w.setEnabled(can)
+        sl = getattr(self, "slide_list", None)
+        if sl is not None:
+            for name in ("add_btn", "dup_btn", "del_btn"):
+                b = getattr(sl, name, None)
+                if b is not None:
+                    b.setEnabled(can)
+
+    def _toggle_present_edit(self):
+        if not self._presenting:
+            return
+        if self._hold_editor_canvas:
+            if self.canvas.is_drawing():
+                self.canvas.cancel_draw()
+            if self.canvas.is_format_painting():
+                self._end_format_paint(None)
+            self._confirm_live_output()
+            self._enter_present_preview()
+            self.statusBar().showMessage("已回到放映预览", 2000)
+            return
+        self._open_editor_canvas("放映中编辑 · 点选元素后可对齐、格式刷或改属性")
+        props_idx = self.side_tabs.indexOf(self.props)
+        if props_idx >= 0:
+            self.side_tabs.setCurrentIndex(props_idx)
+        self.statusBar().showMessage("已打开画布，点选后可对齐 / 格式刷", 4000)
 
     def _enter_present_preview(self):
         """放映中：中间区换成与副屏同画的只读舞台。"""
+        self._hold_editor_canvas = False
         root = self.store.sermon_dir(self.doc.id)
         self.present_stage.set_assets_root(root)
-        self.canvas_stack.setCurrentIndex(1)
-        self.canvas_caption.setText("放映预览 · 与观众同画（空格步进 / 滚轮翻页）")
-        # 动画列表更直观
-        anim_idx = self.side_tabs.indexOf(self.anim_panel)
-        if anim_idx >= 0:
-            self.side_tabs.setCurrentIndex(anim_idx)
+        self._apply_stage_layout("present")
+        self.canvas_caption.setText(
+            "放映预览 · 与观众同画（空格步进；点「编辑」可改对齐/格式）"
+        )
+        self._update_present_edit_btn()
         main = self._main_window()
         if main is not None and main.sermon_controller.active:
             ctrl = main.sermon_controller
@@ -757,7 +1003,7 @@ class SermonEditorWindow(QWidget):
     def _exit_present_preview(self):
         self.present_stage.stop_animations(apply_end=False)
         self.present_stage.clear_stage()
-        self.canvas_stack.setCurrentIndex(0)
+        self._apply_stage_layout("edit")
         self.canvas_caption.setText("编辑画布 · 拖动元素调整位置")
 
     def _on_present_stage_step(self, delta: int):
@@ -783,11 +1029,12 @@ class SermonEditorWindow(QWidget):
             return
         if index < 0 or index >= len(doc.slides):
             return
-        if self.canvas_stack.currentIndex() != 1:
-            if not self._presenting:
-                return
-            self.canvas_stack.setCurrentIndex(1)
-            self.canvas_caption.setText("放映预览 · 与观众同画（空格步进 / 滚轮翻页）")
+        if not self._presenting:
+            return
+        if not self._hold_editor_canvas:
+            self.canvas_caption.setText(
+                "放映预览 · 与观众同画（空格步进；点「编辑」可改对齐/格式）"
+            )
         root = Path(assets_root) if assets_root else self.store.sermon_dir(doc.id)
         self.present_stage.set_assets_root(root)
         slide = doc.slides[index]
@@ -795,15 +1042,14 @@ class SermonEditorWindow(QWidget):
             self.present_stage.show_slide(doc, slide, prepare_anims=False)
             self.present_stage.reveal_all()
         else:
-            self.present_stage.show_slide(doc, slide, prepare_anims=prepare_anims)
-            played = slide.sorted_animations()[: max(0, int(anim_cursor))]
-            if played:
-                self.present_stage.apply_played_steps(played)
-        self._slide_index = index
-        self.slide_list.list.blockSignals(True)
-        self.slide_list.list.setCurrentRow(index)
-        self.slide_list.list.blockSignals(False)
-        self.anim_panel.set_slide(slide)
+            self.present_stage.hot_refresh(doc, slide, anim_cursor=int(anim_cursor))
+        # 编辑画布打开时只刷右侧观众预览，别把左侧正在编的页拽走
+        if not self._hold_editor_canvas:
+            self._slide_index = index
+            self.slide_list.list.blockSignals(True)
+            self.slide_list.list.setCurrentRow(index)
+            self.slide_list.list.blockSignals(False)
+            self.anim_panel.set_slide(slide)
         self._update_present_status(doc, index, anim_cursor)
 
     def mirror_present_steps(self, steps, anim_cursor: int | None = None):
@@ -820,13 +1066,30 @@ class SermonEditorWindow(QWidget):
             if ctrl.doc is not None:
                 self._update_present_status(ctrl.doc, ctrl.index, cur)
         if batch:
-            # 副屏播完整动画；主屏预览只落到终态，避免两套动画抢线程
-            QTimer.singleShot(40, lambda b=list(batch): self._play_preview_steps(b))
+            QTimer.singleShot(0, lambda b=list(batch): self._play_preview_steps(b))
 
     def _play_preview_steps(self, batch: list):
-        if not self._presenting or self.canvas_stack.currentIndex() != 1:
+        if not self._presenting or not self.present_stage.isVisible():
             return
-        self.present_stage.apply_played_steps(batch)
+        self.present_stage.play_steps(batch)
+
+    def _on_present_stage_edit(self):
+        if not self._presenting:
+            return
+        if self._hold_editor_canvas:
+            return
+        self.statusBar().showMessage("放映中请先点工具栏「编辑」再改内容", 3500)
+
+    def _require_present_edit(self, tip: str | None = None) -> bool:
+        """放映中必须先点「编辑」才能改画布。"""
+        if not self._presenting:
+            return True
+        if self._hold_editor_canvas:
+            return True
+        self.statusBar().showMessage(
+            tip or "放映中请先点「编辑」再操作", 4000
+        )
+        return False
 
     def mirror_present_reveal(self):
         if self._presenting:
@@ -888,7 +1151,7 @@ class SermonEditorWindow(QWidget):
                     self.anim_panel.set_slide(slide)
                     self.transition_panel.set_slide(slide)
                     self.bg_panel.set_slide(slide)
-                    if rebuild_canvas or not self._presenting:
+                    if rebuild_canvas or not self._presenting or self._want_editor_canvas():
                         self._show_slide(self._slide_index)
             finally:
                 self.slide_list.list.blockSignals(False)
@@ -896,17 +1159,26 @@ class SermonEditorWindow(QWidget):
         if self.isVisible():
             self.anim_panel.set_play_cursor(int(ctrl.anim_cursor))
         if self._presenting and ctrl.doc is not None:
-            if self.canvas_stack.currentIndex() != 1:
+            if self._hold_editor_canvas:
+                if not self.canvas.isVisible():
+                    self._open_editor_canvas()
+                # 编辑中也要刷新右侧观众预览，否则左右页不一致
+                self._refresh_present_preview(index=idx, anim_cursor=int(ctrl.anim_cursor))
+                return
+            if self.canvas.isVisible():
                 self._enter_present_preview()
 
     def _on_transition_changed(self):
+        if not self._require_present_edit():
+            return
         self._set_dirty(True)
 
-    def _sync_editor_to_controller(self):
-        self.sync_from_controller()
-
     def wheelEvent(self, event):
-        if self._focus_is_text_field():
+        if (
+            self._focus_is_text_field()
+            or self.canvas.is_drawing()
+            or self.canvas.is_format_painting()
+        ):
             super().wheelEvent(event)
             return
         delta = event.angleDelta().y() or event.pixelDelta().y()
@@ -924,6 +1196,13 @@ class SermonEditorWindow(QWidget):
         event.accept()
 
     def _wheel_change_slide(self, delta: int):
+        # 画框/改字时不翻页，避免误触
+        if (
+            self._focus_is_text_field()
+            or self.canvas.is_drawing()
+            or self.canvas.is_format_painting()
+        ):
+            return
         if self._presenting:
             if delta < 0:
                 self._present_next()
@@ -940,8 +1219,52 @@ class SermonEditorWindow(QWidget):
         self.slide_list.list.setCurrentRow(nxt)
         self.slide_list.list.blockSignals(False)
 
+    def _defer_live_output(self) -> bool:
+        return bool(
+            self._hold_live_output
+            or self.canvas.is_drawing()
+            or self._focus_is_text_field()
+        )
+
+    def _confirm_live_output(self):
+        self._hold_live_output = False
+        try:
+            self.canvas.commit_geometry()
+        except Exception:
+            pass
+        if self._presenting:
+            self._sync_live_preview()
+
+    def _on_canvas_edit_finished(self):
+        if self._syncing_from_ctrl or self._restoring:
+            return
+        self._confirm_live_output()
+
+    def _refresh_present_preview(
+        self, *, index: int | None = None, anim_cursor: int | None = None
+    ):
+        """立刻刷新主屏右侧观众预览（不改编辑画布）。"""
+        if not self._presenting or not self.present_stage.isVisible():
+            return
+        if not self.doc.slides:
+            return
+        idx = int(self._slide_index if index is None else index)
+        idx = max(0, min(idx, len(self.doc.slides) - 1))
+        cursor = 0 if anim_cursor is None else int(anim_cursor)
+        if anim_cursor is None:
+            main = self._main_window()
+            if main is not None and main.sermon_controller.active:
+                cursor = int(main.sermon_controller.anim_cursor)
+        root = self.store.sermon_dir(self.doc.id)
+        self.present_stage.set_assets_root(root)
+        self.present_stage.hot_refresh(
+            self.doc, self.doc.slides[idx], anim_cursor=cursor
+        )
+
     def _push_hot_update(self):
         if not self._presenting or self._syncing_from_ctrl:
+            return
+        if self._defer_live_output():
             return
         main = self._main_window()
         if main is None:
@@ -952,6 +1275,7 @@ class SermonEditorWindow(QWidget):
             self._slide_index,
             self.store.sermon_dir(self.doc.id),
         )
+        self._refresh_present_preview()
 
     # —— 文档生命周期 ——
 
@@ -970,6 +1294,8 @@ class SermonEditorWindow(QWidget):
         else:
             self._package_path = None
         self._saved_once = bool(self._package_path and self._package_path.is_file())
+        if hasattr(self.store, "cleanup_temps"):
+            self.store.cleanup_temps(keep_id=doc.id)
         self.store.sermon_dir(doc.id).mkdir(parents=True, exist_ok=True)
         self.canvas.set_assets_root(self.store.sermon_dir(doc.id))
         idx = self.aspect_combo.findData(doc.aspect)
@@ -1072,7 +1398,11 @@ class SermonEditorWindow(QWidget):
             QMessageBox.warning(self, "导入失败", str(exc))
             return
         self._load_document(doc, mark_clean=True, package_path=None)
-        self.statusBar().showMessage(f"已导入 {len(doc.slides)} 页（请保存为 .sermon）", 4000)
+        skipped = int(getattr(doc, "import_skip_count", 0) or 0)
+        extra = f"，{skipped} 处对象已跳过" if skipped else ""
+        self.statusBar().showMessage(
+            f"已导入 {len(doc.slides)} 页{extra}（请保存为 .sermon）", 5000
+        )
 
     def export_pptx(self):
         self.canvas.commit_geometry()
@@ -1272,10 +1602,13 @@ class SermonEditorWindow(QWidget):
         self._slide_index = max(0, min(self._slide_index, len(self.doc.slides) - 1))
         return self.doc.slides[self._slide_index]
 
-    def _show_slide(self, index: int):
+    def _show_slide(self, index: int, *, sync_output: bool = True):
         if not self.doc.slides:
             return
-        self.canvas.commit_geometry()
+        loaded = self.canvas.current_slide()
+        cur = self.doc.slides[max(0, min(self._slide_index, len(self.doc.slides) - 1))]
+        if loaded is cur:
+            self.canvas.commit_geometry()
         self._slide_index = max(0, min(index, len(self.doc.slides) - 1))
         slide = self.doc.slides[self._slide_index]
         self.canvas.load_slide(self.doc, slide)
@@ -1285,7 +1618,10 @@ class SermonEditorWindow(QWidget):
         self.anim_panel.set_selected_element(None)
         self.transition_panel.set_slide(slide)
         QTimer.singleShot(0, self._refresh_thumbnail)
-        if self._presenting and not self._syncing_from_ctrl:
+        if self._presenting:
+            self._hold_live_output = False
+            self._refresh_present_preview()
+        if sync_output and self._presenting and not self._syncing_from_ctrl:
             main = self._main_window()
             if main is not None:
                 main.sermon_presentation_go_to(self._slide_index)
@@ -1298,6 +1634,8 @@ class SermonEditorWindow(QWidget):
             self.slide_list.list.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _add_slide(self):
+        if not self._require_present_edit():
+            return
         self._push_history(full=True)
         self.canvas.commit_geometry()
         cur = self._current_slide()
@@ -1307,9 +1645,12 @@ class SermonEditorWindow(QWidget):
         self.slide_list.refresh(self._slide_index)
         self._show_slide(self._slide_index)
         self._set_dirty(True)
-        self._push_hot_update()
+        if self._presenting:
+            self.statusBar().showMessage("已添加一页", 2000)
 
     def _delete_slide(self):
+        if not self._require_present_edit():
+            return
         idxs = self.slide_list.selected_indexes()
         if not idxs:
             idxs = [self._slide_index]
@@ -1326,6 +1667,8 @@ class SermonEditorWindow(QWidget):
         self._push_hot_update()
 
     def _duplicate_slide(self):
+        if not self._require_present_edit():
+            return
         idxs = self.slide_list.selected_indexes()
         if not idxs:
             idxs = [self._slide_index]
@@ -1345,6 +1688,9 @@ class SermonEditorWindow(QWidget):
 
     def _on_slides_reordered(self, ids: list):
         if self._restoring or not ids:
+            return
+        if not self._require_present_edit():
+            self.slide_list.refresh(self._slide_index)
             return
         by_id = {s.id: s for s in self.doc.slides}
         if set(ids) != set(by_id):
@@ -1370,10 +1716,12 @@ class SermonEditorWindow(QWidget):
         self.slide_list.update_thumbnail(self._slide_index, pix)
 
     def _refresh_all_thumbnails(self):
-        if self._presenting:
+        if self.doc is None or not self.doc.slides:
+            self._thumb_queue = []
             self._thumb_timer.stop()
             return
-        if self.doc is None or not self.doc.slides:
+        if self._presenting:
+            self._refresh_thumbnail()
             self._thumb_queue = []
             self._thumb_timer.stop()
             return
@@ -1388,12 +1736,17 @@ class SermonEditorWindow(QWidget):
             self._thumb_timer.start()
 
     def _pump_thumbnails(self):
-        if self._presenting or self.doc is None or not self._thumb_queue:
+        if self.doc is None or not self._thumb_queue:
             self._thumb_timer.stop()
-            if self._presenting:
-                return
             self._thumb_queue = []
             return
+        if self._presenting:
+            cur = self._slide_index
+            self._thumb_queue = [i for i in self._thumb_queue if i == cur]
+            if not self._thumb_queue:
+                self._thumb_timer.stop()
+                self._refresh_thumbnail()
+                return
         i = self._thumb_queue.pop(0)
         if 0 <= i < len(self.doc.slides):
             if i == self._slide_index:
@@ -1409,38 +1762,40 @@ class SermonEditorWindow(QWidget):
     # —— 元素 / 背景 ——
 
     def _toggle_draw_text(self):
-        if self._presenting:
-            self.btn_text.setChecked(False)
-            return
         if not self.btn_text.isChecked():
             if self.canvas.is_drawing():
                 self.canvas.cancel_draw()
             self.statusBar().showMessage("已取消画文本框", 2000)
+            return
+        if not self._require_present_edit():
+            self.btn_text.blockSignals(True)
+            self.btn_text.setChecked(False)
+            self.btn_text.blockSignals(False)
             return
         self._end_format_paint(None)
         self.btn_shape.blockSignals(True)
         self.btn_shape.setChecked(False)
         self.btn_shape.blockSignals(False)
         self.canvas.begin_draw("text")
-        self.canvas_stack.setCurrentIndex(0)
-        self.canvas.setFocus(Qt.FocusReason.OtherFocusReason)
+        self.statusBar().showMessage("拖出文本框，打完字后点空白或 Esc 确认", 4000)
 
     def _toggle_draw_shape(self):
-        if self._presenting:
-            self.btn_shape.setChecked(False)
-            return
         if not self.btn_shape.isChecked():
             if self.canvas.is_drawing():
                 self.canvas.cancel_draw()
             self.statusBar().showMessage("已取消画形状", 2000)
+            return
+        if not self._require_present_edit():
+            self.btn_shape.blockSignals(True)
+            self.btn_shape.setChecked(False)
+            self.btn_shape.blockSignals(False)
             return
         self._end_format_paint(None)
         self.btn_text.blockSignals(True)
         self.btn_text.setChecked(False)
         self.btn_text.blockSignals(False)
         self.canvas.begin_draw("shape")
-        self.canvas_stack.setCurrentIndex(0)
-        self.canvas.setFocus(Qt.FocusReason.OtherFocusReason)
+        self.statusBar().showMessage("拖拽画出形状，Esc 取消", 3000)
 
     def _on_canvas_status(self, text: str):
         self.statusBar().showMessage(text, 4000)
@@ -1459,9 +1814,12 @@ class SermonEditorWindow(QWidget):
         self.btn_shape.setChecked(False)
         self.btn_text.blockSignals(False)
         self.btn_shape.blockSignals(False)
+        if self._presenting and not self._hold_editor_canvas:
+            return
         self._push_history()
         cw, ch = self.doc.canvas_size()
         if kind == "text":
+            self._hold_live_output = True
             el = new_text_element(
                 "在此输入",
                 canvas_w=cw,
@@ -1472,38 +1830,31 @@ class SermonEditorWindow(QWidget):
             self.canvas.add_element(el)
             eid = el.id
             QTimer.singleShot(0, lambda i=eid: self._begin_edit_text(i))
-            self.statusBar().showMessage("已创建文本框，直接输入文字", 3000)
+            self.statusBar().showMessage("打完字后点空白或 Esc，确认到副屏", 4000)
         else:
             el = new_shape_element(canvas_w=cw, canvas_h=ch)
             el.x, el.y, el.w, el.h = x, y, w, h
             self.canvas.add_element(el)
             self.statusBar().showMessage("已创建形状", 2000)
+            self._sync_live_preview()
+        self._set_dirty(True)
 
     def _begin_edit_text(self, element_id: str):
+        if self._presenting and not self._hold_editor_canvas:
+            return
         item = self.canvas._items.get(element_id)
         if item is None or not hasattr(item, "setTextInteractionFlags"):
+            self._hold_live_output = False
             return
+        self._on_canvas_edit_started()
         item.setTextInteractionFlags(Qt.TextInteractionFlag.TextEditorInteraction)
         item.setFocus(Qt.FocusReason.OtherFocusReason)
         if hasattr(item, "_place_cursor_for_edit"):
             item._place_cursor_for_edit()
 
-    def _add_text(self):
-        """兼容入口：进入拖拽画框。"""
-        if self._presenting:
-            return
-        self._end_format_paint(None)
-        self.btn_text.blockSignals(True)
-        self.btn_text.setChecked(True)
-        self.btn_text.blockSignals(False)
-        self.btn_shape.blockSignals(True)
-        self.btn_shape.setChecked(False)
-        self.btn_shape.blockSignals(False)
-        self.canvas.begin_draw("text")
-        self.canvas_stack.setCurrentIndex(0)
-        self.canvas.setFocus(Qt.FocusReason.OtherFocusReason)
-
     def _add_image(self):
+        if not self._require_present_edit():
+            return
         path, _ = QFileDialog.getOpenFileName(
             self,
             "选择图片",
@@ -1524,24 +1875,11 @@ class SermonEditorWindow(QWidget):
         self.canvas.add_element(el)
         self._set_dirty(True)
         self._refresh_thumbnail()
-        self._push_hot_update()
-
-    def _add_shape(self):
-        """兼容入口：进入拖拽画形状。"""
-        if self._presenting:
-            return
-        self._end_format_paint(None)
-        self.btn_shape.blockSignals(True)
-        self.btn_shape.setChecked(True)
-        self.btn_shape.blockSignals(False)
-        self.btn_text.blockSignals(True)
-        self.btn_text.setChecked(False)
-        self.btn_text.blockSignals(False)
-        self.canvas.begin_draw("shape")
-        self.canvas_stack.setCurrentIndex(0)
-        self.canvas.setFocus(Qt.FocusReason.OtherFocusReason)
+        self._sync_live_preview()
 
     def _pick_bg_image(self):
+        if not self._require_present_edit():
+            return
         path, _ = QFileDialog.getOpenFileName(
             self,
             "背景图片",
@@ -1559,34 +1897,45 @@ class SermonEditorWindow(QWidget):
         except OSError as exc:
             QMessageBox.warning(self, "导入失败", str(exc))
             return
+        self._push_history()
         slide.background = Background(type="image", value=rel, fit=slide.background.fit)
         self.canvas.refresh_background()
         self.bg_panel.set_slide(slide)
         self._set_dirty(True)
         self._refresh_thumbnail()
-        self._push_hot_update()
+        self._sync_live_preview()
 
     def _clear_bg_image(self):
+        if not self._require_present_edit():
+            return
         slide = self._current_slide()
         if slide is None:
             return
         color = "#1A1A2E"
         if slide.background.type == "color":
             color = slide.background.value
-        slide.background = Background(type="color", value=color, fit=slide.background.fit)
+        self._push_history()
+        slide.background = Background(type="color", value=color)
         self.canvas.refresh_background()
         self.bg_panel.set_slide(slide)
         self._set_dirty(True)
         self._refresh_thumbnail()
-        self._push_hot_update()
+        self._sync_live_preview()
 
     def _on_bg_changed(self):
+        if not self._require_present_edit():
+            slide = self._current_slide()
+            if slide is not None:
+                self.bg_panel.set_slide(slide)
+            return
         self.canvas.refresh_background()
         self._set_dirty(True)
         self._refresh_thumbnail()
         self._push_hot_update()
 
     def _apply_bg_to_all(self):
+        if not self._require_present_edit():
+            return
         slide = self._current_slide()
         if slide is None or not self.doc.slides:
             return
@@ -1614,6 +1963,9 @@ class SermonEditorWindow(QWidget):
         if element is None or getattr(element, "type", None) != "text":
             return
         self._last_text_style = element.style.clone()
+        self._style_save_timer.start()
+
+    def _flush_last_text_style(self):
         cfg = self._app_config()
         if cfg is not None:
             cfg.save_sermon_text_style(self._last_text_style)
@@ -1621,30 +1973,22 @@ class SermonEditorWindow(QWidget):
     def _toggle_format_paint(self, checked: bool = False):
         if self._format_ignore:
             return
-        if self._presenting:
-            self.btn_format.setChecked(False)
-            return
         if not self.btn_format.isChecked():
             self._end_format_paint()
             return
         self._start_format_paint(sticky=False)
 
     def _start_format_paint(self, *, sticky: bool):
-        if self._presenting:
-            self._end_format_paint()
+        if not self._require_present_edit():
+            self._format_ignore = True
+            self.btn_format.setChecked(False)
+            self._format_ignore = False
             return
         src = None
         for el in self.canvas.selected_elements():
             if el.type == "text":
                 src = el
                 break
-        if src is None:
-            self._format_ignore = True
-            self.btn_format.setChecked(False)
-            self._format_ignore = False
-            self.statusBar().showMessage("请先选中一个文本框（导入的也可以），再点格式刷", 4000)
-            return
-        self._remember_text_style(src)
         self._format_sticky = sticky
         self._format_ignore = True
         self.btn_format.setChecked(True)
@@ -1656,8 +2000,14 @@ class SermonEditorWindow(QWidget):
         self.btn_text.blockSignals(False)
         self.btn_shape.blockSignals(False)
         self.canvas.set_format_paint(True)
-        self.canvas_stack.setCurrentIndex(0)
-        self.canvas.setFocus(Qt.FocusReason.OtherFocusReason)
+        if src is None:
+            self._paint_style = None
+            self._format_pick_source = True
+            self.statusBar().showMessage("格式刷：先点样板文本框，再点要套用的", 5000)
+            return
+        self._format_pick_source = False
+        self._remember_text_style(src)
+        self._paint_style = src.style.clone()
         if sticky:
             self.statusBar().showMessage("连续格式刷：点文本框套用样式，Esc 取消", 5000)
         else:
@@ -1665,6 +2015,8 @@ class SermonEditorWindow(QWidget):
 
     def _end_format_paint(self, message: str | None = "已取消格式刷"):
         self._format_sticky = False
+        self._format_pick_source = False
+        self._paint_style = None
         self.canvas.set_format_paint(False)
         self._format_ignore = True
         self.btn_format.setChecked(False)
@@ -1677,11 +2029,18 @@ class SermonEditorWindow(QWidget):
             self._end_format_paint("已取消格式刷")
             return
         if target is None or getattr(target, "type", None) != "text":
-            if not self._format_sticky:
+            if not self._format_sticky and not self._format_pick_source:
                 self._end_format_paint("已取消格式刷")
             return
+        if self._format_pick_source or self._paint_style is None:
+            self._paint_style = target.style.clone()
+            self._remember_text_style(target)
+            self._format_pick_source = False
+            self.statusBar().showMessage("已取样，再点要套用的文本框", 4000)
+            return
         self._push_history()
-        target.style = self._last_text_style.clone()
+        style = self._paint_style or self._last_text_style
+        target.style = style.clone()
         self.canvas.update_selected_from_element(target)
         self.props.set_element(target)
         self._remember_text_style(target)
@@ -1694,6 +2053,12 @@ class SermonEditorWindow(QWidget):
             self._end_format_paint("已套用文字格式")
 
     def _on_element_changed(self, element):
+        if not self._require_present_edit():
+            return
+        if not self._restoring and not getattr(self, "_props_hist_armed", False):
+            self._push_history()
+            self._props_hist_armed = True
+            QTimer.singleShot(700, lambda: setattr(self, "_props_hist_armed", False))
         self.canvas.update_selected_from_element(element)
         self._remember_text_style(element)
         self._set_dirty(True)
@@ -1701,18 +2066,36 @@ class SermonEditorWindow(QWidget):
         self._push_hot_update()
 
     def _on_layer_reorder(self, action: str):
+        if not self._require_present_edit():
+            return
+        if not self.canvas.selected_elements():
+            self.statusBar().showMessage("请先在画布上选中元素", 4000)
+            return
+        self._push_history()
         self.canvas.reorder_selected(action)
         self._set_dirty(True)
         self._refresh_thumbnail()
         self._push_hot_update()
 
     def _on_align_requested(self, mode: str):
+        if not self._require_present_edit():
+            return
+        if not self.canvas.selected_elements():
+            self.statusBar().showMessage("请先在画布上点选要对齐的元素", 4000)
+            return
+        self._push_history()
         self.canvas.align_selected(mode, relative=self.props.align_relative_mode())
         self._set_dirty(True)
         self._refresh_thumbnail()
         self._push_hot_update()
 
     def _on_distribute_requested(self, axis: str):
+        if not self._require_present_edit():
+            return
+        if not self.canvas.selected_elements():
+            self.statusBar().showMessage("请先在画布上选中至少 3 个元素", 4000)
+            return
+        self._push_history()
         self.canvas.distribute_selected(axis)
         self._set_dirty(True)
         self._refresh_thumbnail()
@@ -1726,6 +2109,8 @@ class SermonEditorWindow(QWidget):
             self.side_tabs.setCurrentIndex(1)
 
     def _on_anims_changed(self):
+        if not self._require_present_edit():
+            return
         self._set_dirty(True)
         self._push_hot_update()
 
@@ -1753,9 +2138,23 @@ class SermonEditorWindow(QWidget):
         QTimer.singleShot(0, self._refresh_thumbnail)
         self._push_hot_update()
 
+    def _sync_live_preview(self):
+        """放映中加页/加元素后立刻同步副屏与主屏预览。"""
+        self._hold_live_output = False
+        self._refresh_thumbnail()
+        self._push_hot_update()
+        self._refresh_present_preview()
+
     def _on_aspect(self):
         aspect = self.aspect_combo.currentData()
         if not aspect or aspect == self.doc.aspect:
+            return
+        if not self._require_present_edit():
+            self.aspect_combo.blockSignals(True)
+            idx = self.aspect_combo.findData(self.doc.aspect)
+            if idx >= 0:
+                self.aspect_combo.setCurrentIndex(idx)
+            self.aspect_combo.blockSignals(False)
             return
         self.canvas.commit_geometry()
         self.doc.aspect = aspect

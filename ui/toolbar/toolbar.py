@@ -5,11 +5,12 @@ from PyQt6.QtWidgets import (
     QHBoxLayout, QVBoxLayout, QSpinBox, QColorDialog,
     QFileDialog, QLineEdit, QDialogButtonBox, QWidget, QSizePolicy,
     QTabWidget, QGroupBox, QFrame, QGridLayout, QComboBox, QCompleter,
+    QToolButton, QMenu,
 )
 from PyQt6.QtCore import Qt, QSize, QStringListModel, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QFontDatabase, QColor, QPainter, QPen
 
-from app.feature_flags import ENABLE_SCRIPTURE_TITLES
+from app.feature_flags import ENABLE_SCRIPTURE_TITLES, ENABLE_SERMON
 
 
 # 全进程共用一份字体列表，避免打开设置时扫 5 遍
@@ -231,6 +232,17 @@ class HelpShortcutsDialog(QDialog):
         grid.setHorizontalSpacing(10)
         grid.setVerticalSpacing(10)
 
+        sections = []
+        for section_title, rows in self.SECTIONS:
+            if section_title == "讲篇放映" and not ENABLE_SERMON:
+                continue
+            if section_title == "其他" and not ENABLE_SERMON:
+                rows = tuple(
+                    r for r in rows if "讲篇" not in r[0] and "讲篇" not in r[1]
+                )
+                if not rows:
+                    continue
+            sections.append((section_title, rows))
         positions = (
             (0, 0, 1, 1),
             (0, 1, 1, 1),
@@ -240,7 +252,7 @@ class HelpShortcutsDialog(QDialog):
             (2, 1, 1, 1),
         )
         for (row, col, row_span, col_span), (section_title, rows) in zip(
-            positions, self.SECTIONS
+            positions, sections
         ):
             grid.addWidget(
                 self._make_section(section_title, rows),
@@ -260,7 +272,10 @@ class HelpShortcutsDialog(QDialog):
         footer_layout.setContentsMargins(0, 2, 0, 0)
         footer_layout.setSpacing(12)
 
-        tip = QLabel("输入框内按键交给当前控件。放映中空格和方向键用于步进 / 翻页。讲篇与经文切换的淡化时长在显示设置里。")
+        tip_text = "输入框内按键交给当前控件。"
+        if ENABLE_SERMON:
+            tip_text += "放映中空格和方向键用于步进 / 翻页。讲篇与经文切换的淡化时长在显示设置里。"
+        tip = QLabel(tip_text)
         tip.setObjectName("helpTip")
         tip.setWordWrap(True)
         footer_layout.addWidget(tip, 1)
@@ -626,7 +641,8 @@ class DisplaySettingsDialog(QDialog):
         lf.addRow("左右边距", self.margin)
         lf.addRow("底注区域高度", self.footer_height)
         lf.addRow("底注文字", self.footer_text)
-        lf.addRow("讲篇/经文切换", self.channel_fade_ms)
+        if ENABLE_SERMON:
+            lf.addRow("讲篇/经文切换", self.channel_fade_ms)
         tabs.addTab(layout_page, "布局与底注")
 
         bg_page = QWidget()
@@ -825,6 +841,8 @@ class ToolBarWidget(QToolBar):
     settings_changed = pyqtSignal(dict)
     scroll_speed_changed = pyqtSignal(int)
     extend_toggled = pyqtSignal()
+    prepare_extend_menu = pyqtSignal(object)
+    extend_screen_picked = pyqtSignal(str)
     footer_triggered = pyqtSignal()
     theme_changed = pyqtSignal(str)
     topmost_toggled = pyqtSignal(bool)
@@ -846,11 +864,39 @@ class ToolBarWidget(QToolBar):
         self._settings_dialog = None
 
         # —— 投影 ——
+        extend_wrap = QWidget()
+        extend_wrap.setObjectName("extendBtnWrap")
+        extend_wrap.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        extend_wrap.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        extend_row = QHBoxLayout(extend_wrap)
+        extend_row.setContentsMargins(0, 0, 0, 0)
+        extend_row.setSpacing(0)
         self.extend_btn = ToolbarButton("扩展显示")
         self.extend_btn.setObjectName("extendBtn")
         self.extend_btn.setToolTip("开启 / 关闭扩展显示  F12")
         self.extend_btn.clicked.connect(self.extend_toggled)
-        self.addWidget(self.extend_btn)
+        self.extend_arrow = QToolButton()
+        self.extend_arrow.setObjectName("extendArrowBtn")
+        self.extend_arrow.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.extend_arrow.setAutoRaise(False)
+        self.extend_arrow.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.extend_arrow.setFixedHeight(ToolbarButton.HEIGHT)
+        self.extend_arrow.setFixedWidth(28)
+        self.extend_arrow.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.extend_arrow.setArrowType(Qt.ArrowType.NoArrow)
+        self.extend_arrow.setText("▾")
+        self.extend_arrow.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.extend_arrow.setToolTip("选择投影屏幕")
+        self.extend_menu = QMenu(self.extend_arrow)
+        self.extend_arrow.setMenu(self.extend_menu)
+        self.extend_menu.aboutToShow.connect(
+            lambda: self.prepare_extend_menu.emit(self.extend_menu)
+        )
+        self.extend_menu.triggered.connect(self._emit_extend_screen)
+        extend_row.addWidget(self.extend_btn)
+        extend_row.addWidget(self.extend_arrow)
+        self.extend_wrap = extend_wrap
+        self.addWidget(extend_wrap)
 
         self.topmost_btn = ToolbarButton("置顶")
         self.topmost_btn.setObjectName("topmostBtn")
@@ -998,6 +1044,18 @@ class ToolBarWidget(QToolBar):
         self.theme_btn.setToolTip(
             "当前亮色，点击切换暗色" if self.theme == "light" else "当前暗色，点击切换亮色"
         )
+
+    def popup_extend_screen_menu(self):
+        self.prepare_extend_menu.emit(self.extend_menu)
+        origin = self.extend_wrap.mapToGlobal(self.extend_wrap.rect().bottomLeft())
+        self.extend_menu.exec(origin)
+
+    def _emit_extend_screen(self, action):
+        if action is None or not action.isEnabled():
+            return
+        name = action.data()
+        if name:
+            self.extend_screen_picked.emit(str(name))
 
     def set_extend_active(self, active):
         if active:

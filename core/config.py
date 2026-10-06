@@ -79,6 +79,7 @@ class AppConfig:
             "bg_color": "#000000", "bg_image": "", "line_spacing": "160", "margin": "60",
             "footer_text": "", "footer_height": "45", "footer_size": "14", "footer_color": "#AAAAAA",
             "footer_font_family": "微软雅黑", "extension_topmost": "True", "verse_segmentation": "False",
+            "extension_screen_name": "",
         }
         self.parser["Window"] = {"geometry": ""}
         self.parser["History"] = {"search_history": "[]"}
@@ -121,6 +122,7 @@ class AppConfig:
             "footer_text": "", "footer_height": 45, "footer_size": 14, "footer_color": "#AAAAAA",
             "footer_font_family": "微软雅黑", "extension_topmost": True, "verse_segmentation": False,
             "channel_fade_ms": 400,
+            "extension_screen_name": "",
         }
         result = {}
         sec = self.parser["Display"] if "Display" in self.parser else {}

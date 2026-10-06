@@ -34,7 +34,7 @@ class ScriptureBody(QWidget):
     """经文正文区：用浮点 scroll_y 平移绘制，观感接近网页提词器。"""
     scroll_changed = pyqtSignal(float)
     def __init__(self, parent=None):
-        super().__init__(parent); self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False); self.setFocusPolicy(Qt.FocusPolicy.NoFocus); self.setMouseTracking(True); self._doc = QTextDocument(self); self._doc.setDocumentMargin(0); self._scroll_y = 0.0; self._pad_left = 0; self._pad_right = 0; self._pad_bottom = 0; self._wheel_step = 48.0
+        super().__init__(parent); self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False); self.setFocusPolicy(Qt.FocusPolicy.NoFocus); self.setMouseTracking(True); self._doc = QTextDocument(self); self._doc.setDocumentMargin(0); self._scroll_y = 0.0; self._pad_left = 0; self._pad_right = 0; self._pad_bottom = 0; self._wheel_step = 48.0; self._follow_only = False
     def set_html(self, html): self._doc.setHtml(html); self._doc.setDocumentMargin(0); self._clamp_scroll(); self.update()
     def set_pads(self,left,right,bottom): self._pad_left=max(0,int(left)); self._pad_right=max(0,int(right)); self._pad_bottom=max(0,int(bottom)); self._fit_text_width(); self._clamp_scroll(); self.update()
     def set_text_width(self,width): self._doc.setTextWidth(max(1.0,float(width))); self._clamp_scroll(); self.update()
@@ -65,7 +65,12 @@ class ScriptureBody(QWidget):
         try: delta=float(delta)
         except (TypeError,ValueError): return
         self.set_scroll_y(self._scroll_y+delta)
+    def set_follow_only(self, on: bool):
+        self._follow_only = bool(on)
     def wheelEvent(self,event):
+        if self._follow_only:
+            event.accept()
+            return
         angle=event.angleDelta().y(); pixel=event.pixelDelta().y()
         if pixel: delta=-float(pixel)
         elif angle: delta=-(float(angle)/120.0)*self._wheel_step
@@ -227,6 +232,12 @@ class ScriptureDisplay(QWidget):
             scaled=self._bg_scaled; painter.drawPixmap((self.width()-scaled.width())//2,(self.height()-scaled.height())//2,scaled)
         super().paintEvent(event); self._update_overlay_geometry()
     def _on_body_scroll_changed(self,value): self.scroll_changed.emit(int(round(value)))
+    def set_follow_only(self, on: bool):
+        """副屏：只跟主屏位置，忽略滚轮和 Home/End。"""
+        self.text_display.set_follow_only(on)
+        enabled = not bool(on)
+        self._home_shortcut.setEnabled(enabled)
+        self._end_shortcut.setEnabled(enabled)
     def scroll_position(self): return self.text_display.scroll_y()
     def max_scroll(self): return self.text_display.max_scroll()
     def scroll_fraction(self): return self.text_display.scroll_fraction()

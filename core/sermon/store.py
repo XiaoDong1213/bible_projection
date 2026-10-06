@@ -261,6 +261,20 @@ class SermonStore:
         rel = (rel or "").replace("\\", "/").lstrip("/")
         return self.sermon_dir(sermon_id) / rel
 
+    def cleanup_temps(self, keep_id: str | None = None) -> None:
+        """清掉加载残留的临时目录，不碰正在编辑的工作副本。"""
+        if not self.root.exists():
+            return
+        keep = str(keep_id or "").strip()
+        for child in list(self.root.iterdir()):
+            name = child.name
+            if not child.is_dir():
+                continue
+            if keep and name == keep:
+                continue
+            if name.endswith(".__old__") or name.startswith("."):
+                shutil.rmtree(child, ignore_errors=True)
+
     def create_blank(self, title: str = "未命名讲篇") -> SermonDocument:
         doc = new_document(title=title)
         self.save(doc)

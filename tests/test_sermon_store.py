@@ -36,6 +36,21 @@ class SermonStoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 store.load_package(pkg)
 
+    def test_cleanup_temps_keeps_active(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            store = SermonStore(root)
+            doc = store.create_blank("keep")
+            stale = root / "gone.__old__"
+            stale.mkdir()
+            (stale / "x.txt").write_text("x", encoding="utf-8")
+            tmp = root / ".sid_load_abc"
+            tmp.mkdir()
+            store.cleanup_temps(keep_id=doc.id)
+            self.assertTrue(store.sermon_dir(doc.id).is_dir())
+            self.assertFalse(stale.exists())
+            self.assertFalse(tmp.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
