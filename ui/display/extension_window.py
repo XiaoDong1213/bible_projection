@@ -45,7 +45,9 @@ class ExtensionWindow(QWidget):
         grid.setSpacing(0)
 
         self.scripture_display = ScriptureDisplay()
+        self.scripture_display.set_follow_only(True)
         self.slide_stage = SlideStage()
+        self.slide_stage.set_wheel_pages(False)
 
         grid.addWidget(self.slide_stage, 0, 0)
         grid.addWidget(self.scripture_display, 0, 0)
@@ -82,6 +84,9 @@ class ExtensionWindow(QWidget):
             self.sermon_next_requested.emit()
         elif delta < 0:
             self.sermon_prev_requested.emit()
+
+    def wheelEvent(self, event):
+        event.accept()
 
     def _apply_window_flags(self):
         """设置无边框、工具窗口和置顶属性。"""

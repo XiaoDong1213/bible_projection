@@ -73,13 +73,23 @@ def _hide_panel(window):
     sizes = splitter.sizes()
     extra = sizes[2] if len(sizes) > 2 else 0
     if extra <= 0:
+        handle = splitter.handle(2)
+        if handle is not None:
+            handle.setEnabled(False)
         return
     sizes[1] = sizes[1] + extra
     sizes[2] = 0
     splitter.setSizes(sizes)
+    handle = splitter.handle(2)
+    if handle is not None:
+        handle.setEnabled(False)
 
 
 def _toggle(window):
+    editor = getattr(window, "_sermon_editor", None)
+    if editor is not None and editor.isVisible():
+        if hasattr(editor, "stash_and_hide"):
+            editor.stash_and_hide()
     widget = _ensure_panel(window)
     if widget.isVisible():
         _hide_panel(window)
@@ -96,6 +106,9 @@ def _toggle(window):
             sizes[1] = sizes[1] - take
             sizes[2] = take
             splitter.setSizes(sizes)
+        handle = splitter.handle(2)
+        if handle is not None:
+            handle.setEnabled(True)
     widget.raise_()
     widget.search_input.setFocus()
     widget.search_input.selectAll()

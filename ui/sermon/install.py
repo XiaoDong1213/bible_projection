@@ -71,12 +71,25 @@ def _ensure_editor(window):
     return editor
 
 
+def _set_scripture_preview_visible(window, visible: bool):
+    host = getattr(window, "preview_host", None)
+    if host is None:
+        return
+    if visible:
+        host.show()
+        if hasattr(host, "_fit_view"):
+            QTimer.singleShot(0, host._fit_view)
+    else:
+        host.hide()
+
+
 def _on_editor_closed(window):
     btn = getattr(window, "sermon_button", None)
     if btn is not None:
         btn.blockSignals(True)
         btn.setChecked(False)
         btn.blockSignals(False)
+    _set_scripture_preview_visible(window, True)
 
 
 def _toggle_editor(window):
@@ -90,6 +103,7 @@ def _toggle_editor(window):
 def _open_editor(window):
     """打开讲篇叠层（供工具栏与放映入口调用）。"""
     editor = _ensure_editor(window)
+    _set_scripture_preview_visible(window, False)
     editor.fit_to_parent()
     editor.show()
     editor.raise_()

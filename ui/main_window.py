@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 from PyQt6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -16,8 +18,8 @@ from PyQt6.QtWidgets import (
     QTextEdit,
     QMessageBox,
 )
-from PyQt6.QtCore import Qt, QPoint, QTimer
-from PyQt6.QtGui import QKeySequence, QShortcut
+from PyQt6.QtCore import QEvent, Qt, QPoint, QTimer
+from PyQt6.QtGui import QKeySequence, QShortcut, QActionGroup
 
 from core.config import AppConfig
 from core.database import BibleDatabase
@@ -28,9 +30,56 @@ from ui.quick_search import SearchWidget
 from ui.navigation import NavigationPanel
 from ui.toolbar import ToolBarWidget
 from ui.display import PreviewHost, ExtensionWindow
+from ui.display.screens import (
+    extension_open_mode,
+    resolve_saved_output,
+    screen_choice_label,
+)
 from ui.themes import build_stylesheet, theme_tokens
 from ui.sermon.player import PresentationController
 from ui.sermon.player.session_bar import SessionBar
+
+
+def _win32_monitor_rect(device_name: str, *, work_area: bool):
+    """Win32 物理像素显示器矩形；对不上设备名则返回 None。"""
+    import ctypes
+    from ctypes import wintypes
+
+    class RECT(ctypes.Structure):
+        _fields_ = [
+            ("left", ctypes.c_long),
+            ("top", ctypes.c_long),
+            ("right", ctypes.c_long),
+            ("bottom", ctypes.c_long),
+        ]
+
+    class MONITORINFOEXW(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD),
+            ("rcMonitor", RECT),
+            ("rcWork", RECT),
+            ("dwFlags", wintypes.DWORD),
+            ("szDevice", wintypes.WCHAR * 32),
+        ]
+
+    found = {}
+    wanted = str(device_name or "")
+
+    def _cb(hmon, _hdc, _lprc, _lp):
+        info = MONITORINFOEXW()
+        info.cbSize = ctypes.sizeof(MONITORINFOEXW)
+        if ctypes.windll.user32.GetMonitorInfoW(hmon, ctypes.byref(info)):
+            name = str(info.szDevice)
+            if name == wanted or (wanted and wanted in name):
+                r = info.rcWork if work_area else info.rcMonitor
+                found["rect"] = (int(r.left), int(r.top), int(r.right - r.left), int(r.bottom - r.top))
+        return 1
+
+    proto = ctypes.WINFUNCTYPE(
+        ctypes.c_int, wintypes.HMONITOR, wintypes.HDC, ctypes.POINTER(RECT), wintypes.LPARAM
+    )
+    ctypes.windll.user32.EnumDisplayMonitors(None, None, proto(_cb), 0)
+    return found.get("rect")
 
 
 class MainWindow(QMainWindow):
@@ -68,12 +117,17 @@ class MainWindow(QMainWindow):
         self.sermon_controller.status_changed.connect(self._on_sermon_status)
         self._projection_channel = "scripture"
         self._keep_editor_after_stop = True
+        saved_screen = str(self.settings.get("extension_screen_name") or "").strip()
+        self._extension_screen_name = saved_screen or None
 
         # 先套主题，再建大量控件：避免「先造百余按钮再全局 polish」
         self._load_theme_style()
         self._create_central_widget()
         self._create_toolbar()
         self._create_shortcuts()
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
         self._create_statusbar()
         self._apply_settings(self.settings)
 
@@ -115,6 +169,8 @@ class MainWindow(QMainWindow):
         self.toolbar.load_settings(self.settings)
         self.toolbar.scroll_speed_changed.connect(self._on_scroll_speed)
         self.toolbar.extend_toggled.connect(self._toggle_extension)
+        self.toolbar.prepare_extend_menu.connect(self._fill_extend_screen_menu)
+        self.toolbar.extend_screen_picked.connect(self._on_extend_screen_picked)
         self.toolbar.settings_changed.connect(self._on_settings_changed)
         self.toolbar.theme_changed.connect(self._on_theme_changed)
         self.toolbar.topmost_toggled.connect(self._toggle_extension_topmost)
@@ -342,9 +398,6 @@ class MainWindow(QMainWindow):
 
     def _create_shortcuts(self):
         bindings = [
-            (Qt.Key.Key_Return, self._show_search, False),
-            (Qt.Key.Key_Enter, self._show_search, False),
-            (Qt.Key.Key_Escape, self._on_escape, False),
             (Qt.Key.Key_F12, self._toggle_extension, False),
             (Qt.Key.Key_F1, self.toolbar._open_help, False),
             (Qt.Key.Key_Right, self._add_verse_end, True),
@@ -365,6 +418,40 @@ class MainWindow(QMainWindow):
             s.setContext(Qt.ShortcutContext.WindowShortcut)
             s.activated.connect(self._wrap_nav(fn) if guard else fn)
             self._shortcuts.append(s)
+
+    def eventFilter(self, obj, event):
+        if event.type() != QEvent.Type.KeyPress:
+            return super().eventFilter(obj, event)
+        if QApplication.activeModalWidget() is not None:
+            return super().eventFilter(obj, event)
+        key = event.key()
+        popup = QApplication.activePopupWidget()
+        search = getattr(self, "search_widget", None)
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if popup is not None and popup is not search:
+                return super().eventFilter(obj, event)
+            if popup is search or (search is not None and search.isVisible()):
+                self._show_search()
+                return True
+            if self._focus_blocks_nav_shortcuts():
+                return super().eventFilter(obj, event)
+            self._show_search()
+            return True
+        if key == Qt.Key.Key_Escape:
+            if popup is not None and popup is not search:
+                return super().eventFilter(obj, event)
+            if search is not None and search.isVisible():
+                self._close_search()
+                return True
+            if self.extension_window is not None and QApplication.activeWindow() is self.extension_window:
+                return super().eventFilter(obj, event)
+            editor = getattr(self, "_sermon_editor", None)
+            if editor is not None and editor.isVisible() and hasattr(editor, "consume_escape"):
+                if editor.consume_escape():
+                    return True
+            self._on_escape()
+            return True
+        return super().eventFilter(obj, event)
 
     def _set_speed_hotkey(self, speed):
         self.toolbar._set_speed(speed)
@@ -477,15 +564,6 @@ class MainWindow(QMainWindow):
             return ScriptureSelection.from_history_entry(value)
         return None
 
-    def _load_scripture(self, b, c, s, e):
-        max_v = self.db.get_verse_count(b, c)
-        if s is None:
-            selection = ScriptureSelection.single_chapter(b, c, 1, max_v, max_verse=max_v)
-        else:
-            end = max_v if e is None else e
-            selection = ScriptureSelection.single_chapter(b, c, s, end, max_verse=max_v)
-        self._load_selection(selection)
-
     def _load_selection(self, selection: ScriptureSelection, reset_scroll=True, restore_scroll_y=None):
         selection = normalize_selection(self.db, selection)
         self.current_selection = selection
@@ -537,9 +615,162 @@ class MainWindow(QMainWindow):
             self.extension_window.scripture_display.clear_scripture()
         self.status_label.setText("已清屏")
 
+    def _output_screens(self):
+        screens = QApplication.screens()
+        primary = QApplication.primaryScreen()
+        return [s for s in screens if s is not primary]
+
+    def _remember_extension_screen(self, name: str | None):
+        name = str(name or "").strip()
+        self._extension_screen_name = name or None
+        self.settings["extension_screen_name"] = name
+        self.config.save_display_settings({"extension_screen_name": name})
+
+    def _screen_choice_label(self, screen, index: int) -> str:
+        geom = screen.geometry()
+        return screen_choice_label(index, geom.width(), geom.height())
+
+    def _fill_extend_screen_menu(self, menu):
+        menu.clear()
+        extras = self._output_screens()
+        if not extras:
+            act = menu.addAction("未检测到第二块屏幕")
+            act.setEnabled(False)
+            return
+        current = self._extension_screen_name or extras[0].name()
+        default = None
+        group = QActionGroup(menu)
+        group.setExclusive(True)
+        for i, screen in enumerate(extras, start=1):
+            act = menu.addAction(self._screen_choice_label(screen, i))
+            act.setCheckable(True)
+            act.setData(screen.name())
+            act.setToolTip(screen.name())
+            act.setChecked(screen.name() == current)
+            group.addAction(act)
+            if screen.name() == current:
+                default = act
+        if default is not None:
+            menu.setDefaultAction(default)
+
+    def _on_extend_screen_picked(self, name: str):
+        self._remember_extension_screen(name)
+        target = None
+        for screen in self._output_screens():
+            if screen.name() == self._extension_screen_name:
+                target = screen
+                break
+        if target is None:
+            self.status_label.setText("找不到所选屏幕")
+            return
+        if self.extension_window and self.extension_window.isVisible():
+            self._place_extension_on_screen(target, single=False)
+            extras = self._output_screens()
+            idx = extras.index(target) + 1 if target in extras else 1
+            self.status_label.setText(f"扩展显示: {self._screen_choice_label(target, idx)}")
+            return
+        self._show_extension(preferred_name=self._extension_screen_name)
+
+    def _native_place_window(self, win, target, *, single: bool):
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+
+            hwnd = int(win.winId())
+            insert = -1 if bool(self.settings.get("extension_topmost", True)) else -2
+            rect = _win32_monitor_rect(target.name(), work_area=single)
+            flags = 0x0040 | 0x0020  # SHOWWINDOW | FRAMECHANGED
+            if rect is None:
+                # 拿不到物理像素时只改 Z 序，避免用 DIP 误放窗口
+                flags |= 0x0001 | 0x0002  # NOSIZE | NOMOVE
+                ctypes.windll.user32.SetWindowPos(hwnd, insert, 0, 0, 0, 0, flags)
+                return
+            x, y, w, h = rect
+            ctypes.windll.user32.SetWindowPos(hwnd, insert, x, y, w, h, flags)
+        except Exception:
+            return
+
+    def _place_extension_on_screen(self, target, *, single: bool):
+        if target is None or self.extension_window is None:
+            return
+        win = self.extension_window
+        geom = target.availableGeometry() if single else target.geometry()
+        stage_w, stage_h = geom.width(), geom.height()
+        # 先放到目标屏再显示，避免首次在主屏闪一下
+        first_show = not win.isVisible()
+        if first_show:
+            win.setWindowOpacity(0.0)
+        self.preview_host.set_stage_size(stage_w, stage_h)
+        win.scripture_display.set_stage_size(stage_w, stage_h)
+        if win.windowHandle() is None:
+            win.winId()
+        handle = win.windowHandle()
+        if handle is not None:
+            handle.setScreen(target)
+        win.setGeometry(geom)
+        if single:
+            win.showMaximized()
+        else:
+            win.showFullScreen()
+        self._native_place_window(win, target, single=single)
+        self.preview_host._fit_view()
+        if first_show:
+            QTimer.singleShot(
+                0,
+                lambda t=target, s=single: self._reveal_extension_after_place(t, s),
+            )
+        else:
+            QTimer.singleShot(
+                0,
+                lambda t=target, s=single: self._reassert_extension_geometry(t, s),
+            )
+
+    def _reveal_extension_after_place(self, target, single: bool):
+        win = self.extension_window
+        if win is None:
+            return
+        self._reassert_extension_geometry(target, single, soft=True)
+        win.setWindowOpacity(1.0)
+
+    def _reassert_extension_geometry(self, target, single: bool, *, soft: bool = False):
+        win = self.extension_window
+        if win is None or not win.isVisible() or target is None:
+            return
+        handle = win.windowHandle()
+        if handle is not None and handle.screen() is not target:
+            handle.setScreen(target)
+        geom = target.availableGeometry() if single else target.geometry()
+        win.setGeometry(geom)
+        center = win.frameGeometry().center()
+        need_fullscreen = not soft and (
+            handle is None
+            or handle.screen() is not target
+            or not target.geometry().contains(center)
+        )
+        if need_fullscreen:
+            if single:
+                win.showMaximized()
+            else:
+                win.showFullScreen()
+        if handle is None or handle.screen() is not target or not target.geometry().contains(center):
+            self._native_place_window(win, target, single=single)
+        # 预览尺寸已在 place 时设过，仅几何纠正时不必再刷，减少主屏闪一下
+        if not soft:
+            self.preview_host.set_stage_size(geom.width(), geom.height())
+            win.scripture_display.set_stage_size(geom.width(), geom.height())
+            self.preview_host._fit_view()
+
     def _toggle_extension(self):
         if self.extension_window and self.extension_window.isVisible():
             self._close_extension()
+            return
+        mode = extension_open_mode(len(QApplication.screens()))
+        if mode == "none":
+            self.status_label.setText("未检测到第二块屏幕")
+            return
+        if mode == "ask":
+            self.toolbar.popup_extend_screen_menu()
             return
         self._show_extension()
 
@@ -551,8 +782,8 @@ class MainWindow(QMainWindow):
         self._abort_extension_sermon_layer()
         if ext is not None and ext.isVisible():
             ext.hide()
-        self._extension_sync_timer.stop()
-        self.toolbar.set_extend_active(False)
+            self._extension_sync_timer.stop()
+            self.toolbar.set_extend_active(False)
         if presenting:
             self.sermon_controller.stop()
         else:
@@ -572,7 +803,7 @@ class MainWindow(QMainWindow):
             return True
         return self._show_extension(allow_single_screen=allow_single_screen)
 
-    def _show_extension(self, *, allow_single_screen: bool = False) -> bool:
+    def _show_extension(self, *, allow_single_screen: bool = False, preferred_name: str | None = None) -> bool:
         screens = QApplication.screens()
         single = len(screens) < 2
         if single and not allow_single_screen:
@@ -588,31 +819,32 @@ class MainWindow(QMainWindow):
             self.extension_window.apply_topmost(topmost)
 
         primary = QApplication.primaryScreen()
-        if single:
-            target = primary or screens[0]
-            geom = target.availableGeometry()
-            # 单屏：以接近全屏的窗口放映，便于开发/测试
-            self.extension_window.setGeometry(geom)
-            stage_w, stage_h = geom.width(), geom.height()
-            self.preview_host.set_stage_size(stage_w, stage_h)
-            self.extension_window.scripture_display.set_stage_size(stage_w, stage_h)
-            self.extension_window.showMaximized()
-            status = f"扩展显示(单屏): {target.name()} ({stage_w}x{stage_h})"
-        else:
-            target = None
-            for s in screens:
-                if s is not primary:
-                    target = s
+        extras = self._output_screens()
+        extra_names = [s.name() for s in extras]
+        name = preferred_name or self._extension_screen_name
+        chosen, used_fallback = resolve_saved_output(extra_names, name)
+        target = None
+        if chosen:
+            for screen in extras:
+                if screen.name() == chosen:
+                    target = screen
                     break
-            if target is None:
-                target = screens[1]
-            geom = target.geometry()
-            stage_w, stage_h = geom.width(), geom.height()
-            self.preview_host.set_stage_size(stage_w, stage_h)
-            self.extension_window.scripture_display.set_stage_size(stage_w, stage_h)
-            self.extension_window.setGeometry(geom)
-            self.extension_window.showFullScreen()
-            status = f"扩展显示: {target.name()} ({stage_w}x{stage_h})，预览已按副屏等比缩放"
+        if target is None:
+            target = extras[0] if extras else (primary or screens[0])
+        if target is not None and target is not primary:
+            self._remember_extension_screen(target.name())
+
+        self._place_extension_on_screen(target, single=single)
+        if single:
+            status = f"扩展显示(单屏): {target.geometry().width()}×{target.geometry().height()}"
+        else:
+            extras = self._output_screens()
+            idx = extras.index(target) + 1 if target in extras else 1
+            status = (
+                f"扩展显示: {self._screen_choice_label(target, idx)}，预览已按副屏等比缩放"
+            )
+        if used_fallback and not single:
+            status = f"找不到上次屏幕，已改投扩展屏 {idx}。{status}"
 
         if self.verses and self.current_selection is not None:
             self.extension_window.update_from_selection(self.current_selection, self.verses)
@@ -702,10 +934,14 @@ class MainWindow(QMainWindow):
         editor._set_present_shortcuts_enabled(True)
         editor.play_btn.setEnabled(False)
         editor.stop_btn.setEnabled(True)
+        if hasattr(editor, "edit_btn"):
+            editor.edit_btn.setEnabled(True)
         if hasattr(editor, "_enter_present_preview"):
             editor._enter_present_preview()
         elif hasattr(editor, "sync_from_controller"):
             editor.sync_from_controller()
+        if hasattr(editor, "_update_present_edit_btn"):
+            editor._update_present_edit_btn()
 
     # —— 讲篇放映 ——
 
@@ -808,12 +1044,10 @@ class MainWindow(QMainWindow):
         editor = getattr(self, "_sermon_editor", None)
 
         if hot:
-            self.extension_window.show_sermon_slide(
-                doc, slide, assets_root, prepare_anims=True
-            )
-            played = slide.sorted_animations()[: max(0, int(ctrl.anim_cursor))]
-            if played:
-                stage.apply_played_steps(played)
+            if assets_root is not None:
+                stage.set_assets_root(assets_root)
+            stage.hot_refresh(doc, slide, anim_cursor=int(ctrl.anim_cursor))
+            stage.flush_pending_hot()
             if editor is not None and hasattr(editor, "mirror_present_slide"):
                 editor.mirror_present_slide(
                     doc,
@@ -867,6 +1101,7 @@ class MainWindow(QMainWindow):
                 if editor is not None and hasattr(editor, "mirror_present_reveal"):
                     editor.mirror_present_reveal()
             stage.release_hold()
+            stage.flush_pending_hot()
             if not pending_reveal and hasattr(ctrl, "maybe_auto_start"):
                 QTimer.singleShot(50, self._after_sermon(gen, ctrl.maybe_auto_start))
             QTimer.singleShot(400, self._after_sermon(gen, _mirror_editor))
@@ -935,8 +1170,9 @@ class MainWindow(QMainWindow):
         if self.extension_window and self._projection_channel == "sermon":
             self.extension_window.slide_stage.play_steps(batch)
         cursor = int(self.sermon_controller.anim_cursor)
+        # 主屏预览稍晚一帧跟播，避免和副屏抢同一帧；仍用 play_steps 播动画
         QTimer.singleShot(
-            160,
+            40,
             self._after_sermon(
                 gen, lambda b=list(batch), c=cursor: self._deferred_step_chrome(b, c)
             ),
@@ -984,7 +1220,18 @@ class MainWindow(QMainWindow):
         self.settings["extension_topmost"] = bool(on)
         if self.extension_window and self.extension_window.isVisible():
             self.extension_window.apply_topmost(on)
-            self.extension_window.showFullScreen()
+            extras = self._output_screens()
+            target = None
+            for screen in extras:
+                if screen.name() == self._extension_screen_name:
+                    target = screen
+                    break
+            if target is None and extras:
+                target = extras[0]
+            if target is not None:
+                self._place_extension_on_screen(target, single=len(QApplication.screens()) < 2)
+            else:
+                self.extension_window.showFullScreen()
         self.config.save_display_settings({"extension_topmost": bool(on)})
 
     def _on_scroll_speed(self, speed):
@@ -1165,25 +1412,6 @@ class MainWindow(QMainWindow):
             return None
         return self.current_selection
 
-    def _refresh_display(self):
-        if self.current_selection is not None:
-            self.scripture_display.set_from_selection(self.current_selection, self.verses)
-            if self.extension_window and self.extension_window.isVisible():
-                self.extension_window.update_from_selection(
-                    self.current_selection, self.verses
-                )
-                self._sync_extension_scroll()
-        else:
-            self.scripture_display.set_scripture(
-                self.current_book, self.current_chapter, self.current_start, self.current_end, self.verses
-            )
-            if self.extension_window and self.extension_window.isVisible():
-                self.extension_window.update_scripture(
-                    self.current_book, self.current_chapter, self.current_start, self.current_end, self.verses
-                )
-                self._sync_extension_scroll()
-        self._update_status()
-
     def _sync_extension_scroll(self, value=None):
         if self._syncing_scroll or not self.extension_window or not self.extension_window.isVisible():
             return
@@ -1213,6 +1441,9 @@ class MainWindow(QMainWindow):
             self.config.save_window_state(self.saveGeometry())
         except Exception:
             pass
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
         if self.extension_window:
             self.extension_window.hide()
         try:

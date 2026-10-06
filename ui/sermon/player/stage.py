@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import (
 
 from core.sermon.image_cache import load_pixmap, scaled_pixmap
 from core.sermon.model import AnimStep, Element, SermonDocument, Slide
-from ui.sermon.text_format import apply_text_line_spacing
+from ui.sermon.text_format import apply_text_line_spacing, is_text_placeholder
 
 FLY_OFFSET = 160
 
@@ -37,6 +37,7 @@ class SlideStage(QGraphicsView):
 
     anim_finished = pyqtSignal()
     page_step_requested = pyqtSignal(int)  # +1 下一页/步，-1 上一页
+    edit_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -69,6 +70,7 @@ class SlideStage(QGraphicsView):
         self._running: list[QVariantAnimation] = []
         self._slide: Slide | None = None
         self._wheel_guard_ms = 0
+        self._wheel_pages = True
         self._page_overlay: QGraphicsPixmapItem | None = None
         self._page_wipe_host: QGraphicsRectItem | None = None
         self._page_anim: QVariantAnimation | None = None
@@ -77,9 +79,35 @@ class SlideStage(QGraphicsView):
         self._new_base_item: QGraphicsPixmapItem | None = None
         self._old_snap = QPixmap()
         self._render_cache: dict[tuple, QPixmap] = {}
+        self._pending_hot: tuple | None = None
+        self._preview_edit = False
+        self._hot_flush_timer = QTimer(self)
+        self._hot_flush_timer.setSingleShot(True)
+        self._hot_flush_timer.setInterval(800)
+        self._hot_flush_timer.timeout.connect(self._force_flush_pending_hot)
 
     def set_assets_root(self, root: Path | None):
         self._assets_root = Path(root) if root else None
+
+    def set_preview_quality(self, light: bool):
+        """主屏预览减绘制负担；副屏不要开。"""
+        self._preview_edit = bool(light)
+        if light:
+            self.setRenderHints(QPainter.RenderHint.TextAntialiasing)
+            self.setViewportUpdateMode(
+                QGraphicsView.ViewportUpdateMode.BoundingRectViewportUpdate
+            )
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.setToolTip("放映预览 · 请点工具栏「编辑」再改内容")
+        else:
+            self.setRenderHints(
+                QPainter.RenderHint.Antialiasing | QPainter.RenderHint.TextAntialiasing
+            )
+            self.setViewportUpdateMode(
+                QGraphicsView.ViewportUpdateMode.SmartViewportUpdate
+            )
+            self.unsetCursor()
+            self.setToolTip("")
 
     def abort_playback(self):
         """立刻停入场与换页过渡，不回调 on_done。"""
@@ -136,6 +164,135 @@ class SlideStage(QGraphicsView):
         self._fit_view()
         if not hold_pix.isNull():
             self.hold_pixmap(hold_pix)
+
+    def hot_refresh(self, doc: SermonDocument, slide: Slide, *, anim_cursor: int = 0):
+        """放映中改内容：同一页就地更新，避免整页清空闪一下。"""
+        if self._page_anim is not None or self._hold_item is not None:
+            self._pending_hot = (doc, slide, int(anim_cursor))
+            if not self._hot_flush_timer.isActive():
+                self._hot_flush_timer.start()
+            return
+        same = (
+            self._slide is not None
+            and getattr(self._slide, "id", None) == getattr(slide, "id", None)
+            and self._page_anim is None
+            and self._hold_item is None
+        )
+        if not same:
+            self.show_slide(doc, slide, prepare_anims=True)
+            played = slide.sorted_animations()[: max(0, int(anim_cursor))]
+            if played:
+                self.apply_played_steps(played)
+            return
+        self._slide = slide
+        self._logical_w, self._logical_h = doc.canvas_size()
+        self._scene.setSceneRect(0, 0, self._logical_w, self._logical_h)
+        self._apply_background(slide)
+        keep = {e.id for e in slide.elements}
+        for eid in list(self._items.keys()):
+            if eid in keep:
+                continue
+            item = self._items.pop(eid)
+            self._targets.pop(eid, None)
+            if item.scene() is not None:
+                self._scene.removeItem(item)
+        for element in sorted(slide.elements, key=lambda e: e.z):
+            item = self._items.get(element.id)
+            if item is None or not self._element_item_matches(item, element):
+                if item is not None and item.scene() is not None:
+                    self._scene.removeItem(item)
+                item = self._add_element(element)
+                if item is None:
+                    self._items.pop(element.id, None)
+                    continue
+                self._items[element.id] = item
+            else:
+                self._apply_element_visuals(item, element)
+            self._targets[element.id] = QPointF(element.x, element.y)
+        self._render_cache = {
+            key: pix for key, pix in self._render_cache.items() if key[0] != slide.id
+        }
+        anims = slide.sorted_animations()
+        cursor = max(0, int(anim_cursor))
+        played_ids = {a.element_id for a in anims[:cursor]}
+        pending_ids = {a.element_id for a in anims[cursor:]}
+        for element in slide.elements:
+            item = self._items.get(element.id)
+            if item is None:
+                continue
+            if element.id in pending_ids and element.id not in played_ids:
+                self._prepare_entrance(item, element, slide)
+        played = anims[:cursor]
+        if played:
+            self.apply_played_steps(played)
+        self._fit_view()
+
+    def _element_item_matches(self, item, element: Element) -> bool:
+        kind = element.type
+        if kind == "text":
+            return isinstance(item, QGraphicsTextItem)
+        if kind == "image":
+            return isinstance(item, QGraphicsPixmapItem)
+        if kind == "shape":
+            shape = element.shape if element.shape in ("rect", "ellipse") else "rect"
+            if shape == "ellipse":
+                return isinstance(item, QGraphicsEllipseItem)
+            return isinstance(item, QGraphicsRectItem) and not isinstance(
+                item, QGraphicsEllipseItem
+            )
+        return False
+
+    def _apply_element_visuals(self, item, element: Element):
+        if element.type == "text" and isinstance(item, QGraphicsTextItem):
+            raw = element.content or ""
+            text = "" if is_text_placeholder(raw) else raw
+            if item.toPlainText() != text:
+                item.setPlainText(text)
+            style = element.style
+            font = QFont(style.font_family or "微软雅黑")
+            font.setPixelSize(max(8, int(style.font_size)))
+            font.setBold(style.bold)
+            font.setItalic(style.italic)
+            item.setFont(font)
+            color = QColor(style.color)
+            if color.isValid():
+                color.setAlphaF(max(0.0, min(1.0, float(getattr(style, "opacity", 1.0)))))
+            item.setDefaultTextColor(color)
+            align = {
+                "left": Qt.AlignmentFlag.AlignLeft,
+                "center": Qt.AlignmentFlag.AlignHCenter,
+                "right": Qt.AlignmentFlag.AlignRight,
+            }.get(style.align, Qt.AlignmentFlag.AlignLeft)
+            option = item.document().defaultTextOption()
+            option.setAlignment(align)
+            item.document().setDefaultTextOption(option)
+            if getattr(style, "wrap", True):
+                item.setTextWidth(max(40.0, element.w))
+            else:
+                item.setTextWidth(-1)
+            apply_text_line_spacing(item, getattr(style, "line_spacing", 120))
+        elif element.type == "image" and isinstance(item, QGraphicsPixmapItem):
+            pix = load_pixmap(element.content, self._assets_root)
+            if pix is None or pix.isNull():
+                pix = QPixmap(max(1, int(element.w)), max(1, int(element.h)))
+                pix.fill(QColor("#444444"))
+            scaled = scaled_pixmap(
+                pix, max(1, int(element.w)), max(1, int(element.h)), smooth=False
+            )
+            item.setPixmap(scaled)
+            item.setTransformationMode(Qt.TransformationMode.FastTransformation)
+        elif element.type == "shape":
+            if isinstance(item, QGraphicsRectItem):
+                item.setRect(0, 0, max(1.0, element.w), max(1.0, element.h))
+            color = QColor(element.style.color or "#000000")
+            if not color.isValid():
+                color = QColor("#000000")
+            color.setAlphaF(max(0.0, min(1.0, float(element.style.opacity))))
+            item.setBrush(QBrush(color))
+            item.setPen(QPen(Qt.PenStyle.NoPen))
+        item.setPos(element.x, element.y)
+        item.setRotation(element.rotation)
+        item.setZValue(element.z)
 
     def _populate_live_scene(
         self, doc: SermonDocument, slide: Slide, *, prepare_anims: bool
@@ -279,6 +436,27 @@ class SlideStage(QGraphicsView):
             if self._new_base_item.scene() is not None:
                 self._scene.removeItem(self._new_base_item)
             self._new_base_item = None
+        if self._pending_hot is not None and self._page_anim is None:
+            QTimer.singleShot(0, self.flush_pending_hot)
+
+    def flush_pending_hot(self):
+        pending = self._pending_hot
+        if pending is None:
+            return
+        if self._page_anim is not None or self._hold_item is not None:
+            return
+        self._pending_hot = None
+        self._hot_flush_timer.stop()
+        doc, slide, cursor = pending
+        self.hot_refresh(doc, slide, anim_cursor=int(cursor))
+
+    def _force_flush_pending_hot(self):
+        if self._pending_hot is None:
+            return
+        self.stop_animations(apply_end=False)
+        self._stop_page_transition(apply_end=False)
+        self.release_hold()
+        self.flush_pending_hot()
 
     def _prepare_entrance(self, item: QGraphicsItem, element: Element, slide: Slide):
         self._prepare_entrance_item(item, element, slide, self._targets)
@@ -699,7 +877,8 @@ class SlideStage(QGraphicsView):
     ) -> QGraphicsItem | None:
         if element.type == "text":
             item = QGraphicsTextItem()
-            item.setPlainText(element.content or "")
+            raw = element.content or ""
+            item.setPlainText("" if is_text_placeholder(raw) else raw)
             style = element.style
             font = QFont(style.font_family or "微软雅黑")
             font.setPixelSize(max(8, int(style.font_size)))
@@ -770,7 +949,28 @@ class SlideStage(QGraphicsView):
             Qt.AspectRatioMode.KeepAspectRatio,
         )
 
+    def set_wheel_pages(self, on: bool):
+        """副屏禁止滚轮翻页；主屏预览仍可滚轮控场。"""
+        self._wheel_pages = bool(on)
+
+    def mousePressEvent(self, event):
+        if self._preview_edit and event.button() == Qt.MouseButton.LeftButton:
+            self.edit_requested.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if self._preview_edit:
+            self.edit_requested.emit()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
     def wheelEvent(self, event):
+        if not self._wheel_pages:
+            event.accept()
+            return
         delta = event.angleDelta().y()
         if delta == 0:
             delta = event.pixelDelta().y()

@@ -927,6 +927,7 @@ def import_pptx(path: Path | str, store: SermonStore, title: str | None = None) 
     doc = new_document(title=title or path.stem or "导入讲篇", aspect=aspect)
     store.save(doc)
     doc.slides.clear()
+    skipped = {"n": 0}
 
     for slide in prs.slides:
         out = Slide(
@@ -950,6 +951,7 @@ def import_pptx(path: Path | str, store: SermonStore, title: str | None = None) 
             if _is_picture(shape):
                 rel = _save_picture(shape, store, doc.id)
                 if not rel:
+                    skipped["n"] += 1
                     continue
                 el = Element(
                     id=new_id("el_"),
@@ -992,6 +994,7 @@ def import_pptx(path: Path | str, store: SermonStore, title: str | None = None) 
 
             # 无文字：导入纯色/半透明形状（如遮罩矩形）
             if fill_hex is None:
+                skipped["n"] += 1
                 continue
             el = Element(
                 id=new_id("el_"),
@@ -1054,6 +1057,7 @@ def import_pptx(path: Path | str, store: SermonStore, title: str | None = None) 
     if not doc.slides:
         doc.slides.append(new_slide())
     store.save(doc)
+    setattr(doc, "import_skip_count", skipped["n"])
     return doc
 
 

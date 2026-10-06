@@ -1,8 +1,11 @@
+import logging
 import os
 import re
 import sqlite3
 
 from .paths import database_path
+
+logger = logging.getLogger(__name__)
 
 
 class BibleDatabase:
@@ -29,7 +32,7 @@ class BibleDatabase:
         try:
             self.conn.close()
         except Exception:
-            pass
+            logger.warning("关闭圣经数据库失败", exc_info=True)
 
     def clear_caches(self):
         self._chapter_logical_cache.clear()

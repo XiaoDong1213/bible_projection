@@ -5,6 +5,12 @@ from __future__ import annotations
 from PyQt6.QtGui import QTextBlockFormat, QTextCursor
 from PyQt6.QtWidgets import QGraphicsTextItem
 
+TEXT_PLACEHOLDERS = frozenset({"在此输入", "双击编辑文字"})
+
+
+def is_text_placeholder(text: str | None) -> bool:
+    return (text or "").strip() in TEXT_PLACEHOLDERS
+
 
 def apply_text_line_spacing(item: QGraphicsTextItem, percent: int | None) -> None:
     """按百分比设置讲篇文本行距（100=单倍）。"""

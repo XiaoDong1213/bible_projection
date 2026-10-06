@@ -122,8 +122,8 @@ class SearchWidget(QWidget):
         self._resize_result_area()
         self._update_hint(self.DEFAULT_HINT)
         self.apply_theme(self._theme)
+        self.search_input.clear()
         self.search_input.setFocus()
-        self.search_input.selectAll()
 
     def _update_hint(self, text):
         self.hint_label.setText(text)

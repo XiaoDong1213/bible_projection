@@ -26,9 +26,7 @@ from PyQt6.QtWidgets import (
 
 from core.sermon.image_cache import load_pixmap, scaled_pixmap
 from core.sermon.model import Element, SermonDocument, Slide
-from ui.sermon.text_format import apply_text_line_spacing
-
-_TEXT_PLACEHOLDERS = frozenset({"在此输入", "双击编辑文字"})
+from ui.sermon.text_format import apply_text_line_spacing, is_text_placeholder
 
 
 def _render_scene_thumb(scene: QGraphicsScene, logical_w: int, logical_h: int, size: int) -> QPixmap:
@@ -116,7 +114,9 @@ class TextElementItem(QGraphicsTextItem, ElementItemMixin):
 
     def apply_element(self, element: Element):
         self.element_id = element.id
-        self.setPlainText(element.content or "")
+        text = element.content or ""
+        if self.toPlainText() != text:
+            self.setPlainText(text)
         style = element.style
         font = QFont(style.font_family or "微软雅黑")
         font.setPixelSize(max(8, int(style.font_size)))
@@ -146,7 +146,7 @@ class TextElementItem(QGraphicsTextItem, ElementItemMixin):
         self.setZValue(element.z)
 
     def _is_placeholder(self) -> bool:
-        return (self.toPlainText() or "").strip() in _TEXT_PLACEHOLDERS
+        return is_text_placeholder(self.toPlainText())
 
     def _consume_placeholder(self) -> None:
         if not self._is_placeholder():
@@ -172,6 +172,12 @@ class TextElementItem(QGraphicsTextItem, ElementItemMixin):
         self.setTextCursor(cursor)
 
     def mouseDoubleClickEvent(self, event):
+        scene = self.scene()
+        if scene is not None:
+            for view in scene.views():
+                if hasattr(view, "edit_started"):
+                    view.edit_started.emit()
+                    break
         self.setTextInteractionFlags(Qt.TextInteractionFlag.TextEditorInteraction)
         self.setFocus(Qt.FocusReason.MouseFocusReason)
         super().mouseDoubleClickEvent(event)
@@ -187,9 +193,10 @@ class TextElementItem(QGraphicsTextItem, ElementItemMixin):
                 self._consume_placeholder()
                 event.accept()
                 return
-            if event.text() and not (
-                event.modifiers() & Qt.KeyboardModifier.ControlModifier
-            ):
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                if key == Qt.Key.Key_V:
+                    self._consume_placeholder()
+            elif event.text():
                 self._consume_placeholder()
         super().keyPressEvent(event)
 
@@ -201,6 +208,15 @@ class TextElementItem(QGraphicsTextItem, ElementItemMixin):
     def focusOutEvent(self, event):
         self.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         super().focusOutEvent(event)
+        scene = self.scene()
+        if scene is None:
+            return
+        for view in scene.views():
+            if hasattr(view, "commit_geometry"):
+                view.commit_geometry()
+            if hasattr(view, "edit_finished"):
+                view.edit_finished.emit()
+                break
 
 
 class ShapeElementItem(QGraphicsRectItem, ElementItemMixin):
@@ -272,6 +288,9 @@ class SlideCanvas(QGraphicsView):
     status_message = pyqtSignal(str)
     rect_drawn = pyqtSignal(str, float, float, float, float)  # kind, x, y, w, h
     format_paint_target = pyqtSignal(object)  # Element | None
+    edit_finished = pyqtSignal()
+    edit_started = pyqtSignal()
+    history_checkpoint = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -284,6 +303,7 @@ class SlideCanvas(QGraphicsView):
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
+        self._drag_history_armed = False
         self.setBackgroundBrush(QBrush(QColor("#2B2B2B")))
         self.setFrameShape(self.Shape.NoFrame)
 
@@ -619,7 +639,11 @@ class SlideCanvas(QGraphicsView):
         self._draw_kind = kind
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
-        tip = "拖拽画出文本框，Esc 取消" if kind == "text" else "拖拽画出形状，Esc 取消"
+        tip = (
+            "拖出文本框，打完字后点空白或 Esc 确认"
+            if kind == "text"
+            else "拖拽画出形状，Esc 取消"
+        )
         self.status_message.emit(tip)
 
     def cancel_draw(self):
@@ -683,6 +707,18 @@ class SlideCanvas(QGraphicsView):
             self.status_message.emit("已取消画框")
             event.accept()
             return
+        self._drag_history_armed = False
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and not self._draw_kind
+            and not self._format_paint
+        ):
+            item = self.itemAt(event.position().toPoint())
+            el = self._element_from_item(item) if item is not None else None
+            if el is not None:
+                # 选中并拖动前记一笔，才能撤回位移
+                self.history_checkpoint.emit()
+                self._drag_history_armed = True
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -728,6 +764,7 @@ class SlideCanvas(QGraphicsView):
             return
         super().mouseReleaseEvent(event)
         self.commit_geometry()
+        self._drag_history_armed = False
 
     def refresh_background(self):
         self._apply_background()
