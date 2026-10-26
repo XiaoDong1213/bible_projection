@@ -2052,15 +2052,22 @@ class SermonEditorWindow(QWidget):
         else:
             self._end_format_paint("已套用文字格式")
 
-    def _on_element_changed(self, element):
+    def _on_element_changed(self, payload):
         if not self._require_present_edit():
+            return
+        els = payload if isinstance(payload, list) else [payload]
+        els = [e for e in els if e is not None]
+        if not els:
             return
         if not self._restoring and not getattr(self, "_props_hist_armed", False):
             self._push_history()
             self._props_hist_armed = True
             QTimer.singleShot(700, lambda: setattr(self, "_props_hist_armed", False))
-        self.canvas.update_selected_from_element(element)
-        self._remember_text_style(element)
+        self.canvas.update_elements_from_model(els)
+        for el in els:
+            if el.type == "text":
+                self._remember_text_style(el)
+                break
         self._set_dirty(True)
         self._refresh_thumbnail()
         self._push_hot_update()

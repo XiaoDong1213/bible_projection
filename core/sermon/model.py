@@ -136,6 +136,7 @@ class ElementStyle:
     opacity: float = 1.0  # 0~1，形状填充/文字透明度
     wrap: bool = True  # 文本是否在框内自动换行
     line_spacing: int = 120  # 行距百分比，100=单倍
+    tab_stop: int = 192  # 制表位间距（画布像素，约 1 英寸）
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -158,6 +159,10 @@ class ElementStyle:
             line_spacing = int(data.get("line_spacing", 120) or 120)
         except (TypeError, ValueError):
             line_spacing = 120
+        try:
+            tab_stop = int(data.get("tab_stop", 192) or 192)
+        except (TypeError, ValueError):
+            tab_stop = 192
         return cls(
             font_family=str(data.get("font_family", "微软雅黑")),
             font_size=int(data.get("font_size", 48) or 48),
@@ -169,6 +174,7 @@ class ElementStyle:
             opacity=opacity,
             wrap=bool(data.get("wrap", True)),
             line_spacing=max(80, min(300, line_spacing)),
+            tab_stop=max(24, min(800, tab_stop)),
         )
 
     def clone(self) -> ElementStyle:

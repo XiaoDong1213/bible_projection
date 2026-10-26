@@ -90,6 +90,28 @@ QWidget#sermonEditorWindow QStatusBar {{
     color: {t['text_muted']};
     border-top: 1px solid {t['border']};
 }}
+QLabel#sermonConsoleTitle {{
+    font-size: 18px;
+    font-weight: 600;
+    color: {t['text']};
+}}
+QLabel#sermonConsoleHint {{
+    color: {t['text_muted']};
+    font-size: 15px;
+    padding: 24px;
+}}
+QLabel#sermonConsoleStatus {{
+    color: {t['text_muted']};
+    font-size: 12px;
+}}
+QWidget#sermonEditorWindow QTextEdit {{
+    background: {t['surface']};
+    color: {t['text']};
+    border: 1px solid {t['border']};
+    border-radius: {r['sm']}px;
+    padding: 12px;
+    font-size: 16px;
+}}
 QTabWidget#sermonSideTabs {{
     background: transparent;
     border: none;

@@ -1,4 +1,4 @@
-"""挂载讲篇编辑器：主窗口中央全屏叠层。"""
+"""挂载讲篇编辑器：主窗口中央全屏叠层（PPT 式界面）。"""
 
 from __future__ import annotations
 
@@ -112,7 +112,6 @@ def _open_editor(window):
         bar.raise_()
     QTimer.singleShot(0, editor.fit_to_parent)
     editor.setFocus(Qt.FocusReason.OtherFocusReason)
-    # 若仍在放映，叠层回来后恢复编辑器翻页快捷键
     if getattr(editor, "_presenting", False):
         editor._set_present_shortcuts_enabled(True)
         if hasattr(window, "_update_session_chrome"):

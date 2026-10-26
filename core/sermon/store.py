@@ -16,6 +16,7 @@ from .model import SermonDocument, new_document
 PACKAGE_EXT = ".sermon"
 PACKAGE_FILTER = "讲篇 (*.sermon)"
 LEGACY_FILTER = "旧版讲篇 (sermon.json)"
+_SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 
 def suggest_package_name(title: str) -> str:
@@ -26,6 +27,20 @@ def suggest_package_name(title: str) -> str:
     return cleaned[:80]
 
 
+def safe_sermon_id(raw: str, fallback: str = "sermon") -> str:
+    """拒绝路径穿越用的 id（只留字母数字 _ -）。"""
+    sid = (raw or "").strip()
+    if _SAFE_ID.match(sid):
+        return sid
+    cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", (fallback or "sermon").strip()).strip("_")
+    cleaned = cleaned[:64] or "sermon"
+    if not _SAFE_ID.match(cleaned):
+        from .model import new_id
+
+        return new_id("sermon_")
+    return cleaned
+
+
 class SermonStore:
     """工作副本在 sermons/<id>/；用户可见存档为 *.sermon 包。"""
 
@@ -34,7 +49,11 @@ class SermonStore:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def sermon_dir(self, sermon_id: str) -> Path:
-        return self.root / sermon_id
+        sid = safe_sermon_id(sermon_id)
+        root = self.root.resolve()
+        path = (root / sid).resolve()
+        path.relative_to(root)
+        return path
 
     def assets_dir(self, sermon_id: str) -> Path:
         path = self.sermon_dir(sermon_id) / "assets"
@@ -113,10 +132,11 @@ class SermonStore:
         }
 
     def load(self, sermon_id: str) -> SermonDocument:
-        path = self.json_path(sermon_id)
+        sid = safe_sermon_id(sermon_id)
+        path = self.json_path(sid)
         data = json.loads(path.read_text(encoding="utf-8"))
         doc = SermonDocument.from_dict(data)
-        doc.id = sermon_id
+        doc.id = sid
         return doc
 
     def load_path(self, path: Path | str) -> SermonDocument:
@@ -141,11 +161,11 @@ class SermonStore:
             except KeyError as exc:
                 raise ValueError("不是有效的讲篇包（缺少 sermon.json）") from exc
             doc = SermonDocument.from_dict(data)
-            sid = (doc.id or "").strip() or package_path.stem
+            sid = safe_sermon_id((doc.id or "").strip() or package_path.stem, package_path.stem)
             doc.id = sid
             folder = self.sermon_dir(doc.id)
             self.root.mkdir(parents=True, exist_ok=True)
-            tmp = Path(tempfile.mkdtemp(prefix=f".{sid}_load_", dir=str(self.root)))
+            tmp = Path(tempfile.mkdtemp(prefix=f".{sid}_load_", dir=str(self.root.resolve())))
             old = folder.with_name(folder.name + ".__old__")
             try:
                 self._extract_package(zf, tmp)
@@ -177,6 +197,8 @@ class SermonStore:
     def _extract_package(zf: zipfile.ZipFile, dest: Path) -> None:
         dest.mkdir(parents=True, exist_ok=True)
         root = dest.resolve()
+        written = 0
+        max_bytes = 500 * 1024 * 1024  # 解压上限，防压缩炸弹
         for info in zf.infolist():
             name = info.filename.replace("\\", "/").lstrip("/")
             if not name or name.endswith("/"):
@@ -192,10 +214,18 @@ class SermonStore:
                 raise ValueError(f"讲篇包含非法路径：{info.filename}") from exc
             target.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(info, "r") as src, open(target, "wb") as out:
-                shutil.copyfileobj(src, out)
+                while True:
+                    chunk = src.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise ValueError("讲篇包解压过大（超过 500MB）")
+                    out.write(chunk)
 
     def save(self, doc: SermonDocument) -> Path:
         """写入工作目录（编辑/放映用），不写用户 .sermon 包。"""
+        doc.id = safe_sermon_id(doc.id)
         doc.touch()
         folder = self.sermon_dir(doc.id)
         folder.mkdir(parents=True, exist_ok=True)
@@ -259,7 +289,10 @@ class SermonStore:
 
     def resolve_asset(self, sermon_id: str, rel: str) -> Path:
         rel = (rel or "").replace("\\", "/").lstrip("/")
-        return self.sermon_dir(sermon_id) / rel
+        base = self.sermon_dir(sermon_id).resolve()
+        target = (base / rel).resolve()
+        target.relative_to(base)
+        return target
 
     def cleanup_temps(self, keep_id: str | None = None) -> None:
         """清掉加载残留的临时目录，不碰正在编辑的工作副本。"""
