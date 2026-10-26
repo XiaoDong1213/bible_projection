@@ -18,10 +18,11 @@ _APP = QApplication.instance() or QApplication(sys.argv)
 
 
 class FormatsTests(unittest.TestCase):
-    def test_filters_prefer_pptx(self):
-        self.assertTrue(OPEN_FILTER.startswith("PowerPoint"))
-        self.assertIn(PPTX_EXT, SAVE_FILTER)
+    def test_filters_prefer_sermon_package(self):
+        self.assertTrue(OPEN_FILTER.startswith("讲篇"))
         self.assertIn(PACKAGE_EXT, OPEN_FILTER)
+        self.assertIn(PPTX_EXT, SAVE_FILTER)
+        self.assertIn(PACKAGE_EXT, SAVE_FILTER)
 
 
 class LayoutTests(unittest.TestCase):

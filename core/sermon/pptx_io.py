@@ -18,6 +18,7 @@ from core.sermon.model import (
     new_document,
     new_id,
     new_slide,
+    normalize_sermon_title,
 )
 from core.sermon.store import SermonStore
 
@@ -1209,7 +1210,10 @@ def import_pptx(
         except Exception:
             title = None
 
-    doc = new_document(title=title or path.stem or "导入讲篇", aspect=aspect)
+    doc = new_document(
+        title=normalize_sermon_title(title, path.stem or "导入讲篇"),
+        aspect=aspect,
+    )
     created_new = not reuse_id
     if reuse_id:
         doc.id = safe_sermon_id(str(reuse_id), path.stem)

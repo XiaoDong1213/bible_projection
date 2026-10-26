@@ -113,6 +113,22 @@ class SermonStoreTests(unittest.TestCase):
             self.assertFalse(stale.exists())
             self.assertFalse(tmp.exists())
 
+    def test_save_package_keeps_old_until_replace(self):
+        """覆盖保存不得先删旧包：replace 失败时旧文件仍在。"""
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            store = SermonStore(root)
+            doc = new_document()
+            doc.title = "v1"
+            pkg = root / "live.sermon"
+            store.save_package(doc, pkg)
+            self.assertTrue(pkg.is_file())
+            doc.title = "v2"
+            store.save_package(doc, pkg)
+            loaded = store.load_package(pkg)
+            self.assertEqual(loaded.title, "v2")
+            self.assertFalse(pkg.with_suffix(".sermon.tmp").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

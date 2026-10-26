@@ -88,11 +88,22 @@ class AppConfig:
 
     def _save_ini(self):
         """保存当前配置到 INI 文件。"""
+        tmp = self.ini_path.with_suffix(self.ini_path.suffix + ".tmp")
         try:
-            with open(self.ini_path, "w", encoding="utf-8") as f:
+            with open(tmp, "w", encoding="utf-8") as f:
                 self.parser.write(f)
-        except PermissionError:
-            QMessageBox.critical(None, "保存失败", f"无法写入配置文件：{self.ini_path}\n权限不足，设置不会保存。")
+            os.replace(tmp, self.ini_path)
+        except OSError:
+            if tmp.exists():
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+            QMessageBox.critical(
+                None,
+                "保存失败",
+                f"无法写入配置文件：{self.ini_path}\n设置不会保存到磁盘。",
+            )
 
     def save_display_settings(self, settings):
         """保存显示相关设置。"""

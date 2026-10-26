@@ -1,4 +1,4 @@
-"""用户可见讲篇格式：主存档 PPTX，旧 .sermon 仍可打开。"""
+"""用户可见讲篇格式：主存档 .sermon；PPTX 用于导入 / 导出。"""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from .store import LEGACY_FILTER, PACKAGE_EXT, PACKAGE_FILTER
 
 PPTX_EXT = ".pptx"
 PPTX_FILTER = "PowerPoint (*.pptx)"
-OPEN_FILTER = f"{PPTX_FILTER};;{PACKAGE_FILTER};;{LEGACY_FILTER};;所有文件 (*.*)"
-SAVE_FILTER = f"{PPTX_FILTER};;{PACKAGE_FILTER}"
+OPEN_FILTER = f"{PACKAGE_FILTER};;{PPTX_FILTER};;{LEGACY_FILTER};;所有文件 (*.*)"
+SAVE_FILTER = f"{PACKAGE_FILTER};;{PPTX_FILTER}"
 
 __all__ = [
     "LEGACY_FILTER",

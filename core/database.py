@@ -15,6 +15,9 @@ class BibleDatabase:
         if db_path is None:
             db_path = str(database_path())
         self.db_path = db_path
+        # connect 会创建空文件；缺库时先失败，避免污染 resources/
+        if not os.path.isfile(self.db_path):
+            raise FileNotFoundError(f"找不到圣经库：{self.db_path}")
         self.conn = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row
         try:

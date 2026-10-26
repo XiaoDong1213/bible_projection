@@ -60,7 +60,9 @@ class SlideStage(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setFrameShape(self.Shape.NoFrame)
-        self.setStyleSheet("background: #000; border: none; border-radius: 0;")
+        self.setStyleSheet("background: transparent; border: none; border-radius: 0;")
+        self._stage_matte = QColor("#12161E")
+        self.setBackgroundBrush(QBrush(self._stage_matte))
         self.setInteractive(False)
 
         self._scene = QGraphicsScene(self)
@@ -91,6 +93,13 @@ class SlideStage(QGraphicsView):
         self._hot_flush_timer.setSingleShot(True)
         self._hot_flush_timer.setInterval(800)
         self._hot_flush_timer.timeout.connect(self._force_flush_pending_hot)
+
+    def set_stage_matte(self, color):
+        c = QColor(color) if not isinstance(color, QColor) else QColor(color)
+        if c.isValid():
+            self._stage_matte = c
+            self.setBackgroundBrush(QBrush(self._stage_matte))
+            self.viewport().update()
 
     def set_assets_root(self, root: Path | None):
         self._assets_root = Path(root) if root else None
@@ -874,11 +883,15 @@ class SlideStage(QGraphicsView):
                 item.setPos((w - scaled.width()) / 2, (h - scaled.height()) / 2)
                 item.setTransformationMode(Qt.TransformationMode.FastTransformation)
                 scene.addItem(item)
+                if scene is self._scene:
+                    self.setBackgroundBrush(QBrush(self._stage_matte))
                 return item
         color = QColor(bg.value) if bg.value else QColor("#1A1A2E")
         if not color.isValid():
             color = QColor("#1A1A2E")
         bg_item.setBrush(QBrush(color))
+        if scene is self._scene:
+            self.setBackgroundBrush(QBrush(self._stage_matte))
         return None
 
     def _add_element(self, element: Element) -> QGraphicsItem | None:

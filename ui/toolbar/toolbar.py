@@ -863,7 +863,10 @@ class ToolBarWidget(QToolBar):
         self._speed = 0
         self._settings_dialog = None
 
-        # —— 投影 ——
+        # 模式胶囊已去掉；保留 no-op 接口以免主窗口调用报错
+        self.mode_badge = None
+
+        # —— 输出 ——
         extend_wrap = QWidget()
         extend_wrap.setObjectName("extendBtnWrap")
         extend_wrap.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -915,7 +918,7 @@ class ToolBarWidget(QToolBar):
 
         self.addSeparator()
 
-        # —— 显示 ——
+        # —— 显示 / 讲篇入口锚点 ——
         self.show_titles_btn = ToolbarButton("小标题")
         self.show_titles_btn.setObjectName("showTitlesBtn")
         self.show_titles_btn.setCheckable(True)
@@ -926,10 +929,10 @@ class ToolBarWidget(QToolBar):
         else:
             self.show_titles_btn.hide()
 
-        # 全文搜索按钮插到此分隔符之前（小标题右侧）
+        # 讲篇 / 全文搜索插到此分隔符之前
         self._search_anchor_action = self.addSeparator()
 
-        # —— 滚动速度（暂停 + 1～9 档；按钮略窄省宽）——
+        # —— 滚动 ——
         scroll_wrap = QWidget()
         scroll_wrap.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         scroll_layout = QHBoxLayout(scroll_wrap)
@@ -938,11 +941,6 @@ class ToolBarWidget(QToolBar):
         scroll_layout.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
-        speed_caption = QLabel("速度")
-        speed_caption.setAlignment(
-            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight
-        )
-        scroll_layout.addWidget(speed_caption)
         self.speed_buttons = []
         for speed, text in [(0, "暂停")] + [(i, f"{i}档") for i in range(1, 10)]:
             btn = ToolbarButton(text, kind="speed")
@@ -962,7 +960,7 @@ class ToolBarWidget(QToolBar):
         self.addWidget(spacer)
         self.addSeparator()
 
-        # —— 设置 ——
+        # —— 更多 ——
         self.settings_btn = ToolbarButton("显示设置")
         self.settings_btn.setObjectName("settingsBtn")
         self.settings_btn.clicked.connect(self._open_settings)
@@ -981,6 +979,10 @@ class ToolBarWidget(QToolBar):
         self.addWidget(self.help_btn)
 
         self._update_theme_button()
+
+    def set_mode_badge(self, text: str, *, tip: str | None = None):
+        """兼容旧调用；顶栏不再显示模式胶囊。"""
+        return
 
     def load_settings(self, settings):
         self.settings = dict(settings)

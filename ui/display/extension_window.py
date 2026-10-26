@@ -214,9 +214,10 @@ class ExtensionWindow(QWidget):
         except TypeError:
             pass
         self._animating = False
+        self._cover_fx.setOpacity(0.0)
         self._cover.hide()
         self._cover.clear()
-        self._cover_fx.setOpacity(0.0)
+        self._cover.lower()
 
     def _snap_to_mode(self, mode: str):
         self._stop_channel_fade()
@@ -284,7 +285,11 @@ class ExtensionWindow(QWidget):
         """先盖旧画面，再换层，最后淡出盖布。"""
         if mode not in ("scripture", "sermon"):
             return
-        animate = bool(animate) and self._fade_ms >= 40
+        # 快速来回切时先清盖布，避免主/副屏卡在半透明遮罩上
+        was_animating = bool(self._animating)
+        if was_animating:
+            self._stop_channel_fade()
+        animate = bool(animate) and self._fade_ms >= 40 and not was_animating
         if mode == self._mode and not self._animating:
             self._snap_to_mode(mode)
             return

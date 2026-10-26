@@ -395,7 +395,9 @@ class PropertyPanel(QWidget):
         multi_col.addLayout(v_row)
         layout.addWidget(self.multi_section)
 
-        self.hint = QLabel("选中画布上的元素以编辑属性。")
+        self.hint = QLabel(
+            "点画布上的文字或形状开始编辑。\n也可点顶栏「文本」拖出新文本框。"
+        )
         self.hint.setWordWrap(True)
         self.hint.setObjectName("sermonHint")
         layout.addWidget(self.hint)
@@ -569,7 +571,9 @@ class PropertyPanel(QWidget):
             self._show_element_ui(False)
             if not self._selection:
                 self.multi_section.hide()
-            self.hint.setText("选中画布上的元素以编辑属性。")
+            self.hint.setText(
+                "点画布上的文字或形状开始编辑。\n也可点顶栏「文本」拖出新文本框。"
+            )
         else:
             self._show_element_ui(True)
             type_zh = _TYPE_LABELS.get(element.type, element.type)

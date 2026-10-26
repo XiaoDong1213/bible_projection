@@ -513,6 +513,27 @@ def new_shape_element(
     )
 
 
+_GENERIC_SERMON_TITLES = frozenset(
+    {
+        "presentation",
+        "powerpoint presentation",
+        "演示文稿",
+        "未命名",
+        "untitled",
+        "untitled presentation",
+    }
+)
+
+
+def normalize_sermon_title(title: str | None, fallback: str = "导入讲篇") -> str:
+    """PPT 元数据常是 Presentation；空/占位名时改用文件名等 fallback。"""
+    raw = str(title or "").strip()
+    fb = str(fallback or "").strip() or "导入讲篇"
+    if not raw or raw.casefold() in _GENERIC_SERMON_TITLES:
+        return fb
+    return raw
+
+
 def new_document(title: str = "未命名讲篇", aspect: Aspect = "16:9") -> SermonDocument:
     now = _utc_now()
     return SermonDocument(

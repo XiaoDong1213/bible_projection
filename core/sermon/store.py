@@ -231,10 +231,16 @@ class SermonStore:
         folder.mkdir(parents=True, exist_ok=True)
         self.assets_dir(doc.id)
         path = self.json_path(doc.id)
-        path.write_text(
-            json.dumps(doc.to_dict(), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        # 先写临时文件再替换，避免写到一半崩溃留下空/半截 JSON
+        tmp = path.with_name(path.name + ".tmp")
+        payload = json.dumps(doc.to_dict(), ensure_ascii=False, indent=2)
+        try:
+            tmp.write_text(payload, encoding="utf-8")
+            tmp.replace(path)
+        except Exception:
+            if tmp.exists():
+                tmp.unlink(missing_ok=True)
+            raise
         return path
 
     def save_package(self, doc: SermonDocument, package_path: Path | str) -> Path:
@@ -256,8 +262,7 @@ class SermonStore:
                         if file.is_file():
                             arc = file.relative_to(work).as_posix()
                             zf.write(file, arc)
-            if package_path.exists():
-                package_path.unlink()
+            # 原子替换：不要先 unlink 旧包（失败会丢唯一副本）
             tmp.replace(package_path)
         except Exception:
             if tmp.exists():
