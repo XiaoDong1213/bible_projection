@@ -24,18 +24,24 @@ def _remember(store: OrderedDict, key: tuple, value: QPixmap, limit: int) -> QPi
 
 def resolve_asset(rel_or_abs: str, assets_root: Path | None) -> Path | None:
     path = Path(rel_or_abs)
-    if path.is_file():
+    if path.is_absolute() and path.is_file():
         return path
     if assets_root is None:
         return None
-    rel = rel_or_abs.replace("\\", "/")
-    candidate = assets_root / rel
-    if candidate.is_file():
-        return candidate
+    rel = (rel_or_abs or "").replace("\\", "/").lstrip("/")
     sermon_dir = assets_root.parent if assets_root.name == "assets" else assets_root
-    candidate = sermon_dir / rel
-    if candidate.is_file():
-        return candidate
+    try:
+        root = sermon_dir.resolve()
+    except OSError:
+        return None
+    for base in (assets_root, sermon_dir):
+        try:
+            candidate = (base / rel).resolve()
+            candidate.relative_to(root)
+        except (OSError, ValueError):
+            continue
+        if candidate.is_file():
+            return candidate
     return None
 
 

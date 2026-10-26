@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
@@ -567,7 +568,9 @@ def _xml_align(shape) -> str | None:
 
 
 def _text_style_from_shape(shape, sx: float = 1.0) -> ElementStyle:
-    style = ElementStyle(align="left", wrap=_text_wrap(shape))
+    # PPT 默认制表位约 1 英寸 → 画布像素
+    tab_px = max(24, int(round(float(EMU_PER_INCH) * float(sx))))
+    style = ElementStyle(align="left", wrap=_text_wrap(shape), tab_stop=tab_px)
     try:
         from pptx.enum.text import PP_ALIGN
 
@@ -608,25 +611,78 @@ def _text_style_from_shape(shape, sx: float = 1.0) -> ElementStyle:
             pt = _run_font_pt(chosen) or _para_default_font_pt(chosen_para)
             if pt is not None:
                 style.font_size = _pt_to_canvas_px(pt, sx)
-            if font.bold is not None:
-                style.bold = bool(font.bold)
-            elif pt is not None and "heavy" in (font.name or "").lower():
+            fname = str(font.name or "")
+            # 字重写在族名里（如 ExtraBold/Heavy）时，PPT 常仍标 b=0
+            if _font_name_implies_bold(fname):
                 style.bold = True
+            elif font.bold is not None:
+                style.bold = bool(font.bold)
             if font.italic is not None:
                 style.italic = bool(font.italic)
-            if font.name:
-                style.font_family = str(font.name)
-            hx = _color_from_pptx_color(getattr(font, "color", None))
-            if hx:
-                style.color = hx
-            else:
-                style.color = "#FFFFFF"
+            if fname:
+                style.font_family = fname
+            hx = (
+                _color_from_pptx_color(getattr(font, "color", None))
+                or _run_color_hex(chosen)
+                or _para_def_color_hex(chosen_para)
+            )
+            style.color = hx or "#FFFFFF"
         else:
             style.color = "#FFFFFF"
+        spacing = _paragraph_line_spacing_pct(chosen_para)
+        if spacing is not None:
+            style.line_spacing = spacing
     except Exception as exc:
         logger.warning("text style parse failed: %s", exc)
         style.color = "#FFFFFF"
     return style
+
+
+def _paragraph_line_spacing_pct(paragraph) -> int | None:
+    """PPT 行距 → 百分比（100=单倍）。"""
+    try:
+        ls = paragraph.line_spacing
+    except Exception:
+        return None
+    if ls is None:
+        return None
+    try:
+        # 倍数：1.0 / 1.5
+        if isinstance(ls, (int, float)):
+            return max(80, min(300, int(round(float(ls) * 100))))
+        # Pt 绝对行距：相对默认字号估成倍数
+        pt = float(ls.pt)
+        base = _para_default_font_pt(paragraph) or 18.0
+        if base <= 0:
+            return None
+        return max(80, min(300, int(round(pt / base * 100))))
+    except Exception:
+        return None
+
+
+def _font_name_implies_bold(name: str) -> bool:
+    """族名自带字重（阿里巴巴普惠体 … ExtraBold / Heavy 等）。"""
+    low = (name or "").lower()
+    return any(
+        tok in low
+        for tok in (
+            "extrabold",
+            "ultrabold",
+            "semibold",
+            "demibold",
+            "heavy",
+            "black",
+            "bold",
+        )
+    )
+
+
+def _expand_pptx_tabs(text: str) -> str:
+    """保留 Tab；显示时靠 ElementStyle.tab_stop + QTextOption 制表位拉开。
+
+    旧逻辑把 \\t 换成全角空格：字体缺失时全角空格也变成方框，栏目空隙消失。
+    """
+    return text or ""
 
 
 def _shape_plain_text(shape) -> str:
@@ -650,24 +706,221 @@ def _shape_plain_text(shape) -> str:
             paragraphs.append("".join(parts) if parts else (p.text or ""))
         # 不 strip 整段，避免吃掉有意空行；仅去首尾空白段外层
         text = "\n".join(paragraphs)
-        return text.strip("\n")
+        return _expand_pptx_tabs(text.strip("\n"))
     except Exception:
         return ""
 
 
-def _iter_shapes(shapes, parent_offset=(0, 0)):
-    """递归展开组合，坐标叠加父组偏移。"""
+def _solid_fill_hex(solid) -> str | None:
+    """解析 solidFill；空节点或无色值返回 None（表示继承）。"""
+    if solid is None:
+        return None
+    ns_a = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    srgb = solid.find(f"{ns_a}srgbClr")
+    if srgb is not None and srgb.get("val"):
+        val = str(srgb.get("val")).strip()
+        return val if val.startswith("#") else f"#{val}"
+    scheme = solid.find(f"{ns_a}schemeClr")
+    if scheme is not None:
+        return _scheme_hex(scheme.get("val"))
+    return None
+
+
+def _rpr_color_hex(r_pr) -> str | None:
+    if r_pr is None:
+        return None
+    ns_a = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    return _solid_fill_hex(r_pr.find(f"{ns_a}solidFill"))
+
+
+def _para_def_color_hex(paragraph) -> str | None:
+    """段落 defRPr / endParaRPr 上的默认字色（WPS 常把黄字写在这里）。"""
+    try:
+        ns_a = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+        p = paragraph._p
+        p_pr = p.find(f"{ns_a}pPr")
+        if p_pr is not None:
+            hx = _rpr_color_hex(p_pr.find(f"{ns_a}defRPr"))
+            if hx:
+                return hx
+        return _rpr_color_hex(p.find(f"{ns_a}endParaRPr"))
+    except Exception:
+        return None
+
+
+def _run_color_hex(run) -> str | None:
+    """单个 run 的颜色；空 solidFill（继承）返回 None。"""
+    try:
+        hx = _color_from_pptx_color(getattr(run.font, "color", None))
+        if hx:
+            return hx
+    except Exception:
+        pass
+    try:
+        ns_a = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+        return _rpr_color_hex(run._r.find(f"{ns_a}rPr"))
+    except Exception:
+        return None
+
+
+def _html_escape(text: str) -> str:
+    """转义 HTML，并保留空格/Tab/全角空格（默认 HTML 会折叠空白）。"""
+    s = (
+        (text or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+    s = _expand_pptx_tabs(s)
+    s = s.replace("\u3000", "&#12288;")
+    s = s.replace(" ", "&nbsp;")
+    return s
+
+
+# 与 ui.sermon.text_format.RICH_RUNS_MARK 一致；避免 core→ui 依赖，本地编码
+_RICH_RUNS_MARK = "<!--bp-runs-->"
+
+
+def _encode_rich_runs(runs: list[tuple[str, str]]) -> str:
+    payload = [{"t": t, "c": c} for t, c in runs if t != ""]
+    return _RICH_RUNS_MARK + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def _shape_text_content(shape, sx: float = 1.0) -> tuple[str, ElementStyle]:
+    """导入文字：多色 run 写成 bp-runs JSON；单色仍用纯文本。"""
+    style = _text_style_from_shape(shape, sx=sx)
+    plain = _shape_plain_text(shape)
+    if not plain:
+        return "", style
+
+    try:
+        runs: list[tuple[str, str]] = []
+        colors: set[str] = set()
+        ns_a = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+        paragraphs = list(shape.text_frame.paragraphs)
+        for pi, p in enumerate(paragraphs):
+            # 段落 defRPr 常有真正字色；run 空 solidFill 时继承它
+            para_color = _para_def_color_hex(p) or "#FFFFFF"
+            if pi > 0:
+                runs.append(("\n", para_color))
+            try:
+                for child in p._p:
+                    tag = child.tag.split("}")[-1]
+                    if tag == "r":
+                        t_el = child.find(f"{ns_a}t")
+                        t = "" if t_el is None or t_el.text is None else t_el.text
+                        t = _expand_pptx_tabs(t)
+                        if t == "":
+                            continue
+                        r_pr = child.find(f"{ns_a}rPr")
+                        color = _rpr_color_hex(r_pr) or para_color
+                        colors.add(color.upper())
+                        runs.append((t, color if color.startswith("#") else f"#{color}"))
+                    elif tag == "br":
+                        runs.append(("\n", para_color))
+            except Exception:
+                for run in p.runs:
+                    t = _expand_pptx_tabs(run.text or "")
+                    if not t:
+                        continue
+                    color = _run_color_hex(run) or para_color
+                    colors.add(color.upper())
+                    runs.append((t, color if color.startswith("#") else f"#{color}"))
+        if len(colors) <= 1:
+            if len(colors) == 1:
+                only = next(iter(colors))
+                style.color = only if only.startswith("#") else f"#{only}"
+            elif style.color in (None, "", "#FFFFFF"):
+                # 单段无 run 色时仍可能有 defRPr
+                hx = _para_def_color_hex(paragraphs[0]) if paragraphs else None
+                if hx:
+                    style.color = hx
+            return plain, style
+        if style.color in (None, "", "#FFFFFF"):
+            for c in colors:
+                if c.upper() not in ("#FFFFFF", "FFFFFF"):
+                    style.color = c if c.startswith("#") else f"#{c}"
+                    break
+        return _encode_rich_runs(runs), style
+    except Exception as exc:
+        logger.warning("rich text import failed: %s", exc)
+        return plain, style
+
+
+def _group_local_scale(shape) -> tuple[float, float, int, int]:
+    """组合 xfrm：child 坐标 → 父坐标的缩放，以及 chOff。
+
+    slide = group_pos + (child - chOff) * (ext / chExt)
+    """
+    ns_a = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    scale_x = scale_y = 1.0
+    ch_x = ch_y = 0
+    try:
+        xfrm = shape._element.find(f".//{ns_a}xfrm")
+        if xfrm is None:
+            return scale_x, scale_y, ch_x, ch_y
+        ext = xfrm.find(f"{ns_a}ext")
+        ch_ext = xfrm.find(f"{ns_a}chExt")
+        ch_off = xfrm.find(f"{ns_a}chOff")
+        if ch_off is not None:
+            ch_x = int(ch_off.get("x", 0) or 0)
+            ch_y = int(ch_off.get("y", 0) or 0)
+        if ext is not None and ch_ext is not None:
+            ecx = float(ext.get("cx", 0) or 0)
+            ecy = float(ext.get("cy", 0) or 0)
+            ccx = float(ch_ext.get("cx", 0) or 0)
+            ccy = float(ch_ext.get("cy", 0) or 0)
+            if ccx > 0:
+                scale_x = ecx / ccx
+            if ccy > 0:
+                scale_y = ecy / ccy
+    except Exception as exc:
+        logger.warning("group xfrm scale failed: %s", exc)
+    return scale_x, scale_y, ch_x, ch_y
+
+
+def _iter_shapes(
+    shapes,
+    parent_offset=(0, 0),
+    group_stack: tuple[int, ...] = (),
+    scale: tuple[float, float] = (1.0, 1.0),
+    ch_origin: tuple[int, int] = (0, 0),
+):
+    """递归展开组合。
+
+    产出 (shape, left, top, width, height, scale_x, scale_y, group_stack)，
+    坐标/尺寸为幻灯片 EMU（已乘组合缩放）。
+    """
+    sx, sy = scale
+    ox, oy = ch_origin
     for shape in shapes:
-        left = int(getattr(shape, "left", 0) or 0) + parent_offset[0]
-        top = int(getattr(shape, "top", 0) or 0) + parent_offset[1]
+        raw_l = int(getattr(shape, "left", 0) or 0)
+        raw_t = int(getattr(shape, "top", 0) or 0)
+        left = parent_offset[0] + (raw_l - ox) * sx
+        top = parent_offset[1] + (raw_t - oy) * sy
         if _is_group(shape):
             try:
-                # 组内子形状坐标相对组；叠加组位置
-                yield from _iter_shapes(shape.shapes, (left, top))
+                gid = int(shape.shape_id)
+            except Exception:
+                gid = -1
+            try:
+                gx, gy, cox, coy = _group_local_scale(shape)
+                stack = group_stack + ((gid,) if gid >= 0 else ())
+                # 子坐标在本组 child 空间；组的 left/top 已是幻灯片 EMU
+                yield from _iter_shapes(
+                    shape.shapes,
+                    (left, top),
+                    stack,
+                    (gx, gy),
+                    (cox, coy),
+                )
             except Exception as exc:
                 logger.warning("group expand failed: %s", exc)
             continue
-        yield shape, left, top
+        raw_w = int(getattr(shape, "width", 0) or 0)
+        raw_h = int(getattr(shape, "height", 0) or 0)
+        yield shape, left, top, raw_w * sx, raw_h * sy, sx, sy, group_stack
 
 
 # PPT presetSubtype 方向位（常见于飞入/擦除等）
@@ -820,9 +1073,17 @@ def _spid_from_ctn(ctn) -> int | None:
     return None
 
 
-def _import_slide_anims(slide, id_by_shape: dict[int, str]) -> list:
-    """按每条入场动画节点解析方向与开始方式。"""
+def _import_slide_anims(
+    slide,
+    id_by_shape: dict[int, str],
+    group_els: dict[int, list[str]] | None = None,
+) -> list:
+    """按每条入场动画节点解析方向与开始方式。
+
+    PPT 常把动画挂在「组合」上；导入时组合已拆成子元素，需把组 id 映射到子元素。
+    """
     steps = []
+    group_els = group_els or {}
     try:
         ns_p = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
         timing = slide._element.find(f".//{ns_p}timing")
@@ -843,22 +1104,29 @@ def _import_slide_anims(slide, id_by_shape: dict[int, str]) -> list:
             spid = _spid_from_ctn(ctn)
             if spid is None:
                 continue
+            targets: list[str] = []
             el_id = id_by_shape.get(spid)
-            if not el_id:
+            if el_id:
+                targets = [el_id]
+            elif spid in group_els:
+                # 组合动画 → 组内每个子元素同一步（同时出现）
+                targets = list(group_els[spid])
+            if not targets:
                 continue
 
             node = str(ctn.get("nodeType") or "").lower()
             trigger = _PPT_NODE_TRIGGER.get(node, "on_click")
-            # 列表第一条若是「之后/同时」，放映时当页进入即自动播
-            if order == 0 and trigger in ("with_previous", "after_previous"):
-                # 保留原 trigger，由播放器在进页时自动启动
-                pass
-
             kind = _kind_from_entrance_ctn(ctn)
-            step = new_anim_step(el_id, kind=kind, order=order, trigger=trigger)
-            step.duration_ms = _duration_from_ctn(ctn)
-            step.delay_ms = _delay_from_ctn(ctn)
-            steps.append(step)
+            duration = _duration_from_ctn(ctn)
+            delay = _delay_from_ctn(ctn)
+            for i, tid in enumerate(targets):
+                step = new_anim_step(tid, kind=kind, order=order, trigger=trigger)
+                step.duration_ms = duration
+                step.delay_ms = delay
+                # 同一组合内：第一个保持原 trigger，其余 with_previous
+                if i > 0:
+                    step.trigger = "with_previous"
+                steps.append(step)
             order += 1
     except Exception as exc:
         logger.warning("anim import failed: %s", exc)
@@ -912,10 +1180,21 @@ def _import_slide_transition(slide) -> SlideTransition:
         return SlideTransition()
 
 
-def import_pptx(path: Path | str, store: SermonStore, title: str | None = None) -> SermonDocument:
-    """把 PPTX 转成讲篇文档并写入 store（含图片资源）。"""
+def import_pptx(
+    path: Path | str,
+    store: SermonStore,
+    title: str | None = None,
+    *,
+    reuse_id: str | None = None,
+) -> SermonDocument:
+    """把 PPTX 转成讲篇文档并写入 store（含图片资源）。
+
+    reuse_id：Office 外编重载时复用工作目录，避免换 id。
+    """
     _require_pptx()
     from pptx import Presentation
+
+    from .store import safe_sermon_id
 
     path = Path(path)
     prs = Presentation(str(path))
@@ -924,12 +1203,41 @@ def import_pptx(path: Path | str, store: SermonStore, title: str | None = None) 
     sx = canvas_w / float(prs.slide_width)
     sy = canvas_h / float(prs.slide_height)
 
-    doc = new_document(title=title or path.stem or "导入讲篇", aspect=aspect)
-    store.save(doc)
-    doc.slides.clear()
-    skipped = {"n": 0}
+    if not title:
+        try:
+            title = (prs.core_properties.title or "").strip() or None
+        except Exception:
+            title = None
 
-    for slide in prs.slides:
+    doc = new_document(title=title or path.stem or "导入讲篇", aspect=aspect)
+    created_new = not reuse_id
+    if reuse_id:
+        doc.id = safe_sermon_id(str(reuse_id), path.stem)
+    try:
+        store.save(doc)
+        doc.slides.clear()
+        return _import_pptx_body(prs, doc, store, sx, sy)
+    except Exception:
+        if created_new:
+            try:
+                store.delete(doc.id)
+            except Exception:
+                pass
+        raise
+
+
+def _import_pptx_body(prs, doc, store, sx: float, sy: float):
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    skipped = {"n": 0}
+    notes: list[str] = []
+
+    def _skip(reason: str) -> None:
+        skipped["n"] += 1
+        if len(notes) < 40:
+            notes.append(reason)
+
+    for slide_i, slide in enumerate(prs.slides, start=1):
         out = Slide(
             id=new_id("slide_"),
             background=_slide_bg(slide, store, doc.id),
@@ -937,21 +1245,46 @@ def import_pptx(path: Path | str, store: SermonStore, title: str | None = None) 
             animations=[],
         )
         id_by_shape: dict[int, str] = {}
+        group_els: dict[int, list[str]] = {}
         z = 0
-        for shape, abs_left, abs_top in _iter_shapes(slide.shapes):
+        for shape, abs_left, abs_top, abs_w, abs_h, gsx, gsy, group_stack in _iter_shapes(
+            slide.shapes
+        ):
             x = float(abs_left) * sx
             y = float(abs_top) * sy
-            w = max(8.0, float(getattr(shape, "width", 0) or 0) * sx)
-            h = max(8.0, float(getattr(shape, "height", 0) or 0) * sy)
+            w = max(8.0, float(abs_w) * sx)
+            h = max(8.0, float(abs_h) * sy)
             try:
                 shape_id = int(shape.shape_id)
             except Exception:
                 shape_id = z
 
+            def _register(el_id: str) -> None:
+                id_by_shape[shape_id] = el_id
+                for gid in group_stack:
+                    group_els.setdefault(int(gid), []).append(el_id)
+
+            # 图表/表格/媒体等：内置舞台不支持，记入说明（枚举名因 pptx 版本而异）
+            try:
+                st = shape.shape_type
+            except Exception:
+                st = None
+            skip_kinds = {
+                getattr(MSO_SHAPE_TYPE, "CHART", None): "图表",
+                getattr(MSO_SHAPE_TYPE, "TABLE", None): "表格（请用 Office 编辑）",
+                getattr(MSO_SHAPE_TYPE, "MEDIA", None): "视频/音频",
+                getattr(MSO_SHAPE_TYPE, "SMART_ART", None): "SmartArt",
+                getattr(MSO_SHAPE_TYPE, "DIAGRAM", None): "SmartArt",
+            }
+            label = skip_kinds.get(st)
+            if label:
+                _skip(f"第{slide_i}页：跳过{label}")
+                continue
+
             if _is_picture(shape):
                 rel = _save_picture(shape, store, doc.id)
                 if not rel:
-                    skipped["n"] += 1
+                    _skip(f"第{slide_i}页：图片无法读取")
                     continue
                 el = Element(
                     id=new_id("el_"),
@@ -964,18 +1297,21 @@ def import_pptx(path: Path | str, store: SermonStore, title: str | None = None) 
                     z=z,
                 )
                 out.elements.append(el)
-                id_by_shape[shape_id] = el.id
+                _register(el.id)
                 z += 1
                 continue
 
             fill_hex, fill_op = _shape_fill(shape)
             text = ""
+            style = ElementStyle()
             if getattr(shape, "has_text_frame", False):
-                text = _shape_plain_text(shape)
+                text, style = _shape_text_content(shape, sx=sx)
 
             if text:
-                style = _text_style_from_shape(shape, sx=sx)
-                inset_l, inset_t, inset_r, inset_b = _text_insets(shape, sx, sy)
+                # 组内边距 EMU 在 child 坐标系，需乘组合缩放
+                inset_l, inset_t, inset_r, inset_b = _text_insets(
+                    shape, sx * float(gsx), sy * float(gsy)
+                )
                 el = Element(
                     id=new_id("el_"),
                     type="text",
@@ -988,13 +1324,14 @@ def import_pptx(path: Path | str, store: SermonStore, title: str | None = None) 
                     style=style,
                 )
                 out.elements.append(el)
-                id_by_shape[shape_id] = el.id
+                _register(el.id)
                 z += 1
                 continue
 
             # 无文字：导入纯色/半透明形状（如遮罩矩形）
             if fill_hex is None:
-                skipped["n"] += 1
+                name = getattr(shape, "name", "") or "形状"
+                _skip(f"第{slide_i}页：跳过无填充{name}")
                 continue
             el = Element(
                 id=new_id("el_"),
@@ -1008,7 +1345,7 @@ def import_pptx(path: Path | str, store: SermonStore, title: str | None = None) 
                 style=ElementStyle(color=fill_hex, opacity=fill_op),
             )
             out.elements.append(el)
-            id_by_shape[shape_id] = el.id
+            _register(el.id)
             z += 1
 
         # 若形状遍历几乎没图，用 XML blip 兜底（避免重复：仅当当前无图时）
@@ -1032,7 +1369,7 @@ def import_pptx(path: Path | str, store: SermonStore, title: str | None = None) 
                 existing.add(key)
                 z += 1
 
-        out.animations = _import_slide_anims(slide, id_by_shape)
+        out.animations = _import_slide_anims(slide, id_by_shape, group_els)
         # 若有 timing 但没解析到步骤：给每个元素默认淡入（更接近「点一下出一个」）
         if not out.animations and out.elements:
             try:
@@ -1042,6 +1379,7 @@ def import_pptx(path: Path | str, store: SermonStore, title: str | None = None) 
                 if timing is not None:
                     for i, el in enumerate(out.elements):
                         out.animations.append(new_anim_step(el.id, kind="fade", order=i))
+                    notes.append(f"第{slide_i}页：复杂动画已降级为逐项淡入")
             except Exception:
                 pass
 
@@ -1058,6 +1396,7 @@ def import_pptx(path: Path | str, store: SermonStore, title: str | None = None) 
         doc.slides.append(new_slide())
     store.save(doc)
     setattr(doc, "import_skip_count", skipped["n"])
+    setattr(doc, "import_notes", notes)
     return doc
 
 
@@ -1173,6 +1512,10 @@ def export_pptx(doc: SermonDocument, dest: Path | str, store: SermonStore) -> Pa
             except Exception:
                 _ = MSO_ANCHOR
 
+    try:
+        prs.core_properties.title = doc.title or dest.stem
+    except Exception:
+        pass
     dest.parent.mkdir(parents=True, exist_ok=True)
     prs.save(str(dest))
     return dest

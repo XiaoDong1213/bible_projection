@@ -9,7 +9,7 @@ from PyQt6.QtGui import (
     QBrush,
     QColor,
     QCursor,
-    QFont,
+    QMouseEvent,
     QPainter,
     QPen,
     QPixmap,
@@ -26,7 +26,38 @@ from PyQt6.QtWidgets import (
 
 from core.sermon.image_cache import load_pixmap, scaled_pixmap
 from core.sermon.model import Element, SermonDocument, Slide
-from ui.sermon.text_format import apply_text_line_spacing, is_text_placeholder
+from ui.sermon.text_format import (
+    apply_text_content,
+    apply_text_line_spacing,
+    apply_text_tab_stops,
+    fit_text_item_height,
+    is_text_placeholder,
+    plain_from_content,
+    resolve_qfont,
+)
+
+_HANDLE_ROLES = ("nw", "n", "ne", "e", "se", "s", "sw", "w")
+_HANDLE_CURSORS = {
+    "nw": Qt.CursorShape.SizeFDiagCursor,
+    "se": Qt.CursorShape.SizeFDiagCursor,
+    "ne": Qt.CursorShape.SizeBDiagCursor,
+    "sw": Qt.CursorShape.SizeBDiagCursor,
+    "n": Qt.CursorShape.SizeVerCursor,
+    "s": Qt.CursorShape.SizeVerCursor,
+    "e": Qt.CursorShape.SizeHorCursor,
+    "w": Qt.CursorShape.SizeHorCursor,
+}
+
+
+def selection_range_ids(order: list[str], anchor: str | None, target: str) -> list[str]:
+    """Shift 连续选：图层顺序上从锚点到目标（含两端）。"""
+    if not target or target not in order:
+        return [target] if target else []
+    if not anchor or anchor not in order:
+        return [target]
+    i0, i1 = order.index(anchor), order.index(target)
+    lo, hi = min(i0, i1), max(i0, i1)
+    return order[lo : hi + 1]
 
 
 def _render_scene_thumb(scene: QGraphicsScene, logical_w: int, logical_h: int, size: int) -> QPixmap:
@@ -114,19 +145,20 @@ class TextElementItem(QGraphicsTextItem, ElementItemMixin):
 
     def apply_element(self, element: Element):
         self.element_id = element.id
-        text = element.content or ""
-        if self.toPlainText() != text:
-            self.setPlainText(text)
         style = element.style
-        font = QFont(style.font_family or "微软雅黑")
-        font.setPixelSize(max(8, int(style.font_size)))
-        font.setBold(style.bold)
-        font.setItalic(style.italic)
+        font = resolve_qfont(
+            style.font_family,
+            pixel_size=max(8, int(style.font_size)),
+            bold=bool(style.bold),
+            italic=bool(style.italic),
+        )
         self.setFont(font)
         color = QColor(style.color)
         if color.isValid():
             color.setAlphaF(max(0.0, min(1.0, float(getattr(style, "opacity", 1.0)))))
         self.setDefaultTextColor(color)
+        apply_text_tab_stops(self, getattr(style, "tab_stop", 192))
+        apply_text_content(self, element.content, style)
         align = {
             "left": Qt.AlignmentFlag.AlignLeft,
             "center": Qt.AlignmentFlag.AlignHCenter,
@@ -134,6 +166,13 @@ class TextElementItem(QGraphicsTextItem, ElementItemMixin):
         }.get(style.align, Qt.AlignmentFlag.AlignLeft)
         option = self.document().defaultTextOption()
         option.setAlignment(align)
+        # setAlignment 会换新 option，制表位再写一次
+        try:
+            option.setTabStopDistance(
+                max(24.0, float(getattr(style, "tab_stop", 192) or 192))
+            )
+        except (TypeError, ValueError):
+            option.setTabStopDistance(192.0)
         self.document().setDefaultTextOption(option)
         if getattr(style, "wrap", True):
             self.setTextWidth(max(40.0, element.w))
@@ -177,7 +216,9 @@ class TextElementItem(QGraphicsTextItem, ElementItemMixin):
             for view in scene.views():
                 if hasattr(view, "edit_started"):
                     view.edit_started.emit()
-                    break
+                if hasattr(view, "_place_resize_handles"):
+                    view._place_resize_handles()
+                break
         self.setTextInteractionFlags(Qt.TextInteractionFlag.TextEditorInteraction)
         self.setFocus(Qt.FocusReason.MouseFocusReason)
         super().mouseDoubleClickEvent(event)
@@ -216,7 +257,9 @@ class TextElementItem(QGraphicsTextItem, ElementItemMixin):
                 view.commit_geometry()
             if hasattr(view, "edit_finished"):
                 view.edit_finished.emit()
-                break
+            if hasattr(view, "_place_resize_handles"):
+                view._place_resize_handles()
+            break
 
 
 class ShapeElementItem(QGraphicsRectItem, ElementItemMixin):
@@ -280,6 +323,49 @@ class ImageElementItem(QGraphicsPixmapItem, ElementItemMixin):
         self.setZValue(element.z)
 
 
+class _ResizeHandle(QGraphicsRectItem):
+    """单选时的边角缩放点（屏幕固定大小，像 PPT）。"""
+
+    def __init__(self, role: str, canvas: "SlideCanvas"):
+        hs = 9.0
+        super().__init__(-hs / 2, -hs / 2, hs, hs)
+        self.role = role
+        self._canvas = canvas
+        self.setZValue(1_000_000)
+        self.setBrush(QBrush(QColor("#2196F3")))
+        self.setPen(QPen(QColor("#FFFFFF"), 1))
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+        self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
+        self.setCursor(QCursor(_HANDLE_CURSORS[role]))
+        self._start_box: tuple[float, float, float, float] | None = None
+        self._origin: QPointF | None = None
+
+    def mousePressEvent(self, event):
+        self._canvas.history_checkpoint.emit()
+        box = self._canvas._selected_item_box()
+        if box is None:
+            event.accept()
+            return
+        self._start_box = box
+        self._origin = event.scenePos()
+        event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self._start_box is None or self._origin is None:
+            event.accept()
+            return
+        delta = event.scenePos() - self._origin
+        self._canvas._resize_from_handle(self.role, self._start_box, delta.x(), delta.y())
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self._start_box = None
+        self._origin = None
+        self._canvas.commit_geometry()
+        self._canvas._place_resize_handles()
+        event.accept()
+
+
 class SlideCanvas(QGraphicsView):
     """单页编辑画布。"""
 
@@ -325,9 +411,169 @@ class SlideCanvas(QGraphicsView):
         self._draw_origin: QPointF | None = None
         self._draw_rubber: QGraphicsRectItem | None = None
         self._format_paint = False
+        # PPT 式选区：Shift 连续选锚点；Ctrl+框选时保留原选中
+        self._sel_anchor_id: str | None = None
+        self._rubber_keep_ids: set[str] | None = None
+        self._handles: list[_ResizeHandle] = []
 
     def set_assets_root(self, root: Path | None):
         self._assets_root = Path(root) if root else None
+
+    def _ensure_handles(self):
+        # scene.clear 后 C++ 对象已删，不能再调 h.scene()
+        need = not self._handles
+        if not need:
+            for h in self._handles:
+                try:
+                    if h.scene() is not self._scene:
+                        need = True
+                        break
+                except RuntimeError:
+                    need = True
+                    break
+        if need:
+            self._handles = []
+            for role in _HANDLE_ROLES:
+                h = _ResizeHandle(role, self)
+                h.hide()
+                self._scene.addItem(h)
+                self._handles.append(h)
+        self._place_resize_handles()
+
+    def _editing_text(self) -> bool:
+        focus = self._scene.focusItem()
+        return isinstance(focus, TextElementItem) and (
+            focus.textInteractionFlags() != Qt.TextInteractionFlag.NoTextInteraction
+        )
+
+    def _selected_item_box(self) -> tuple[float, float, float, float] | None:
+        el = self.selected_element()
+        if el is None or len(self.selected_elements()) != 1:
+            return None
+        item = self._items.get(el.id)
+        if item is None:
+            return None
+        x, y = float(item.pos().x()), float(item.pos().y())
+        if isinstance(item, TextElementItem):
+            tw = float(item.textWidth()) if item.textWidth() > 0 else float(item.boundingRect().width())
+            th = float(item.boundingRect().height())
+            return x, y, max(20.0, tw), max(16.0, th)
+        if isinstance(item, ShapeElementItem):
+            r = item.rect()
+            return x, y, max(20.0, float(r.width())), max(16.0, float(r.height()))
+        if isinstance(item, ImageElementItem):
+            pm = item.pixmap()
+            return x, y, max(20.0, float(pm.width())), max(16.0, float(pm.height()))
+        return None
+
+    def _place_resize_handles(self):
+        if not self._handles:
+            return
+        box = self._selected_item_box()
+        if box is None or self._editing_text():
+            for h in self._handles:
+                h.hide()
+            return
+        x, y, w, h = box
+        pts = {
+            "nw": (x, y),
+            "n": (x + w / 2, y),
+            "ne": (x + w, y),
+            "e": (x + w, y + h / 2),
+            "se": (x + w, y + h),
+            "s": (x + w / 2, y + h),
+            "sw": (x, y + h),
+            "w": (x, y + h / 2),
+        }
+        for handle in self._handles:
+            px, py = pts[handle.role]
+            handle.setPos(px, py)
+            handle.show()
+
+    def _resize_from_handle(
+        self,
+        role: str,
+        start: tuple[float, float, float, float],
+        dx: float,
+        dy: float,
+    ):
+        el = self.selected_element()
+        item = self._items.get(el.id) if el else None
+        if el is None or item is None:
+            return
+        x, y, w, h = start
+        left, top, right, bottom = x, y, x + w, y + h
+        min_s = 24.0
+        if role in ("nw", "w", "sw"):
+            left = min(right - min_s, x + dx)
+        if role in ("ne", "e", "se"):
+            right = max(left + min_s, x + w + dx)
+        if role in ("nw", "n", "ne"):
+            top = min(bottom - min_s, y + dy)
+        if role in ("sw", "s", "se"):
+            bottom = max(top + min_s, y + h + dy)
+        el.x, el.y = float(left), float(top)
+        el.w, el.h = float(right - left), float(bottom - top)
+        self._syncing = True
+        if isinstance(item, TextElementItem):
+            item.setPos(el.x, el.y)
+            item.setTextWidth(el.w)
+        elif isinstance(item, ShapeElementItem):
+            item.apply_element(el)
+        elif isinstance(item, ImageElementItem):
+            pix = load_pixmap(el.content, self._assets_root)
+            item.apply_element(el, pix)
+        self._syncing = False
+        self._place_resize_handles()
+        self.slide_modified.emit()
+
+    def _top_element_item_at(self, view_pos) -> QGraphicsItem | None:
+        """点到的最上层可选元素（忽略背景）。"""
+        for item in self.items(view_pos):
+            if item is self._bg_item or item is self._bg_image_item:
+                continue
+            if item is self._draw_rubber:
+                continue
+            if getattr(item, "element_id", None):
+                return item
+        return None
+
+    def _element_order_ids(self) -> list[str]:
+        if self._slide is None:
+            return list(self._items.keys())
+        return [e.id for e in self._slide.elements if e.id in self._items]
+
+    def _apply_shift_range(self, target: QGraphicsItem, *, additive: bool = False) -> None:
+        """Shift+单击：从锚点到目标按图层顺序连续选。"""
+        tid = getattr(target, "element_id", None)
+        if not tid:
+            return
+        order = self._element_order_ids()
+        if tid not in order:
+            return
+        aid = self._sel_anchor_id if self._sel_anchor_id in order else None
+        if aid is None:
+            self._sel_anchor_id = tid
+        ids = selection_range_ids(order, self._sel_anchor_id, tid)
+        if not additive:
+            self._scene.clearSelection()
+        for eid in ids:
+            item = self._items.get(eid)
+            if item is not None:
+                item.setSelected(True)
+
+    def nudge_selected(self, dx: float, dy: float) -> bool:
+        """方向键微移选中图层。"""
+        els = self.selected_elements()
+        if not els:
+            return False
+        for el in els:
+            item = self._items.get(el.id)
+            if item is None:
+                continue
+            item.setPos(item.pos() + QPointF(dx, dy))
+        self.commit_geometry()
+        return True
 
     def wheelEvent(self, event):
         """滚轮翻页（放映跟控制器；编辑跟侧栏）。编辑文字时不抢。"""
@@ -375,6 +621,7 @@ class SlideCanvas(QGraphicsView):
         self._items.clear()
         self._bg_item = None
         self._bg_image_item = None
+        self._handles = []
         self._scene.clear()
 
     def _rebuild(self):
@@ -382,6 +629,7 @@ class SlideCanvas(QGraphicsView):
             self.clear_canvas()
             return
         self._syncing = True
+        self._handles = []  # scene.clear 会销毁手柄，先丢掉 Python 引用
         self._scene.clear()
         self._items.clear()
         self._bg_item = None
@@ -398,7 +646,16 @@ class SlideCanvas(QGraphicsView):
         for element in sorted(self._slide.elements, key=lambda e: e.z):
             self._add_item_for_element(element)
 
+        # 仅编辑画布：导入框常偏矮，按排版后高度抬高（缩略图路径不走这里）
+        for el in self._slide.elements:
+            if el.type != "text":
+                continue
+            item = self._items.get(el.id)
+            if isinstance(item, TextElementItem):
+                el.h = fit_text_item_height(item, el.h)
+
         self._syncing = False
+        self._ensure_handles()
         self._fit_view()
         self.selection_changed.emit(None)
 
@@ -474,6 +731,7 @@ class SlideCanvas(QGraphicsView):
     def _on_selection_changed(self):
         if self._syncing:
             return
+        self._place_resize_handles()
         selected = self._scene.selectedItems()
         if not selected:
             self.selection_changed.emit(None)
@@ -609,11 +867,12 @@ class SlideCanvas(QGraphicsView):
                 el.y = float(pos.y())
                 changed = True
             if isinstance(item, TextElementItem):
-                text = item.toPlainText()
-                if text != el.content:
-                    el.content = text
+                plain = item.toPlainText()
+                stored_plain = plain_from_content(el.content)
+                # 富文本未改可见字时保留 bp-runs；改过则降级为纯文本
+                if plain != stored_plain:
+                    el.content = plain
                     changed = True
-                # 文本宽
                 tw = item.textWidth()
                 if tw > 0 and abs(el.w - tw) > 0.5:
                     el.w = float(tw)
@@ -630,6 +889,7 @@ class SlideCanvas(QGraphicsView):
                     changed = True
         if changed:
             self.slide_modified.emit()
+        self._place_resize_handles()
 
     def begin_draw(self, kind: str):
         """进入拖拽画框：text | shape。"""
@@ -707,18 +967,61 @@ class SlideCanvas(QGraphicsView):
             self.status_message.emit("已取消画框")
             event.accept()
             return
+
         self._drag_history_armed = False
+        self._rubber_keep_ids = None
         if (
             event.button() == Qt.MouseButton.LeftButton
             and not self._draw_kind
             and not self._format_paint
         ):
-            item = self.itemAt(event.position().toPoint())
-            el = self._element_from_item(item) if item is not None else None
-            if el is not None:
-                # 选中并拖动前记一笔，才能撤回位移
-                self.history_checkpoint.emit()
-                self._drag_history_armed = True
+            mods = event.modifiers()
+            ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
+            shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
+            hit = self._top_element_item_at(event.position().toPoint())
+
+            # 空白处框选：Ctrl 保留原选中再并上框内
+            if hit is None:
+                if ctrl:
+                    self._rubber_keep_ids = {
+                        getattr(it, "element_id", "")
+                        for it in self._scene.selectedItems()
+                        if getattr(it, "element_id", None)
+                    }
+                super().mousePressEvent(event)
+                return
+
+            # Ctrl+单击：切换选中；Shift+单击：连续范围选
+            if ctrl or shift:
+                if shift and not ctrl:
+                    self._apply_shift_range(hit, additive=False)
+                elif shift and ctrl:
+                    self._apply_shift_range(hit, additive=True)
+                else:
+                    hit.setSelected(not hit.isSelected())
+                    if hit.isSelected():
+                        self._sel_anchor_id = getattr(hit, "element_id", None)
+                if hit.isSelected():
+                    self.history_checkpoint.emit()
+                    self._drag_history_armed = True
+                    # 去掉修饰键再交给基类，才能拖动且不再改选区
+                    plain = QMouseEvent(
+                        event.type(),
+                        event.position(),
+                        event.globalPosition(),
+                        event.button(),
+                        event.buttons(),
+                        Qt.KeyboardModifier.NoModifier,
+                    )
+                    super().mousePressEvent(plain)
+                else:
+                    event.accept()
+                return
+
+            # 普通单击：单选并记下 Shift 锚点
+            self._sel_anchor_id = getattr(hit, "element_id", None)
+            self.history_checkpoint.emit()
+            self._drag_history_armed = True
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -732,6 +1035,8 @@ class SlideCanvas(QGraphicsView):
             event.accept()
             return
         super().mouseMoveEvent(event)
+        if self._handles and any(h.isVisible() for h in self._handles):
+            self._place_resize_handles()
 
     def mouseReleaseEvent(self, event):
         if self._format_paint:
@@ -763,6 +1068,14 @@ class SlideCanvas(QGraphicsView):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+        # Ctrl+框选：把框选前保留的选中并回来
+        keep = self._rubber_keep_ids
+        self._rubber_keep_ids = None
+        if keep:
+            for eid in keep:
+                item = self._items.get(eid)
+                if item is not None:
+                    item.setSelected(True)
         self.commit_geometry()
         self._drag_history_armed = False
 
@@ -772,17 +1085,24 @@ class SlideCanvas(QGraphicsView):
 
     def update_selected_from_element(self, element: Element):
         """属性面板改完后刷新选中项外观。"""
-        item = self._items.get(element.id)
-        if item is None:
+        self.update_elements_from_model([element])
+
+    def update_elements_from_model(self, elements: list[Element]):
+        """属性面板批量改完后刷新多项外观。"""
+        if not elements:
             return
         self._syncing = True
-        if isinstance(item, TextElementItem):
-            item.apply_element(element)
-        elif isinstance(item, ImageElementItem):
-            pix = load_pixmap(element.content, self._assets_root)
-            item.apply_element(element, pix)
-        elif isinstance(item, ShapeElementItem):
-            item.apply_element(element)
+        for element in elements:
+            item = self._items.get(element.id)
+            if item is None:
+                continue
+            if isinstance(item, TextElementItem):
+                item.apply_element(element)
+            elif isinstance(item, ImageElementItem):
+                pix = load_pixmap(element.content, self._assets_root)
+                item.apply_element(element, pix)
+            elif isinstance(item, ShapeElementItem):
+                item.apply_element(element)
         self._syncing = False
         self.slide_modified.emit()
 
@@ -859,17 +1179,30 @@ class SlideCanvas(QGraphicsView):
             self.status_message.emit("已取消画框")
             event.accept()
             return
+        # 改字中：方向键留给光标，不微移图层
+        focus = self._scene.focusItem()
+        editing_text = isinstance(focus, TextElementItem) and (
+            focus.textInteractionFlags() != Qt.TextInteractionFlag.NoTextInteraction
+        )
         if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
-            # 文本编辑中不删元素
-            focus = self._scene.focusItem()
-            if isinstance(focus, TextElementItem) and (
-                focus.textInteractionFlags() != Qt.TextInteractionFlag.NoTextInteraction
-            ):
+            if editing_text:
                 super().keyPressEvent(event)
                 return
             self.remove_selected()
             event.accept()
             return
+        arrows = {
+            Qt.Key.Key_Left: (-1.0, 0.0),
+            Qt.Key.Key_Right: (1.0, 0.0),
+            Qt.Key.Key_Up: (0.0, -1.0),
+            Qt.Key.Key_Down: (0.0, 1.0),
+        }
+        if event.key() in arrows and not editing_text:
+            dx, dy = arrows[event.key()]
+            step = 10.0 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1.0
+            if self.nudge_selected(dx * step, dy * step):
+                event.accept()
+                return
         super().keyPressEvent(event)
 
     def render_thumbnail(self, size: int = 160) -> QPixmap:

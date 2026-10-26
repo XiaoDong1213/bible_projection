@@ -14,7 +14,7 @@ from PyQt6.QtCore import (
     QVariantAnimation,
     pyqtSignal,
 )
-from PyQt6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPixmap
+from PyQt6.QtGui import QBrush, QColor, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsItem,
@@ -27,7 +27,13 @@ from PyQt6.QtWidgets import (
 
 from core.sermon.image_cache import load_pixmap, scaled_pixmap
 from core.sermon.model import AnimStep, Element, SermonDocument, Slide
-from ui.sermon.text_format import apply_text_line_spacing, is_text_placeholder
+from ui.sermon.text_format import (
+    apply_text_content,
+    apply_text_line_spacing,
+    apply_text_tab_stops,
+    is_text_placeholder,
+    resolve_qfont,
+)
 
 FLY_OFFSET = 160
 
@@ -244,20 +250,20 @@ class SlideStage(QGraphicsView):
 
     def _apply_element_visuals(self, item, element: Element):
         if element.type == "text" and isinstance(item, QGraphicsTextItem):
-            raw = element.content or ""
-            text = "" if is_text_placeholder(raw) else raw
-            if item.toPlainText() != text:
-                item.setPlainText(text)
             style = element.style
-            font = QFont(style.font_family or "微软雅黑")
-            font.setPixelSize(max(8, int(style.font_size)))
-            font.setBold(style.bold)
-            font.setItalic(style.italic)
+            font = resolve_qfont(
+                style.font_family,
+                pixel_size=max(8, int(style.font_size)),
+                bold=bool(style.bold),
+                italic=bool(style.italic),
+            )
             item.setFont(font)
             color = QColor(style.color)
             if color.isValid():
                 color.setAlphaF(max(0.0, min(1.0, float(getattr(style, "opacity", 1.0)))))
             item.setDefaultTextColor(color)
+            apply_text_tab_stops(item, getattr(style, "tab_stop", 192))
+            apply_text_content(item, element.content, style)
             align = {
                 "left": Qt.AlignmentFlag.AlignLeft,
                 "center": Qt.AlignmentFlag.AlignHCenter,
@@ -265,6 +271,12 @@ class SlideStage(QGraphicsView):
             }.get(style.align, Qt.AlignmentFlag.AlignLeft)
             option = item.document().defaultTextOption()
             option.setAlignment(align)
+            try:
+                option.setTabStopDistance(
+                    max(24.0, float(getattr(style, "tab_stop", 192) or 192))
+                )
+            except (TypeError, ValueError):
+                option.setTabStopDistance(192.0)
             item.document().setDefaultTextOption(option)
             if getattr(style, "wrap", True):
                 item.setTextWidth(max(40.0, element.w))
@@ -877,18 +889,20 @@ class SlideStage(QGraphicsView):
     ) -> QGraphicsItem | None:
         if element.type == "text":
             item = QGraphicsTextItem()
-            raw = element.content or ""
-            item.setPlainText("" if is_text_placeholder(raw) else raw)
             style = element.style
-            font = QFont(style.font_family or "微软雅黑")
-            font.setPixelSize(max(8, int(style.font_size)))
-            font.setBold(style.bold)
-            font.setItalic(style.italic)
+            font = resolve_qfont(
+                style.font_family,
+                pixel_size=max(8, int(style.font_size)),
+                bold=bool(style.bold),
+                italic=bool(style.italic),
+            )
             item.setFont(font)
             color = QColor(style.color)
             if color.isValid():
                 color.setAlphaF(max(0.0, min(1.0, float(getattr(style, "opacity", 1.0)))))
             item.setDefaultTextColor(color)
+            apply_text_tab_stops(item, getattr(style, "tab_stop", 192))
+            apply_text_content(item, element.content, style)
             align = {
                 "left": Qt.AlignmentFlag.AlignLeft,
                 "center": Qt.AlignmentFlag.AlignHCenter,
@@ -896,6 +910,12 @@ class SlideStage(QGraphicsView):
             }.get(style.align, Qt.AlignmentFlag.AlignLeft)
             option = item.document().defaultTextOption()
             option.setAlignment(align)
+            try:
+                option.setTabStopDistance(
+                    max(24.0, float(getattr(style, "tab_stop", 192) or 192))
+                )
+            except (TypeError, ValueError):
+                option.setTabStopDistance(192.0)
             item.document().setDefaultTextOption(option)
             if getattr(style, "wrap", True):
                 item.setTextWidth(max(40.0, element.w))
@@ -942,12 +962,18 @@ class SlideStage(QGraphicsView):
         return None
 
     def _fit_view(self):
-        if self._logical_w <= 0:
+        """按当前视口等比铺满（双屏分辨率不同也不变形）。"""
+        if self._logical_w <= 0 or self._logical_h <= 0:
             return
-        self.fitInView(
-            QRectF(0, 0, self._logical_w, self._logical_h),
-            Qt.AspectRatioMode.KeepAspectRatio,
-        )
+        self.setSceneRect(QRectF(0, 0, self._logical_w, self._logical_h))
+        vw = max(1, self.viewport().width())
+        vh = max(1, self.viewport().height())
+        self.resetTransform()
+        scale = min(vw / self._logical_w, vh / self._logical_h)
+        if scale <= 0:
+            return
+        self.scale(scale, scale)
+        self.centerOn(self._logical_w * 0.5, self._logical_h * 0.5)
 
     def set_wheel_pages(self, on: bool):
         """副屏禁止滚轮翻页；主屏预览仍可滚轮控场。"""

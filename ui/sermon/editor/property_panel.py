@@ -426,29 +426,34 @@ class PropertyPanel(QWidget):
                 seen.add(name)
 
     def set_selection(self, elements: list[Element]):
-        """0 个：空提示；≥1：可对齐（相对幻灯片）；≥2：可相对对象；≥3：可分布。"""
+        """0 个：空提示；≥1：可对齐；≥2：批量改属性 + 对齐；≥3：可分布。"""
         self._selection = list(elements)
         n = len(elements)
         if n >= 1:
             self.multi_section.show()
             self._refresh_align_enabled()
+            self._refresh_layer_enabled()
             if n == 1:
                 self.set_element(elements[0])
                 self.multi_section.show()
                 self.hint.setText("已选 1 个图层。可相对幻灯片对齐。")
             else:
-                self._element = None
-                self._show_element_ui(False)
-                rel = self.align_relative_mode()
-                tip = "相对幻灯片" if rel == "slide" else "相对对象"
-                self.hint.setText(f"已选 {n} 个图层。对齐{tip}；分布需 ≥3。")
+                self._load_multi_props(elements)
             return
         self.multi_section.hide()
         self.set_element(None)
+        self._refresh_layer_enabled()
 
     def align_relative_mode(self) -> str:
         data = self.align_relative.currentData()
         return str(data or "slide")
+
+    def _refresh_layer_enabled(self):
+        # shortcut: 多选不整组改 z，单选才开；以后若要 PPT 式成组调层再升级
+        n = len(getattr(self, "_selection", []) or [])
+        on = n == 1
+        for b in (self.front_btn, self.up_btn, self.down_btn, self.back_btn):
+            b.setEnabled(on)
 
     def _refresh_align_enabled(self):
         n = len(getattr(self, "_selection", []) or [])
@@ -465,7 +470,97 @@ class PropertyPanel(QWidget):
                 self.hint.setText("已选 1 个图层。「相对于对象」需再选至少 1 个。")
         elif n >= 2:
             tip = "相对幻灯片" if rel == "slide" else "相对对象"
-            self.hint.setText(f"已选 {n} 个图层。对齐{tip}；分布需 ≥3。")
+            self.hint.setText(
+                f"已选 {n} 个图层。改字号/颜色/尺寸会一并应用到选中项；对齐{tip}；分布需 ≥3。"
+            )
+
+    def _targets(self) -> list[Element]:
+        if len(self._selection) > 1:
+            return list(self._selection)
+        if self._element is not None:
+            return [self._element]
+        return list(self._selection)
+
+    @staticmethod
+    def _common(values: list):
+        if not values:
+            return None
+        first = values[0]
+        return first if all(v == first for v in values) else None
+
+    def _load_multi_props(self, elements: list[Element]):
+        """多选：展示共有控件；值一致则填入，不一致则保留首项供接着改。"""
+        self._element = None
+        self._block = True
+        texts = [e for e in elements if e.type == "text"]
+        shapes = [e for e in elements if e.type == "shape"]
+        self.geom_section.setVisible(True)
+        self.layer_section.setVisible(True)
+        self.text_section.setVisible(bool(texts))
+        self.shape_section.setVisible(bool(shapes))
+
+        self.spin_x.setValue(int(self._common([e.x for e in elements]) or elements[0].x))
+        self.spin_y.setValue(int(self._common([e.y for e in elements]) or elements[0].y))
+        self.spin_w.setValue(
+            int(self._common([max(1, e.w) for e in elements]) or max(1, elements[0].w))
+        )
+        self.spin_h.setValue(
+            int(self._common([max(1, e.h) for e in elements]) or max(1, elements[0].h))
+        )
+
+        if texts:
+            fam = self._common([(t.style.font_family or "微软雅黑") for t in texts])
+            show_fam = fam or (texts[0].style.font_family or "微软雅黑")
+            if show_fam and self.font_family.findText(show_fam) < 0:
+                self.font_family.addItem(show_fam)
+            self.font_family.setCurrentText(show_fam)
+            size = self._common([t.style.font_size for t in texts])
+            self.font_size.setValue(int(size if size is not None else texts[0].style.font_size))
+            color = self._common([t.style.color for t in texts])
+            self._font_color = color or texts[0].style.color or "#FFFFFF"
+            if color is None:
+                self._update_color_btn(self.font_color_btn, self._font_color, mixed=True)
+            else:
+                self._update_color_btn(self.font_color_btn, self._font_color)
+            bold = self._common([t.style.bold for t in texts])
+            self.bold_btn.setChecked(bool(bold) if bold is not None else False)
+            italic = self._common([t.style.italic for t in texts])
+            self.italic_btn.setChecked(bool(italic) if italic is not None else False)
+            wrap = self._common([bool(getattr(t.style, "wrap", True)) for t in texts])
+            self.wrap_btn.setChecked(bool(wrap) if wrap is not None else True)
+            align = self._common([t.style.align for t in texts])
+            idx = self.align.findData(align if align is not None else texts[0].style.align)
+            if idx >= 0:
+                self.align.setCurrentIndex(idx)
+            spacing = self._common(
+                [int(getattr(t.style, "line_spacing", 120) or 120) for t in texts]
+            )
+            self.line_spacing.setValue(
+                int(spacing if spacing is not None else getattr(texts[0].style, "line_spacing", 120))
+            )
+
+        if shapes:
+            kind = self._common([(s.shape or "rect") for s in shapes])
+            sk = self.shape_kind.findData(kind if kind is not None else (shapes[0].shape or "rect"))
+            if sk >= 0:
+                self.shape_kind.setCurrentIndex(sk)
+            fill = self._common([(s.style.color or "#000000") for s in shapes])
+            self._fill_color = fill or (shapes[0].style.color or "#000000")
+            if fill is None:
+                self._update_color_btn(self.fill_color_btn, self._fill_color, mixed=True)
+            else:
+                self._update_color_btn(self.fill_color_btn, self._fill_color)
+            opac = self._common([int(round(float(s.style.opacity) * 100)) for s in shapes])
+            self.opacity.setValue(
+                int(opac if opac is not None else round(float(shapes[0].style.opacity) * 100))
+            )
+
+        rel = self.align_relative_mode()
+        tip = "相对幻灯片" if rel == "slide" else "相对对象"
+        self.hint.setText(
+            f"已选 {len(elements)} 个图层。改字号/颜色/尺寸会一并应用到选中项；对齐{tip}；分布需 ≥3。"
+        )
+        self._block = False
 
     def set_element(self, element: Element | None):
         self._element = element
@@ -489,7 +584,10 @@ class PropertyPanel(QWidget):
             self.shape_section.setVisible(is_shape)
             if is_text:
                 style = element.style
-                self.font_family.setCurrentText(style.font_family)
+                fam = style.font_family or "微软雅黑"
+                if fam and self.font_family.findText(fam) < 0:
+                    self.font_family.addItem(fam)
+                self.font_family.setCurrentText(fam)
                 self.font_size.setValue(style.font_size)
                 self._font_color = style.color
                 self._update_color_btn(self.font_color_btn, self._font_color)
@@ -521,10 +619,20 @@ class PropertyPanel(QWidget):
         self.geom_section.setVisible(visible)
         self.layer_section.setVisible(visible)
 
-    def _update_color_btn(self, btn: QPushButton, color: str):
+    def _update_color_btn(self, btn: QPushButton, color: str, *, mixed: bool = False):
         c = QColor(color)
         if not c.isValid():
             c = QColor("#FFFFFF")
+        if mixed:
+            btn.setStyleSheet(
+                "QPushButton {"
+                " background: #CBD5E1; color: #0F172A;"
+                " border: 1px solid rgba(0,0,0,40);"
+                " border-radius: 6px; min-height: 30px;"
+                "}"
+            )
+            btn.setText("混合")
+            return
         fg = "#0F172A" if c.lightness() > 140 else "#FFFFFF"
         btn.setStyleSheet(
             "QPushButton {"
@@ -536,33 +644,85 @@ class PropertyPanel(QWidget):
         btn.setText(c.name().upper())
 
     def _pick_font_color(self):
-        if self._element is None:
+        if not any(e.type == "text" for e in self._targets()):
             return
         color = QColorDialog.getColor(QColor(self._font_color), self, "文字颜色")
         if not color.isValid():
             return
         self._font_color = color.name().upper()
         self._update_color_btn(self.font_color_btn, self._font_color)
-        self._emit_element()
+        self._emit_keys(("font_color",))
 
     def _pick_fill_color(self):
-        if self._element is None:
+        if not any(e.type == "shape" for e in self._targets()):
             return
         color = QColorDialog.getColor(QColor(self._fill_color), self, "填充颜色")
         if not color.isValid():
             return
         self._fill_color = color.name().upper()
         self._update_color_btn(self.fill_color_btn, self._fill_color)
-        self._emit_element()
+        self._emit_keys(("fill_color",))
 
-    def _emit_element(self, *_args):
-        if self._block or self._element is None:
-            return
-        el = self._element
+    def _keys_for_sender(self, src) -> tuple[str, ...]:
+        mapping = {
+            self.spin_x: ("x",),
+            self.spin_y: ("y",),
+            self.spin_w: ("w",),
+            self.spin_h: ("h",),
+            self.font_family: ("font_family",),
+            self.font_size: ("font_size",),
+            self.font_color_btn: ("font_color",),
+            self.bold_btn: ("bold",),
+            self.italic_btn: ("italic",),
+            self.wrap_btn: ("wrap",),
+            self.align: ("align",),
+            self.line_spacing: ("line_spacing",),
+            self.shape_kind: ("shape_kind",),
+            self.fill_color_btn: ("fill_color",),
+            self.opacity: ("opacity",),
+        }
+        return mapping.get(src, ())
+
+    def _write_keys(self, el: Element, keys: tuple[str, ...]) -> None:
+        for key in keys:
+            if key == "x":
+                el.x = float(self.spin_x.value())
+            elif key == "y":
+                el.y = float(self.spin_y.value())
+            elif key == "w":
+                el.w = float(max(1, self.spin_w.value()))
+            elif key == "h":
+                el.h = float(max(1, self.spin_h.value()))
+            elif el.type == "text":
+                if key == "font_family":
+                    el.style.font_family = self.font_family.currentText().strip() or "微软雅黑"
+                elif key == "font_size":
+                    el.style.font_size = int(self.font_size.value())
+                elif key == "font_color":
+                    el.style.color = self._font_color
+                elif key == "bold":
+                    el.style.bold = self.bold_btn.isChecked()
+                elif key == "italic":
+                    el.style.italic = self.italic_btn.isChecked()
+                elif key == "wrap":
+                    el.style.wrap = self.wrap_btn.isChecked()
+                elif key == "align":
+                    el.style.align = str(self.align.currentData() or "left")
+                elif key == "line_spacing":
+                    el.style.line_spacing = int(self.line_spacing.value())
+            elif el.type == "shape":
+                if key == "shape_kind":
+                    el.shape = str(self.shape_kind.currentData() or "rect")
+                elif key == "fill_color":
+                    el.style.color = self._fill_color
+                elif key == "opacity":
+                    el.style.opacity = max(0.0, min(1.0, self.opacity.value() / 100.0))
+
+    def _write_all_from_ui(self, el: Element) -> None:
         el.x = float(self.spin_x.value())
         el.y = float(self.spin_y.value())
-        el.w = float(self.spin_w.value())
-        el.h = float(self.spin_h.value())
+        el.w = float(max(1, self.spin_w.value()))
+        el.h = float(max(1, self.spin_h.value()))
         if el.type == "text":
             el.style.font_family = self.font_family.currentText().strip() or "微软雅黑"
             el.style.font_size = int(self.font_size.value())
@@ -576,4 +736,33 @@ class PropertyPanel(QWidget):
             el.shape = str(self.shape_kind.currentData() or "rect")
             el.style.color = self._fill_color
             el.style.opacity = max(0.0, min(1.0, self.opacity.value() / 100.0))
-        self.element_changed.emit(el)
+
+    def _emit_keys(self, keys: tuple[str, ...]):
+        if self._block or not keys:
+            return
+        targets = self._targets()
+        if not targets:
+            return
+        for el in targets:
+            self._write_keys(el, keys)
+        if len(targets) == 1:
+            self.element_changed.emit(targets[0])
+        else:
+            self.element_changed.emit(targets)
+
+    def _emit_element(self, *_args):
+        if self._block:
+            return
+        targets = self._targets()
+        if not targets:
+            return
+        if len(targets) == 1:
+            self._write_all_from_ui(targets[0])
+            self.element_changed.emit(targets[0])
+            return
+        keys = self._keys_for_sender(self.sender())
+        if not keys:
+            return
+        for el in targets:
+            self._write_keys(el, keys)
+        self.element_changed.emit(targets)

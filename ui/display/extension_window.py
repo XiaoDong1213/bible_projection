@@ -199,6 +199,7 @@ class ExtensionWindow(QWidget):
         root = Path(assets_root) if assets_root else None
         self.slide_stage.set_assets_root(root)
         self.slide_stage.show_slide(doc, slide, prepare_anims=prepare_anims)
+        self.slide_stage.show()
         self.slide_stage.lower()
         self._cover.raise_()
 
@@ -330,6 +331,19 @@ class ExtensionWindow(QWidget):
             self.force_sync_scroll()
 
         self._play_cover_fade(pix, _after)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # 双屏分辨率/DPI 变化后重算讲篇等比铺满
+        stage = getattr(self, "slide_stage", None)
+        if stage is not None and stage.isVisible() and hasattr(stage, "_fit_view"):
+            stage._fit_view()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        stage = getattr(self, "slide_stage", None)
+        if stage is not None and hasattr(stage, "_fit_view"):
+            stage._fit_view()
 
     def closeEvent(self, event):
         self.close_requested.emit()

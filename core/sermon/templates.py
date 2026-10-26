@@ -9,6 +9,7 @@ from pathlib import Path
 from core.paths import data_dir
 
 from .model import SermonDocument, new_id
+from .store import safe_sermon_id
 
 
 class TemplateStore:
@@ -19,7 +20,11 @@ class TemplateStore:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def template_dir(self, template_id: str) -> Path:
-        return self.root / template_id
+        tid = safe_sermon_id(template_id)
+        root = self.root.resolve()
+        path = (root / tid).resolve()
+        path.relative_to(root)
+        return path
 
     def json_path(self, template_id: str) -> Path:
         return self.template_dir(template_id) / "template.json"
@@ -39,6 +44,10 @@ class TemplateStore:
         for child in sorted(self.root.iterdir()):
             if not child.is_dir():
                 continue
+            # 列表 id 只用文件夹名，忽略 json 里可能被篡改的 id
+            tid = safe_sermon_id(child.name)
+            if tid != child.name:
+                continue
             path = child / "template.json"
             if not path.exists():
                 continue
@@ -50,7 +59,7 @@ class TemplateStore:
             thumb = child / "thumb.png"
             items.append(
                 {
-                    "id": data.get("id") or child.name,
+                    "id": tid,
                     "title": data.get("title") or "未命名模板",
                     "updated": meta.get("updated", ""),
                     "thumb": str(thumb) if thumb.exists() else "",
@@ -60,9 +69,10 @@ class TemplateStore:
         return items
 
     def load(self, template_id: str) -> SermonDocument:
-        data = json.loads(self.json_path(template_id).read_text(encoding="utf-8"))
+        tid = safe_sermon_id(template_id)
+        data = json.loads(self.json_path(tid).read_text(encoding="utf-8"))
         doc = SermonDocument.from_dict(data)
-        doc.id = template_id
+        doc.id = tid
         return doc
 
     def save_from_document(
@@ -82,7 +92,6 @@ class TemplateStore:
         folder.mkdir(parents=True, exist_ok=True)
         self.assets_dir(tpl_id)
 
-        # 复制资源
         if source_assets and Path(source_assets).exists():
             src = Path(source_assets)
             if src.name != "assets":
@@ -115,7 +124,6 @@ class TemplateStore:
         src = self.load(template_id)
         data = src.to_dict()
         data["id"] = new_id("sermon_")
-        # 保留标题，加前缀避免混淆
         title = src.title or "未命名讲篇"
         data["title"] = title
         doc = SermonDocument.from_dict(data)
