@@ -56,6 +56,8 @@ THEMES = {
         "danger_text": "#FCA5A5",
         "success": "#22C55E",
         "preview_bg": "#07090D",
+        # 扩展/讲篇等比留白：监视器外框，不用死黑
+        "stage_matte": "#12161E",
         "scroll": "#3A4558",
         "scroll_hover": "#4B5568",
         "focus_ring": "#3B82F6",
@@ -94,6 +96,7 @@ THEMES = {
         "danger_text": "#B91C1C",
         "success": "#16A34A",
         "preview_bg": "#0B0D10",
+        "stage_matte": "#E8ECF2",
         "scroll": "#C5CDD9",
         "scroll_hover": "#94A3B8",
         "focus_ring": "#2563EB",
@@ -497,6 +500,31 @@ QToolBar QComboBox QAbstractItemView {{
     outline: none;
 }}
 
+QToolBar QLabel#toolbarSection {{
+    color: {t['text_faint']};
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 0 6px 0 4px;
+    background: transparent;
+}}
+QToolBar QLabel#modeBadge {{
+    color: {t['accent_text']};
+    background: {t['accent_soft']};
+    border: 1px solid {t['accent']};
+    border-radius: {r['sm']}px;
+    padding: 0 10px;
+    font-size: 12px;
+    font-weight: 700;
+    min-height: 28px;
+    max-height: 28px;
+    min-width: 48px;
+}}
+QToolBar QLabel#modeBadge[presenting="true"] {{
+    color: #FFFFFF;
+    background: {t['danger']};
+    border-color: {t['danger']};
+}}
 QToolBar QWidget#extendBtnWrap {{
     background: {t['accent']};
     border: 1px solid {t['accent']};
@@ -1006,7 +1034,8 @@ QLineEdit:focus {{
     background: {t['canvas']};
 }}
 #previewView {{
-    background: {t['preview_bg']};
+    /* 经文背景色/图由 PreviewHost + ScriptureDisplay 负责，这里勿盖死黑 */
+    background: transparent;
     border: none;
 }}
 

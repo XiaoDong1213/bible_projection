@@ -90,6 +90,8 @@ def _on_editor_closed(window):
         btn.setChecked(False)
         btn.blockSignals(False)
     _set_scripture_preview_visible(window, True)
+    if hasattr(window, "_update_mode_badge"):
+        window._update_mode_badge()
 
 
 def _toggle_editor(window):
@@ -116,6 +118,8 @@ def _open_editor(window):
         editor._set_present_shortcuts_enabled(True)
         if hasattr(window, "_update_session_chrome"):
             window._update_session_chrome()
+    elif hasattr(window, "_update_mode_badge"):
+        window._update_mode_badge()
     btn = getattr(window, "sermon_button", None)
     if btn is not None:
         btn.blockSignals(True)

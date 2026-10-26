@@ -25,9 +25,11 @@ from core.sermon.model import (
     new_anim_step,
 )
 from ui.sermon.styles import SermonComboBox
+from ui.sermon.text_format import plain_from_content
 
 
 class AnimPanel(QWidget):
+    before_change = pyqtSignal()  # 变更前，供主窗口压撤销栈
     changed = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -116,6 +118,12 @@ class AnimPanel(QWidget):
     def set_selected_element(self, element: Element | None):
         self._selected = element
 
+    def _can_edit(self) -> bool:
+        win = self.window()
+        if win is not None and hasattr(win, "_require_present_edit"):
+            return bool(win._require_present_edit())
+        return True
+
     def refresh(self):
         self._block = True
         self.list.clear()
@@ -156,7 +164,9 @@ class AnimPanel(QWidget):
         for el in self._slide.elements:
             if el.id == element_id:
                 if el.type == "text":
-                    text = (el.content or "文本").replace("\n", " ")
+                    text = plain_from_content(el.content or "").replace("\n", " ").strip()
+                    if not text:
+                        text = "文本"
                     return text[:12] + ("…" if len(text) > 12 else "")
                 if el.type == "shape":
                     return "形状"
@@ -187,13 +197,14 @@ class AnimPanel(QWidget):
         self.duration.setValue(step.duration_ms)
 
     def _add(self):
-        if self._slide is None:
+        if self._slide is None or not self._can_edit():
             return
         if self._selected is None:
             win = self.window()
             if win is not None and hasattr(win, "statusBar"):
                 win.statusBar().showMessage("请先选中一个元素再添动画", 3000)
             return
+        self.before_change.emit()
         order = len(self._slide.animations)
         kind = str(self.kind_combo.currentData() or "fade")
         trigger = str(self.trigger_combo.currentData() or "on_click")
@@ -207,32 +218,37 @@ class AnimPanel(QWidget):
 
     def _delete(self):
         step = self._current_step()
-        if step is None or self._slide is None:
+        if step is None or self._slide is None or not self._can_edit():
             return
+        self.before_change.emit()
         self._slide.animations = [a for a in self._slide.animations if a.id != step.id]
         self._reindex()
         self.refresh()
         self.changed.emit()
 
     def _move(self, delta: int):
-        if self._slide is None:
+        if self._slide is None or not self._can_edit():
             return
         anims = self._slide.sorted_animations()
         row = self.list.currentRow()
         new_row = row + delta
         if row < 0 or new_row < 0 or new_row >= len(anims):
             return
+        self.before_change.emit()
         anims[row], anims[new_row] = anims[new_row], anims[row]
-        self._slide.animations = anims
-        self._reindex()
+        # 先写死 order，再赋回；否则按旧 order 排序会把对调冲掉
+        for i, step in enumerate(anims):
+            step.order = i
+        self._slide.animations = list(anims)
         self.refresh()
         self.list.setCurrentRow(new_row)
         self.changed.emit()
 
     def _apply_fields(self):
         step = self._current_step()
-        if step is None:
+        if step is None or not self._can_edit():
             return
+        self.before_change.emit()
         step.kind = str(self.kind_combo.currentData() or "fade")
         step.trigger = str(self.trigger_combo.currentData() or "on_click")
         step.duration_ms = int(self.duration.value())

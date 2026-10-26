@@ -130,9 +130,9 @@ class NavigationPanel(QWidget):
         self.selected_book = None
         self._history_updating = False
         self.setObjectName("navPanel")
-        self.setMinimumWidth(320)
-        self.setMaximumWidth(420)
-        self.setFixedWidth(360)
+        self.setMinimumWidth(280)
+        self.setMaximumWidth(400)
+        self.setFixedWidth(320)
         self._init_ui()
 
     def _init_ui(self):

@@ -390,7 +390,8 @@ class SlideCanvas(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self._drag_history_armed = False
-        self.setBackgroundBrush(QBrush(QColor("#2B2B2B")))
+        self._stage_matte = QColor("#12161E")
+        self.setBackgroundBrush(QBrush(self._stage_matte))
         self.setFrameShape(self.Shape.NoFrame)
 
         self._scene = QGraphicsScene(self)
@@ -689,11 +690,21 @@ class SlideCanvas(QGraphicsView):
                 )
                 self._scene.addItem(item)
                 self._bg_image_item = item
+                # 留白用主题垫底（监视器外框），不跟死黑/页色
+                self.setBackgroundBrush(QBrush(self._stage_matte))
                 return
         color = QColor(bg.value) if bg.value else QColor("#1A1A2E")
         if not color.isValid():
             color = QColor("#1A1A2E")
         self._bg_item.setBrush(QBrush(color))
+        self.setBackgroundBrush(QBrush(self._stage_matte))
+
+    def set_stage_matte(self, color):
+        c = QColor(color) if not isinstance(color, QColor) else QColor(color)
+        if c.isValid():
+            self._stage_matte = c
+            self.setBackgroundBrush(QBrush(self._stage_matte))
+            self.viewport().update()
 
     def _add_item_for_element(self, element: Element):
         if element.type == "text":

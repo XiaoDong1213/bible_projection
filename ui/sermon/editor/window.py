@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import shutil
 from pathlib import Path
 
 from PyQt6.QtCore import QEvent, Qt, QBuffer, QIODevice, QPoint, QTimer, pyqtSignal
@@ -32,6 +34,7 @@ from core.sermon.model import (
     Element,
     ElementStyle,
     new_document,
+    new_id,
     new_image_element,
     new_shape_element,
     new_slide,
@@ -39,6 +42,7 @@ from core.sermon.model import (
     SermonDocument,
     Slide,
 )
+
 from core.sermon.store import (
     LEGACY_FILTER,
     PACKAGE_EXT,
@@ -47,6 +51,8 @@ from core.sermon.store import (
     suggest_package_name,
 )
 from core.sermon.templates import TemplateStore
+
+logger = logging.getLogger(__name__)
 
 from .anim_panel import AnimPanel
 from .canvas import SlideCanvas
@@ -118,6 +124,13 @@ class SermonEditorWindow(QWidget):
 
     def apply_theme(self, theme: str = "dark"):
         apply_sermon_theme(self, theme)
+        from ui.themes import theme_tokens
+
+        matte = theme_tokens(theme or "dark").get("stage_matte", "#12161E")
+        if hasattr(self, "canvas") and hasattr(self.canvas, "set_stage_matte"):
+            self.canvas.set_stage_matte(matte)
+        if hasattr(self, "present_stage") and hasattr(self.present_stage, "set_stage_matte"):
+            self.present_stage.set_stage_matte(matte)
 
     def eventFilter(self, obj, event):
         if obj is getattr(self, "btn_format", None) and event.type() == QEvent.Type.MouseButtonDblClick:
@@ -234,15 +247,17 @@ class SermonEditorWindow(QWidget):
         self.play_btn = QPushButton("开始放映")
         self.play_btn.setObjectName("sermonPlayBtn")
         self.play_btn.setToolTip("在扩展屏放映当前讲篇  F5")
+        self.play_btn.setMinimumWidth(96)
         self.play_btn.clicked.connect(self.start_presentation)
         self.edit_btn = QPushButton("编辑")
         self.edit_btn.setObjectName("sermonPresentEditBtn")
         self.edit_btn.setToolTip("放映中打开画布：对齐、格式刷、改字")
         self.edit_btn.clicked.connect(self._toggle_present_edit)
         self.edit_btn.setEnabled(False)
-        self.stop_btn = QPushButton("结束")
+        self.stop_btn = QPushButton("结束放映")
         self.stop_btn.setObjectName("sermonStopBtn")
         self.stop_btn.setToolTip("结束放映并淡回经文  Esc")
+        self.stop_btn.setMinimumWidth(88)
         self.stop_btn.clicked.connect(self.stop_presentation)
         self.stop_btn.setEnabled(False)
         toolbar.addWidget(self.play_btn)
@@ -287,9 +302,10 @@ class SermonEditorWindow(QWidget):
         canvas_layout = QVBoxLayout(canvas_host)
         canvas_layout.setContentsMargins(0, 0, 0, 8)
         canvas_layout.setSpacing(0)
-        self.canvas_caption = QLabel("编辑画布 · 拖动元素调整位置")
+        self.canvas_caption = QLabel("")
         self.canvas_caption.setObjectName("sermonCanvasCaption")
         canvas_layout.addWidget(self.canvas_caption)
+        self._refresh_canvas_caption()
 
         self.canvas_split = QSplitter(Qt.Orientation.Horizontal)
         self.canvas_split.setObjectName("sermonCanvasSplit")
@@ -343,6 +359,7 @@ class SermonEditorWindow(QWidget):
         self.side_tabs.addTab(self.props, "属性")
 
         self.anim_panel = AnimPanel()
+        self.anim_panel.before_change.connect(self._on_anims_before_change)
         self.anim_panel.changed.connect(self._on_anims_changed)
         self.side_tabs.addTab(self.anim_panel, "动画")
 
@@ -813,6 +830,40 @@ class SermonEditorWindow(QWidget):
             main.show_scripture_channel()
             self.statusBar().showMessage("已切到经文（讲篇进度保留）", 4000)
 
+    def pause_for_scripture(self):
+        """切到经文频道：保留放映态，关掉本页快捷键，避免主屏卡住抢键。"""
+        if not self._presenting:
+            return
+        self._set_present_shortcuts_enabled(False)
+        try:
+            self.present_stage.abort_playback()
+        except Exception:
+            logger.warning("pause_for_scripture: abort_playback 失败", exc_info=True)
+
+    def resume_from_scripture(self):
+        """从经文切回讲篇：恢复预览与快捷键。"""
+        if not self._presenting:
+            return
+        self._set_present_shortcuts_enabled(True)
+        self.play_btn.setEnabled(False)
+        self.stop_btn.setEnabled(True)
+        self.edit_btn.setEnabled(True)
+        self._update_present_edit_btn()
+        try:
+            self.present_stage.flush_pending_hot()
+        except Exception:
+            logger.warning("resume_from_scripture: flush_pending_hot 失败", exc_info=True)
+        if self._hold_editor_canvas:
+            self._open_editor_canvas()
+        else:
+            self._enter_present_preview()
+        self.fit_to_parent()
+        self.show()
+        self.raise_()
+        # 避免被底栏/其它层挡住，主屏看起来「卡住」
+        self.raise_()
+        self.activateWindow()
+
     def stop_presentation(self):
         main = self._main_window()
         if main is not None:
@@ -1004,7 +1055,7 @@ class SermonEditorWindow(QWidget):
         self.present_stage.stop_animations(apply_end=False)
         self.present_stage.clear_stage()
         self._apply_stage_layout("edit")
-        self.canvas_caption.setText("编辑画布 · 拖动元素调整位置")
+        self._refresh_canvas_caption()
 
     def _on_present_stage_step(self, delta: int):
         if not self._presenting:
@@ -1113,7 +1164,8 @@ class SermonEditorWindow(QWidget):
         if getattr(main, "_projection_channel", "sermon") != "sermon":
             if hasattr(main, "show_sermon_channel"):
                 main.show_sermon_channel()
-            return
+            if getattr(main, "_projection_channel", "sermon") != "sermon":
+                return
         main.sermon_controller.advance()
         self.sync_from_controller()
 
@@ -1128,8 +1180,9 @@ class SermonEditorWindow(QWidget):
         if getattr(main, "_projection_channel", "sermon") != "sermon":
             if hasattr(main, "show_sermon_channel"):
                 main.show_sermon_channel()
-            return
-        main.sermon_controller.prev_slide()
+            if getattr(main, "_projection_channel", "sermon") != "sermon":
+                return
+        main.sermon_controller.prev()
         self.sync_from_controller()
 
     def sync_from_controller(self, *, rebuild_canvas: bool = False):
@@ -1294,6 +1347,17 @@ class SermonEditorWindow(QWidget):
         else:
             self._package_path = None
         self._saved_once = bool(self._package_path and self._package_path.is_file())
+        # PPT 元数据常写成 Presentation，改用文件名
+        from core.sermon.model import normalize_sermon_title
+
+        fallback = (
+            self._package_path.stem
+            if self._package_path is not None
+            else (doc.title or "未命名讲篇")
+        )
+        fixed = normalize_sermon_title(doc.title, fallback)
+        if fixed != doc.title:
+            doc.title = fixed
         if hasattr(self.store, "cleanup_temps"):
             self.store.cleanup_temps(keep_id=doc.id)
         self.store.sermon_dir(doc.id).mkdir(parents=True, exist_ok=True)
@@ -1380,6 +1444,9 @@ class SermonEditorWindow(QWidget):
         self.statusBar().showMessage("模板已删除", 3000)
 
     def import_pptx(self):
+        if self._presenting:
+            QMessageBox.information(self, "导入 PPTX", "放映中请先结束放映，再导入。")
+            return
         if not self._confirm_discard():
             return
         path, _ = QFileDialog.getOpenFileName(
@@ -1398,6 +1465,11 @@ class SermonEditorWindow(QWidget):
             QMessageBox.warning(self, "导入失败", str(exc))
             return
         self._load_document(doc, mark_clean=True, package_path=None)
+        from core.sermon.import_report import import_dialog_body
+
+        body = import_dialog_body(doc)
+        if body:
+            QMessageBox.information(self, "导入说明", body)
         skipped = int(getattr(doc, "import_skip_count", 0) or 0)
         extra = f"，{skipped} 处对象已跳过" if skipped else ""
         self.statusBar().showMessage(
@@ -1424,6 +1496,9 @@ class SermonEditorWindow(QWidget):
         self.statusBar().showMessage(f"已导出：{dest}", 4000)
 
     def new_document(self):
+        if self._presenting:
+            QMessageBox.information(self, "新建讲篇", "放映中请先结束放映，再建新讲篇。")
+            return
         if not self._confirm_discard():
             return
         title, ok = QInputDialog.getText(self, "新建讲篇", "标题：", text="未命名讲篇")
@@ -1436,6 +1511,9 @@ class SermonEditorWindow(QWidget):
         self.statusBar().showMessage("已新建讲篇（尚未保存为 .sermon）", 3000)
 
     def open_document(self):
+        if self._presenting:
+            QMessageBox.information(self, "打开讲篇", "放映中请先结束放映，再打开其他讲篇。")
+            return
         if not self._confirm_discard():
             return
         start_dir = str(
@@ -1494,7 +1572,29 @@ class SermonEditorWindow(QWidget):
         if stem:
             self.doc.title = stem
             self._update_title()
-        return self._write_package(dest)
+        # 另存到新路径：换新 id，避免两个 .sermon 共用一个工作目录
+        same_file = (
+            self._package_path is not None
+            and dest.resolve() == self._package_path.resolve()
+        )
+        if same_file:
+            return self._write_package(dest)
+        old_id = self.doc.id
+        old_dir = self.store.sermon_dir(old_id)
+        self.doc.id = new_id("sermon_")
+        new_dir = self.store.sermon_dir(self.doc.id)
+        try:
+            if old_dir.is_dir() and old_dir.resolve() != new_dir.resolve():
+                if new_dir.exists():
+                    shutil.rmtree(new_dir)
+                shutil.copytree(old_dir, new_dir)
+            if not self._write_package(dest):
+                self.doc.id = old_id
+                return False
+            return True
+        except Exception:
+            self.doc.id = old_id
+            raise
 
     def _write_package(self, package_path: Path) -> bool:
         try:
@@ -1585,6 +1685,26 @@ class SermonEditorWindow(QWidget):
     def _set_dirty(self, dirty: bool):
         self._dirty = dirty
         self._update_title()
+        self._refresh_canvas_caption()
+
+    def _refresh_canvas_caption(self):
+        """画布状态条：页码 + 未保存；放映态保留专用文案。"""
+        if getattr(self, "canvas_caption", None) is None:
+            return
+        if self._presenting and not self._hold_editor_canvas:
+            return
+        if self._presenting and self._hold_editor_canvas:
+            n = len(self.doc.slides)
+            i = self._slide_index + 1 if n else 0
+            dirty = " · 未保存" if self._dirty else ""
+            self.canvas_caption.setText(
+                f"放映中编辑 · 第 {i} / {n} 页{dirty} · 左侧改、右侧跟观众"
+            )
+            return
+        n = len(self.doc.slides)
+        i = self._slide_index + 1 if n else 0
+        dirty = " · 未保存" if self._dirty else ""
+        self.canvas_caption.setText(f"第 {i} / {n} 页{dirty}")
 
     def _update_title(self):
         mark = " *" if self._dirty else ""
@@ -1617,6 +1737,7 @@ class SermonEditorWindow(QWidget):
         self.anim_panel.set_slide(slide)
         self.anim_panel.set_selected_element(None)
         self.transition_panel.set_slide(slide)
+        self._refresh_canvas_caption()
         QTimer.singleShot(0, self._refresh_thumbnail)
         if self._presenting:
             self._hold_live_output = False
@@ -2112,14 +2233,23 @@ class SermonEditorWindow(QWidget):
         els = self.canvas.selected_elements()
         self.props.set_selection(els)
         self.anim_panel.set_selected_element(element if len(els) == 1 else None)
-        if els and self.side_tabs.currentIndex() == 0:
-            self.side_tabs.setCurrentIndex(1)
+        # 有选中就切到属性；无选中且在属性页则回背景
+        if els:
+            props_idx = self.side_tabs.indexOf(self.props)
+            if props_idx >= 0:
+                self.side_tabs.setCurrentIndex(props_idx)
+        elif self.side_tabs.currentWidget() is self.props:
+            bg_idx = self.side_tabs.indexOf(self.bg_panel)
+            if bg_idx >= 0:
+                self.side_tabs.setCurrentIndex(bg_idx)
+
+    def _on_anims_before_change(self):
+        self._push_history()
 
     def _on_anims_changed(self):
-        if not self._require_present_edit():
-            return
         self._set_dirty(True)
         self._push_hot_update()
+        self._refresh_present_preview()
 
     def _prune_orphan_anims(self):
         slide = self._current_slide()

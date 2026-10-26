@@ -184,17 +184,40 @@ class PresentationController(QObject):
         batch = self._collect_with_following(self.anim_cursor)
         self._emit_batch(batch)
 
+    def _prev_batch_start(self) -> int | None:
+        """已播放内容里，上一「单击组」的起点；没有则 None。"""
+        anims = self._anims()
+        cur = int(self.anim_cursor)
+        if cur <= 0 or not anims:
+            return None
+        starts = [
+            i
+            for i, step in enumerate(anims)
+            if i == 0 or step.trigger != "with_previous"
+        ]
+        prior = [s for s in starts if s < cur]
+        return prior[-1] if prior else 0
+
+    def prev(self):
+        """上一步：先退本页上一动画组；到页首再退到上一页终态。"""
+        if not self.active or self.doc is None:
+            return
+        self._cancel_after()
+        back_to = self._prev_batch_start()
+        if back_to is not None:
+            self.anim_cursor = int(back_to)
+            self._hot_refresh = True
+            self.slide_changed.emit(self.doc, self.index, self.assets_root)
+            self.status_changed.emit(self._status_text())
+            return
+        self.prev_slide()
+
     def prev_slide(self):
         """上一页：直接回到上一张并显示终态（不重播本页动画）。"""
         if not self.active or self.doc is None:
             return
         self._cancel_after()
         if self.index <= 0:
-            # 已在首页：仅回到未播放准备态，不自动再播
-            if self.anim_cursor > 0:
-                self.anim_cursor = 0
-                self.slide_changed.emit(self.doc, self.index, self.assets_root)
-                self.status_changed.emit(self._status_text())
             return
         self.index -= 1
         anims = self._anims()

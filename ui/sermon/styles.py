@@ -446,7 +446,8 @@ QPushButton#sermonPlayBtn {{
     background: {a['sermon']};
     color: {a['sermon_on']};
     border: 1px solid {a['sermon']};
-    font-weight: 600;
+    font-weight: 700;
+    padding: 0 16px;
 }}
 QPushButton#sermonPlayBtn:hover {{
     background: {a['sermon_hover']};
@@ -455,14 +456,26 @@ QPushButton#sermonPlayBtn:hover {{
 QPushButton#sermonPlayBtn:pressed {{
     background: {a['sermon_pressed']};
 }}
+QPushButton#sermonPlayBtn:disabled {{
+    background: {t['surface_sunken']};
+    color: {t['text_faint']};
+    border-color: {t['border']};
+}}
 QPushButton#sermonStopBtn {{
-    background: {t['danger_soft']};
+    background: transparent;
     color: {t['danger_text']};
     border: 1px solid {t['danger']};
+    font-weight: 600;
+    padding: 0 14px;
 }}
 QPushButton#sermonStopBtn:hover {{
     background: {t['danger']};
     color: #FFFFFF;
+}}
+QPushButton#sermonStopBtn:disabled {{
+    color: {t['text_faint']};
+    border-color: {t['border']};
+    background: transparent;
 }}
 QToolBar#sermonToolBar QComboBox {{
     background: {t['control']};
@@ -536,7 +549,9 @@ QListWidget#sermonSlideListView::item:hover {{
 QListWidget#sermonSlideListView::item:selected {{
     background: {a['sermon_soft']};
     border: 2px solid {a['sermon']};
+    border-left: 4px solid {a['sermon']};
     color: {a['sermon_text']};
+    font-weight: 600;
 }}
 QWidget#sermonSlideList QPushButton {{
     background: {t['control']};
@@ -555,17 +570,18 @@ QLabel#sermonSlideListMeta {{
 
 /* 画布舞台 */
 QWidget#sermonCanvasHost {{
-    background: {t['canvas']};
+    background: {t.get('stage_matte', t['surface_sunken'])};
 }}
 QGraphicsView#sermonCanvas {{
-    background: {t['preview_bg']};
+    background: transparent;
     border: none;
     border-radius: 0;
 }}
 QLabel#sermonCanvasCaption {{
-    color: {t['text_faint']};
-    font-size: 11px;
-    padding: 6px 12px 0 12px;
+    color: {t['text_muted']};
+    font-size: 12px;
+    font-weight: 500;
+    padding: 8px 14px 4px 14px;
 }}
 
 /* 右侧属性轨 */
@@ -575,7 +591,7 @@ QWidget#sermonSideRail {{
 }}
 
 QGraphicsView#sermonSlideStage {{
-    background: {t['preview_bg']};
+    background: transparent;
     border: none;
     border-radius: 0;
 }}

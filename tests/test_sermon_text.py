@@ -68,10 +68,12 @@ class SermonTextTests(unittest.TestCase):
         installed = {f.lower() for f in QFontDatabase.families()}
         if not installed:
             self.skipTest("QFontDatabase empty (no GUI font stack)")
-        font = resolve_qfont("阿里巴巴普惠体 3.0 95 ExtraBold", pixel_size=48, bold=True)
+        missing = "ZZNoSuchFontFamilyXYZ 95 ExtraBold"
+        self.assertFalse(any(missing.split()[0].lower() in f for f in installed))
+        font = resolve_qfont(missing, pixel_size=48, bold=True)
         # 未安装时不得继续用假族名（否则整页方框，空格也变方框）
         self.assertIn(font.family().lower(), installed)
-        self.assertNotIn("阿里巴巴", font.family())
+        self.assertNotIn("ZZNoSuchFontFamilyXYZ", font.family())
 
     def test_font_name_weight(self):
         self.assertTrue(_font_name_implies_bold("阿里巴巴普惠体 3.0 95 ExtraBold"))

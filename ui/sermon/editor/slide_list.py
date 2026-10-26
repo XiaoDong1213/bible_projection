@@ -17,11 +17,11 @@ from PyQt6.QtWidgets import (
 
 from core.sermon.model import SermonDocument
 
-# PPT 式：图标在上、页码在下；宽度按侧栏内容区留白计算
-_THUMB_W = 168
-_THUMB_H = 94
-_PANEL_W = 208
-_GRID_H = 128
+# PPT 式：图标在上、页码在下；略加宽便于扫页
+_THUMB_W = 176
+_THUMB_H = 99
+_PANEL_W = 220
+_GRID_H = 136
 
 
 class SlideListWidget(QWidget):
@@ -123,9 +123,11 @@ class SlideListWidget(QWidget):
             return
         placeholder = QPixmap(_THUMB_W, _THUMB_H)
         placeholder.fill(Qt.GlobalColor.darkGray)
+        n = len(self._doc.slides)
         for i, slide in enumerate(self._doc.slides):
-            item = QListWidgetItem(f"{i + 1}")
+            item = QListWidgetItem(f"{i + 1} / {n}")
             item.setData(Qt.ItemDataRole.UserRole, slide.id)
+            item.setToolTip(f"第 {i + 1} 页，共 {n} 页")
             item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
             icon = kept.get(slide.id)
             item.setIcon(icon if icon is not None else QIcon(placeholder))
@@ -134,7 +136,6 @@ class SlideListWidget(QWidget):
         row = max(0, min(current, self.list.count() - 1))
         if self.list.count():
             self.list.setCurrentRow(row)
-        n = len(self._doc.slides)
         self.meta.setText(f"共 {n} 页")
         self._order_ids = self.slide_ids()
         self._block = False
