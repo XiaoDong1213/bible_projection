@@ -99,8 +99,11 @@ class MainWindow(QMainWindow):
         self.theme = self.settings.get("theme", "dark")
         self._stylesheet_cache = ""
         self._last_speed = 3
-        self.setWindowTitle("Bible Pro")
+        from app.version import APP_NAME, APP_VERSION
+
+        self.setWindowTitle(f"{APP_NAME}")
         self.setMinimumSize(800, 600)
+        self._app_version = APP_VERSION
 
         geometry = config.load_window_state()
         if geometry:
@@ -146,6 +149,13 @@ class MainWindow(QMainWindow):
         self.nav_panel.history_changed.connect(self._save_history)
         # 稍后再补齐其余书卷页，避免和首屏抢同一帧
         QTimer.singleShot(50, self.nav_panel.warm_book_tabs)
+        # 启动数秒后静默检查更新（仅有新版本才弹窗）
+        QTimer.singleShot(4000, self._quiet_check_update)
+
+    def _quiet_check_update(self):
+        from ui.update_prompt import run_update_check
+
+        run_update_check(self, quiet=True)
 
     def _save_history(self, h):
         self.config.save_history(h)
@@ -1552,6 +1562,12 @@ class MainWindow(QMainWindow):
                     return
             if editor.isVisible():
                 editor.hide()
+        try:
+            from ui.update_prompt import shutdown_update_threads
+
+            shutdown_update_threads(self)
+        except Exception:
+            pass
         try:
             self.config.save_window_state(self.saveGeometry())
         except Exception:
