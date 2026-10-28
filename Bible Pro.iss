@@ -2,7 +2,7 @@
 ; Copyright © 2026 XiaoDong and JiangRTTTR
 
 #define MyAppName "Bible Pro"
-#define MyAppVersion "2.1.0"
+#define MyAppVersion "2.2.0"
 #define MyAppPublisher "XiaoDong & JiangRTTTR"
 #define MyAppExeName "Bible Pro.exe"
 ; Paths are relative to this .iss file (project root), so the script works on any machine.
@@ -21,7 +21,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 DisableProgramGroupPage=yes
 OutputDir=dist_installer
-OutputBaseFilename=Bible Pro_Setup
+OutputBaseFilename=Bible_Pro_Setup
 SetupIconFile={#MyAppIcon}
 SolidCompression=yes
 WizardStyle=modern dynamic

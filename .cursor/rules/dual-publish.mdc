@@ -1,0 +1,29 @@
+---
+description: 发版/更新时必须同时推送 GitHub 与 Gitea
+alwaysApply: true
+---
+
+# 双端发布（GitHub + Gitea）
+
+每次发版、推送更新或上传安装包时，**两个地方都要同步**，保持一致：
+
+1. **GitHub**：`https://github.com/XiaoDong1213/bible_projection`
+   - remote：`origin`
+2. **Gitea**：`https://gitea.cccccjd.cn/SXD20041213/bible_projection`
+   - remote：`gitea`
+
+## 必须同步的内容
+
+- 代码分支（通常 `main`）→ `git push origin` **且** `git push gitea`
+- Release / tag（如 `vX.Y.Z`）两边都建
+- 安装包附件两边都有，固定名优先：`Bible_Pro_Setup.exe`（可另附带版本号文件名）
+
+## 自动更新下载源
+
+- 软件检查更新应**优先从 Gitea 下安装包**（国内更快），GitHub 作备用。
+- 发版后确认 Gitea Release 附件可直接下载。
+
+## 注意
+
+- 不要把 Gitea / GitHub token 写进仓库。
+- 只推一边不算完成。

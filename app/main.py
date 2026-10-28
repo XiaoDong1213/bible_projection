@@ -5,7 +5,14 @@ from __future__ import annotations
 import os
 import sys
 
-from PyQt6.QtCore import Qt, QLoggingCategory, QTimer
+from PyQt6.QtCore import (
+    QLibraryInfo,
+    QLocale,
+    QLoggingCategory,
+    Qt,
+    QTimer,
+    QTranslator,
+)
 from PyQt6.QtGui import QFont, QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import QApplication
 
@@ -34,6 +41,19 @@ def _set_app_font(app):
     app.setFont(QFont("Microsoft YaHei UI", 10))
 
 
+def _install_zh_translators(app: QApplication) -> list[QTranslator]:
+    """加载 Qt 简体中文翻译，让系统弹窗按钮显示「确定 / 是 / 否」等。"""
+    QLocale.setDefault(QLocale(QLocale.Language.Chinese, QLocale.Country.China))
+    trans_dir = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
+    kept: list[QTranslator] = []
+    for name in ("qtbase_zh_CN", "qt_zh_CN"):
+        tr = QTranslator(app)
+        if tr.load(name, trans_dir):
+            app.installTranslator(tr)
+            kept.append(tr)
+    return kept
+
+
 def main():
     _set_windows_app_id()
 
@@ -50,6 +70,8 @@ def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     _set_app_font(app)
+    # 必须挂在 app 上，避免被 GC 后按钮又变回英文
+    app._zh_translators = _install_zh_translators(app)  # noqa: SLF001
 
     icon_file = icon_path()
     app_icon = QIcon(str(icon_file)) if icon_file.exists() else QIcon()

@@ -11,6 +11,7 @@ from PyQt6.QtCore import Qt, QSize, QStringListModel, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QFontDatabase, QColor, QPainter, QPen
 
 from app.feature_flags import ENABLE_SCRIPTURE_TITLES, ENABLE_SERMON
+from app.version import APP_VERSION
 
 
 # 全进程共用一份字体列表，避免打开设置时扫 5 遍
@@ -272,13 +273,20 @@ class HelpShortcutsDialog(QDialog):
         footer_layout.setContentsMargins(0, 2, 0, 0)
         footer_layout.setSpacing(12)
 
-        tip_text = "输入框内按键交给当前控件。"
+        tip_text = f"当前版本 {APP_VERSION}。输入框内按键交给当前控件。"
         if ENABLE_SERMON:
             tip_text += "放映中空格和方向键用于步进 / 翻页。讲篇与经文切换的淡化时长在显示设置里。"
         tip = QLabel(tip_text)
         tip.setObjectName("helpTip")
         tip.setWordWrap(True)
         footer_layout.addWidget(tip, 1)
+
+        update_btn = QPushButton("检查更新")
+        update_btn.setObjectName("helpUpdateBtn")
+        update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        update_btn.setFixedHeight(34)
+        update_btn.clicked.connect(self._check_update)
+        footer_layout.addWidget(update_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
         close_btn = QPushButton("知道了")
         close_btn.setObjectName("helpCloseBtn")
@@ -290,6 +298,11 @@ class HelpShortcutsDialog(QDialog):
             close_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
         root.addWidget(footer)
+
+    def _check_update(self):
+        from ui.update_prompt import run_update_check
+
+        run_update_check(self, quiet=False)
 
     def _make_section(self, title, rows):
         section = QFrame()
@@ -978,7 +991,18 @@ class ToolBarWidget(QToolBar):
         self.help_btn.clicked.connect(self._open_help)
         self.addWidget(self.help_btn)
 
+        self.update_btn = ToolbarButton("检查更新")
+        self.update_btn.setObjectName("checkUpdateBtn")
+        self.update_btn.setToolTip("从 GitHub 检查是否有新版本")
+        self.update_btn.clicked.connect(self._check_update)
+        self.addWidget(self.update_btn)
+
         self._update_theme_button()
+
+    def _check_update(self):
+        from ui.update_prompt import run_update_check
+
+        run_update_check(self.window(), quiet=False)
 
     def set_mode_badge(self, text: str, *, tip: str | None = None):
         """兼容旧调用；顶栏不再显示模式胶囊。"""
