@@ -5,6 +5,35 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 
 
+class ElidedLabel(QLabel):
+    """单行省略标签：宽度不足时显示省略号（QLabel 原生不裁剪会撑爆布局）。"""
+
+    def __init__(self, text="", parent=None):
+        super().__init__(parent)
+        self._full_text = str(text or "")
+        self.setMinimumWidth(0)
+        self._apply_elide()
+
+    def setText(self, text):
+        self._full_text = str(text or "")
+        self._apply_elide()
+
+    def text(self):
+        return self._full_text
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_elide()
+
+    def _apply_elide(self):
+        width = max(10, self.width() - 2)
+        elided = self.fontMetrics().elidedText(
+            self._full_text, Qt.TextElideMode.ElideRight, width
+        )
+        if elided != super().text():
+            super().setText(elided)
+
+
 class HistoryItemWidget(QWidget):
     """单条历史记录及其操作按钮。"""
 
@@ -26,7 +55,7 @@ class HistoryItemWidget(QWidget):
         layout.setContentsMargins(12, 8, 10, 8)
         layout.setSpacing(10)
 
-        self.label = QLabel(text)
+        self.label = ElidedLabel(text)
         self.label.setObjectName("historyText")
         self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -41,6 +70,8 @@ class HistoryItemWidget(QWidget):
         self.copy_btn.setToolTip("复制这条历史记录的简称引用")
         self.copy_btn.clicked.connect(self._on_copy)
         layout.addWidget(self.copy_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        # 长引用被省略时，完整内容放到行级 tooltip
+        self.setToolTip(text)
 
         self.delete_btn = QPushButton("删除")
         self.delete_btn.setObjectName("historyDeleteButton")
@@ -76,6 +107,7 @@ class HistoryItemWidget(QWidget):
     def set_text(self, text):
         """更新历史记录文本。"""
         self.label.setText(text)
+        self.setToolTip(text)
 
     def set_selected(self, selected):
         """更新当前记录的选中状态。"""

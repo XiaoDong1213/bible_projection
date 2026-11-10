@@ -19,12 +19,23 @@ class UpdaterVersionTests(unittest.TestCase):
         self.assertFalse(is_newer("2.0.0", "2.1.0"))
         self.assertTrue(is_newer("v2.1.1", "2.1.0"))
 
-    def test_download_only_fast_proxy(self):
+    def test_download_via_gh_proxy(self):
         official = "https://github.com/XiaoDong1213/bible_projection/releases/download/v2.1.0/Bible_Pro_Setup.exe"
         urls = _candidate_download_urls(official, version="2.1.0")
-        self.assertTrue(all(u.startswith("https://gh.acmsz.top/") for u in urls))
+        # 前四个候选走 gh-proxy 双域名加速（官方直链 + 版本直链）
+        for url in urls[:4]:
+            self.assertTrue(
+                url.startswith("https://gh-proxy.org/")
+                or url.startswith("https://gh-proxy.com/"),
+                url,
+            )
+        # latest 动态直链兜底在列
+        self.assertTrue(any("/releases/latest/download/" in u for u in urls))
+        # 直连兜底在列且排在加速候选之后
+        self.assertIn(official, urls)
+        self.assertGreater(urls.index(official), 3)
         self.assertFalse(any("gitea.cccccjd.cn" in u for u in urls))
-        self.assertFalse(any(u == official for u in urls))
+        self.assertFalse(any("gh.acmsz.top" in u for u in urls))
 
 
 if __name__ == "__main__":

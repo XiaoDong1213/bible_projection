@@ -139,7 +139,7 @@ def _activate(window, result):
         return
     window._load_selection(selection)
     window.nav_panel.add_selection_to_history(selection)
-    window.nav_panel.sync_from_selection(selection)
+    window.nav_panel.sync_from_selection(selection, focus_book=True)
 
 
 def _project(window, result):
@@ -148,6 +148,6 @@ def _project(window, result):
         return
     window._load_selection(selection)
     window.nav_panel.add_selection_to_history(selection)
-    window.nav_panel.sync_from_selection(selection)
+    window.nav_panel.sync_from_selection(selection, focus_book=True)
     if not window.extension_window or not window.extension_window.isVisible():
         window._show_extension()

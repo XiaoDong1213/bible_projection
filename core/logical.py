@@ -25,4 +25,8 @@ def normalize_selection(db, selection: ScriptureSelection | None) -> ScriptureSe
             changed = True
     if not changed:
         return selection
-    return ScriptureSelection(book=selection.book, spans=tuple(normalized))
+    return ScriptureSelection(
+        book=selection.book,
+        spans=tuple(normalized),
+        bible_file=getattr(selection, "bible_file", ""),
+    )

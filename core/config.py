@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from configparser import ConfigParser
 from PyQt6.QtGui import QColor
@@ -46,6 +47,15 @@ class AppConfig:
                     "scripture_title_color": "#87CEEB",
                     "scripture_title_spacing": "8",
                     "scripture_title_line_spacing": "120",
+                    "verse_num_gap_left": "20",
+                    "verse_num_gap_right": "15",
+                    "show_captions": "True",
+                    "caption_font_family": "微软雅黑",
+                    "caption_size": "24",
+                    "caption_color": "#87CEEB",
+                    "caption_italic": "True",
+                    "punct_halfwidth": "False",
+                    "bible_file": "",
                 }
                 for key, value in defaults.items():
                     if key not in self.parser["Display"]:
@@ -78,8 +88,14 @@ class AppConfig:
             "scripture_title_line_spacing": "120",
             "bg_color": "#000000", "bg_image": "", "line_spacing": "160", "margin": "60",
             "footer_text": "", "footer_height": "45", "footer_size": "14", "footer_color": "#AAAAAA",
-            "footer_font_family": "微软雅黑", "extension_topmost": "True", "verse_segmentation": "False",
+            "footer_font_family": "微软雅黑",
+            "show_captions": "True",
+            "caption_font_family": "微软雅黑", "caption_size": "24", "caption_color": "#87CEEB",
+            "caption_italic": "True",
+            "extension_topmost": "True", "verse_segmentation": "False",
             "extension_screen_name": "",
+            "punct_halfwidth": "False",
+            "bible_file": "",
         }
         self.parser["Window"] = {"geometry": ""}
         self.parser["History"] = {"search_history": "[]"}
@@ -87,23 +103,35 @@ class AppConfig:
         self.parser["Sermon"] = {}
 
     def _save_ini(self):
-        """保存当前配置到 INI 文件。"""
-        tmp = self.ini_path.with_suffix(self.ini_path.suffix + ".tmp")
-        try:
-            with open(tmp, "w", encoding="utf-8") as f:
-                self.parser.write(f)
-            os.replace(tmp, self.ini_path)
-        except OSError:
-            if tmp.exists():
-                try:
-                    tmp.unlink()
-                except OSError:
-                    pass
-            QMessageBox.critical(
-                None,
-                "保存失败",
-                f"无法写入配置文件：{self.ini_path}\n设置不会保存到磁盘。",
-            )
+        """保存当前配置到 INI 文件。
+
+        双实例并发或杀毒/索引服务瞬时占用 config.ini 时，os.replace 会偶发
+        PermissionError：用每进程独立临时名 + 短重试消除，重试耗尽才报错。
+        """
+        tmp = self.ini_path.with_suffix(f"{self.ini_path.suffix}.{os.getpid()}.tmp")
+        last_error: Exception | None = None
+        for attempt in range(4):
+            try:
+                with open(tmp, "w", encoding="utf-8") as f:
+                    self.parser.write(f)
+                os.replace(tmp, self.ini_path)
+                return
+            except PermissionError as exc:  # 文件被瞬时占用，退避后重试
+                last_error = exc
+                time.sleep(0.05 * (attempt + 1))
+            except OSError as exc:
+                last_error = exc
+                break
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+        QMessageBox.critical(
+            None,
+            "保存失败",
+            f"无法写入配置文件：{self.ini_path}\n设置不会保存到磁盘。\n{last_error}",
+        )
 
     def save_display_settings(self, settings):
         """保存显示相关设置。"""
@@ -127,23 +155,31 @@ class AppConfig:
             "title_color": "#87CEEB", "title_size": 20, "title_font_family": "微软雅黑", "title_spacing": 12,
             "show_scripture_titles": False,
             "scripture_title_font_family": "微软雅黑", "scripture_title_size": 30,
+            "verse_num_gap_left": 20, "verse_num_gap_right": 15,
+            "punct_halfwidth": False,
             "scripture_title_color": "#87CEEB", "scripture_title_spacing": 8,
             "scripture_title_line_spacing": 120,
             "bg_color": "#000000", "bg_image": "", "line_spacing": 160, "margin": 60,
             "footer_text": "", "footer_height": 45, "footer_size": 14, "footer_color": "#AAAAAA",
-            "footer_font_family": "微软雅黑", "extension_topmost": True, "verse_segmentation": False,
+            "footer_font_family": "微软雅黑",
+            "show_captions": True,
+            "caption_font_family": "微软雅黑", "caption_size": 24, "caption_color": "#87CEEB",
+            "caption_italic": True,
+            "extension_topmost": True, "verse_segmentation": False,
             "channel_fade_ms": 400,
             "extension_screen_name": "",
+            "bible_file": "",
         }
         result = {}
         sec = self.parser["Display"] if "Display" in self.parser else {}
-        color_keys = {"font_color", "verse_num_color", "title_color", "scripture_title_color", "bg_color", "footer_color"}
-        bool_keys = {"extension_topmost", "verse_segmentation", "show_scripture_titles"}
+        color_keys = {"font_color", "verse_num_color", "title_color", "scripture_title_color", "caption_color", "bg_color", "footer_color"}
+        bool_keys = {"extension_topmost", "verse_segmentation", "show_scripture_titles", "punct_halfwidth", "caption_italic", "show_captions"}
         int_keys = {
             "font_size", "verse_num_size", "title_size", "title_spacing",
             "scripture_title_size", "scripture_title_spacing", "scripture_title_line_spacing",
+            "verse_num_gap_left", "verse_num_gap_right",
             "line_spacing", "margin", "footer_height", "footer_size",
-            "channel_fade_ms",
+            "channel_fade_ms", "caption_size",
         }
         for k, default_val in defaults.items():
             raw = sec.get(k, None) if hasattr(sec, "get") else None

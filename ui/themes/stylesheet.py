@@ -189,6 +189,7 @@ def build_stylesheet(name: str = "dark", styles_dir: str | Path | None = None) -
     arrow_up = (styles_dir / f"arrow-up-{suffix}.svg").as_posix()
     arrow_down_spin = (styles_dir / f"arrow-down-spin-{suffix}.svg").as_posix()
     arrow_down = (styles_dir / f"arrow-down-{suffix}.svg").as_posix()
+    check_white = (styles_dir / "check-white.svg").as_posix()
 
     # 不在 QSS 用 * {{ font-family }}：会匹配全部控件并触发字体解析，拖慢启动。
     # 界面字体由 app.setFont 统一设置。
@@ -544,6 +545,10 @@ QToolBar QPushButton#extendBtn {{
     max-height: 40px;
     min-width: 56px;
 }}
+QToolBar QPushButton#extendBtn[solo="true"] {{
+    border-top-right-radius: {r['md']}px;
+    border-bottom-right-radius: {r['md']}px;
+}}
 QToolBar QPushButton#extendBtn:hover {{
     background: {t['accent_hover']};
     color: #FFFFFF;
@@ -849,14 +854,45 @@ QSpinBox::down-arrow {{
     width: 8px;
     height: 5px;
 }}
+
+/* 复选框：圆角实心选中样式（选中=主题蓝+白色对勾） */
+QCheckBox {{
+    color: {t['text']};
+    background: transparent;
+    spacing: 8px;
+}}
+QCheckBox::indicator {{
+    width: 17px;
+    height: 17px;
+    border: 1px solid {t['border_strong']};
+    border-radius: 5px;
+    background: {t['control']};
+}}
+QCheckBox::indicator:hover {{
+    border-color: {t['accent']};
+}}
+QCheckBox::indicator:checked {{
+    background: {t['accent']};
+    border-color: {t['accent']};
+    image: url({check_white});
+}}
+QCheckBox::indicator:checked:hover {{
+    background: {t['accent_hover']};
+    border-color: {t['accent_hover']};
+}}
+QCheckBox::indicator:disabled {{
+    background: {t['surface_sunken']};
+    border-color: {t['border']};
+}}
 #skipVerseEdit {{
     background: {t['control']};
     color: {t['text']};
     border: 1px solid {t['border']};
     border-radius: {r['sm']}px;
-    padding: 6px 10px;
+    padding: 2px 8px;
     font-size: 13px;
-    min-height: 28px;
+    min-height: 26px;
+    max-height: 28px;
 }}
 #skipVerseEdit:focus {{
     border-color: {t['focus_ring']};

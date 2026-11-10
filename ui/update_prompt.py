@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QTextBrowser,
     QStatusBar,
     QVBoxLayout,
     QWidget,
@@ -111,7 +112,7 @@ class UpdateOfferDialog(QDialog):
         super().__init__(parent)
         self._info = info
         self.setWindowTitle("发现新版本")
-        self.setMinimumWidth(380)
+        self.setMinimumWidth(440)
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 14)
         root.setSpacing(10)
@@ -124,6 +125,19 @@ class UpdateOfferDialog(QDialog):
         )
         meta.setWordWrap(True)
         root.addWidget(meta)
+        notes = str(getattr(info, "notes", "") or "").strip()
+        self._notes_view = None
+        if notes:
+            notes_title = QLabel("本次更新内容")
+            notes_title.setStyleSheet("font-weight: 600;")
+            root.addWidget(notes_title)
+            notes_view = QTextBrowser()
+            notes_view.setObjectName("updateNotes")
+            notes_view.setOpenExternalLinks(True)
+            notes_view.setMarkdown(notes)
+            notes_view.setMaximumHeight(160)
+            root.addWidget(notes_view, 1)
+            self._notes_view = notes_view
         row = QHBoxLayout()
         row.addStretch(1)
         later = QPushButton("稍后")
@@ -225,7 +239,10 @@ class UpdateController(QObject):
         self._action_btn.setVisible(True)
         self._action_btn.setEnabled(True)
         if self._host_bar is not None:
-            self._host_bar.showMessage("正在高速下载更新…", 0)
+            self._host_bar.clearMessage()
+        label = getattr(self._window, "status_label", None)
+        if label is not None:
+            label.setText("正在下载更新…")
 
         self._thread = QThread(self)
         self._worker = _DownloadWorker(info, self._cancel)
@@ -268,6 +285,9 @@ class UpdateController(QObject):
             self._label.setText(f"下载更新 {done / (1024 * 1024):.1f} MB")
 
     def _hide_download_chrome(self) -> None:
+        refresh = getattr(self._window, "_update_status", None)
+        if refresh is not None:
+            refresh()
         self._busy = False
         self._progress.setVisible(False)
         self._progress.setValue(0)
@@ -287,10 +307,10 @@ class UpdateController(QObject):
         self._action_btn.setEnabled(True)
         self._action_btn.setVisible(True)
         if self._host_bar is not None:
-            self._host_bar.showMessage(
-                f"更新已下载，可点底栏「安装」。包：{setup}",
-                0,
-            )
+            self._host_bar.clearMessage()
+        label = getattr(self._window, "status_label", None)
+        if label is not None:
+            label.setText("更新已就绪，可点底栏「安装」")
 
     def _clear_ready_chrome(self) -> None:
         self._pending_setup = None
@@ -400,10 +420,18 @@ def run_update_check(parent: QWidget | None, *, quiet: bool = False) -> None:
     def _busy(on: bool):
         bar = host.statusBar() if hasattr(host, "statusBar") else None
         if isinstance(bar, QStatusBar):
-            if on:
-                bar.showMessage("正在检查更新…", 0)
+            bar.clearMessage()
+        label = getattr(host, "status_label", None)
+        if label is None:
+            return
+        if on:
+            label.setText("正在检查更新…")
+        else:
+            refresh = getattr(host, "_update_status", None)
+            if refresh is not None:
+                refresh()
             else:
-                bar.clearMessage()
+                label.setText("")
 
     _busy(True)
     # 挂到主窗口上，避免函数返回后无父对象被提前析构
@@ -422,10 +450,13 @@ def run_update_check(parent: QWidget | None, *, quiet: bool = False) -> None:
         _clear_refs()
         if err:
             if not quiet:
+                detail = str(err)
+                if len(detail) > 200:
+                    detail = detail[:200] + "…"
                 QMessageBox.information(
                     host,
                     "检查更新",
-                    f"{err}\n\n也可打开：\n{RELEASES_PAGE}",
+                    f"暂时无法连接 GitHub，请检查网络后重试。\n\n{detail}\n\n也可打开发布页查看新版本：\n{RELEASES_PAGE}",
                 )
             return
         if info is None:

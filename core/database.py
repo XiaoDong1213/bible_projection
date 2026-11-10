@@ -28,6 +28,7 @@ class BibleDatabase:
             pass
         self._chapter_logical_cache = {}
         self._chapter_titles_cache = {}
+        self._chapter_captions_cache = {}
         self._inspect_database()
         self._build_book_index()
 
@@ -37,9 +38,23 @@ class BibleDatabase:
         except Exception:
             logger.warning("关闭圣经数据库失败", exc_info=True)
 
+    def reopen(self, db_path):
+        """切换到另一个圣经数据库文件；所有持有本对象引用的组件自动生效。
+
+        新库校验失败时抛异常，旧连接保持不变。
+        """
+        replacement = BibleDatabase(db_path)
+        old_conn = self.conn
+        self.__dict__.update(replacement.__dict__)
+        try:
+            old_conn.close()
+        except Exception:
+            logger.warning("关闭旧圣经数据库失败", exc_info=True)
+
     def clear_caches(self):
         self._chapter_logical_cache.clear()
         self._chapter_titles_cache.clear()
+        self._chapter_captions_cache.clear()
 
     def _inspect_database(self):
         tables = self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
@@ -52,6 +67,11 @@ class BibleDatabase:
         self.title_columns = {}
         if self.titles_table:
             self._inspect_titles_table()
+        # 题注表（篇首注/说话人标签/细拉），旧库无此表时静默降级
+        self.captions_table = "Captions" if "Captions" in table_names else None
+        self.caption_columns = {}
+        if self.captions_table:
+            self._inspect_captions_table()
 
         columns = [r[1] for r in self.conn.execute(f'PRAGMA table_info("{self.verse_table}")').fetchall()]
 
@@ -89,6 +109,27 @@ class BibleDatabase:
         if not all(self.title_columns.values()):
             self.titles_table = None
             self.title_columns = {}
+
+    def _inspect_captions_table(self):
+        """按 Captions 表真实结构识别字段。"""
+        columns = [r[1] for r in self.conn.execute(f'PRAGMA table_info("{self.captions_table}")').fetchall()]
+        lower = {c.lower(): c for c in columns}
+
+        def find(names):
+            for name in names:
+                if name.lower() in lower:
+                    return lower[name.lower()]
+            return None
+
+        self.caption_columns = {
+            "book": find(["Book", "book_id", "BookID", "书卷", "书名"]),
+            "chapter": find(["Chapter", "chapter_id", "ChapterID", "章节", "章"]),
+            "verse": find(["Verse", "verse_id", "VerseID", "StartVerse", "start_verse", "节号", "节"]),
+            "text": find(["Caption", "caption", "Text", "text", "Scripture", "Content", "content", "题注", "注"]),
+        }
+        if not all(self.caption_columns.values()):
+            self.captions_table = None
+            self.caption_columns = {}
 
     @staticmethod
     def _clean_scripture_title(value):
@@ -137,6 +178,36 @@ class BibleDatabase:
             if title:
                 result.setdefault(verse, []).append(title)
         self._chapter_titles_cache[key] = result
+        return result
+
+    def get_chapter_captions(self, book_name, chapter):
+        """返回指定章节的题注（篇首注/说话人标签/细拉），键为所属节号。"""
+        key = (str(book_name), int(chapter))
+        cached = self._chapter_captions_cache.get(key)
+        if cached is not None:
+            return cached
+        if not self.captions_table:
+            self._chapter_captions_cache[key] = {}
+            return {}
+        cols = self.caption_columns
+        book_value = self.book_meta.get(book_name, {}).get("id", book_name)
+        sql = (
+            f"SELECT {self._quote(cols['verse'])} AS verse, {self._quote(cols['text'])} AS caption "
+            f"FROM {self._quote(self.captions_table)} "
+            f"WHERE {self._quote(cols['book'])}=? AND {self._quote(cols['chapter'])}=? "
+            f"ORDER BY {self._quote(cols['verse'])}, rowid"
+        )
+        rows = self.conn.execute(sql, (book_value, chapter)).fetchall()
+        result = {}
+        for row in rows:
+            try:
+                verse = int(row["verse"])
+            except (TypeError, ValueError):
+                continue
+            caption = str(row["caption"] or "").strip()
+            if caption:
+                result.setdefault(verse, []).append(caption)
+        self._chapter_captions_cache[key] = result
         return result
 
     def _quote(self, name):
@@ -189,17 +260,21 @@ class BibleDatabase:
                 mapped_names.append(name)
         self.book_names = [name for name in self.book_meta if name in mapped_names] or mapped_names
         self.book_codes = {}
-        for i, book in enumerate(self.book_names[:66], 1):
+        for i, book in enumerate(self.book_names, 1):
             self.book_codes[str(i)] = book
-            pinyin = self.book_meta.get(book, {}).get("pinyin", "")
-            if pinyin:
-                self.book_codes[self._normalize_code(pinyin)] = book
+            for code in self._book_pinyin_codes(book):
+                self.book_codes.setdefault(self._normalize_code(code), book)
         self.short_names = {
             "创":"创世记","出":"出埃及记","利":"利未记","民":"民数记","申":"申命记","书":"约书亚记","士":"士师记","得":"路得记","撒上":"撒母耳记上","撒下":"撒母耳记下","王上":"列王纪上","王下":"列王纪下","代上":"历代志上","代下":"历代志下","拉":"以斯拉记","尼":"尼希米记","斯":"以斯帖记","伯":"约伯记","诗":"诗篇","箴":"箴言","传":"传道书","歌":"雅歌","赛":"以赛亚书","耶":"耶利米书","哀":"耶利米哀歌","结":"以西结书","但":"但以理书","何":"何西阿书","珥":"约珥书","摩":"阿摩司书","俄":"俄巴底亚书","拿":"约拿书","弥":"弥迦书","鸿":"那鸿书","哈":"哈巴谷书","番":"西番雅书","该":"哈该书","亚":"撒迦利亚书","玛":"玛拉基书","太":"马太福音","可":"马可福音","路":"路加福音","约":"约翰福音","徒":"使徒行传","罗":"罗马书","林前":"哥林多前书","林后":"哥林多后书","加":"加拉太书","弗":"以弗所书","腓":"腓立比书","西":"歌罗西书","帖前":"帖撒罗尼迦前书","帖后":"帖撒罗尼迦后书","提前":"提摩太前书","提后":"提摩太后书","多":"提多书","门":"腓利门书","来":"希伯来书","雅":"雅各书","彼前":"彼得前书","彼后":"彼得后书","约一":"约翰一书","约二":"约翰二书","约三":"约翰三书","犹":"犹大书","启":"启示录"
         }
 
     def _normalize_code(self, value):
         return str(value).strip().lower().replace(" ", "")
+
+    def _book_pinyin_codes(self, book):
+        """Pinyin 列可含多个简拼(空格/逗号等分隔,如 'ESX NHMY'),逐个可用。"""
+        raw = str(self.book_meta.get(book, {}).get("pinyin", "") or "")
+        return [c for c in re.split(r"[^0-9A-Za-z]+", raw) if c]
 
     def _short_name(self, book):
         for short, full in self.short_names.items():
@@ -213,9 +288,10 @@ class BibleDatabase:
             return []
         results = []
         for book in self.book_names:
-            pinyin = self._normalize_code(self.book_meta.get(book, {}).get("pinyin", ""))
-            if pinyin and pinyin.startswith(q):
-                results.append(book)
+            for code in self._book_pinyin_codes(book):
+                if self._normalize_code(code).startswith(q):
+                    results.append(book)
+                    break
         return results
 
     def find_book(self, query):
@@ -225,11 +301,19 @@ class BibleDatabase:
         results = self.search_books(query)
         return results[0] if results else None
 
+    def old_testament_count(self):
+        """旧约书卷数：新约固定 27 卷且排在最后（新旧教通用），余下为旧约。"""
+        total = len(self.book_names)
+        if total <= 27:
+            return total
+        return total - 27
+
     def get_books(self, category="all"):
+        ot_count = self.old_testament_count()
         if category == "old":
-            books = self.book_names[:39]
+            books = self.book_names[:ot_count]
         elif category == "new":
-            books = self.book_names[39:]
+            books = self.book_names[ot_count:]
         else:
             books = self.book_names
         return [(b, self._short_name(b)) for b in books]
@@ -327,13 +411,16 @@ class BibleDatabase:
         return [(label, text) for label, text, _start, _end in self.get_logical_verses(book_name, chapter, start_verse, end_verse)]
 
     def get_selection_verses(self, selection):
-        """按多段选择查询经文，返回 (chapter, verse, text, titles) 列表。"""
+        """按多段选择查询经文，返回 (chapter, verse, text, titles, captions) 列表。"""
         rows = []
         for span in selection.spans:
             titles = self.get_chapter_titles(selection.book, span.chapter)
+            captions = self.get_chapter_captions(selection.book, span.chapter)
             for label, text, logical_start, logical_end in self.get_logical_verses(selection.book, span.chapter, span.start, span.end):
                 merged_titles = []
+                merged_captions = []
                 for verse in range(logical_start, logical_end + 1):
                     merged_titles.extend(titles.get(verse, []))
-                rows.append((span.chapter, label, text, merged_titles))
+                    merged_captions.extend(captions.get(verse, []))
+                rows.append((span.chapter, label, text, merged_titles, merged_captions))
         return rows

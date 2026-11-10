@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import sys
+
+logger = logging.getLogger(__name__)
 
 from PyQt6.QtWidgets import (
     QMainWindow,
@@ -23,7 +26,7 @@ from PyQt6.QtGui import QKeySequence, QShortcut, QActionGroup
 
 from core.config import AppConfig
 from core.database import BibleDatabase
-from core.selection import ScriptureSelection
+from core.selection import ScriptureSelection, VerseSpan
 from core.logical import normalize_selection
 from core.paths import styles_dir
 from ui.quick_search import SearchWidget
@@ -94,6 +97,7 @@ class MainWindow(QMainWindow):
         self.current_start = None
         self.current_end = None
         self.current_selection = None
+        self._bible_file = "和合本.db"  # 当前圣经版本文件名
         self.verses = []
         self.settings = config.load_display_settings()
         self.theme = self.settings.get("theme", "dark")
@@ -110,6 +114,8 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(geometry)
         else:
             self.resize(1200, 800)
+        # 打开直接最大化（恢复的几何作为还原时的基准）
+        self.setWindowState(Qt.WindowState.WindowMaximized)
 
         self.sermon_controller = PresentationController(self)
         self.sermon_controller.started.connect(self._on_sermon_started)
@@ -121,6 +127,8 @@ class MainWindow(QMainWindow):
         self._projection_channel = "scripture"
         self._channel_gen = 0  # 经文/讲篇来回切时作废过期的 singleShot
         self._keep_editor_after_stop = True
+        self._main_fullscreen = False  # 单屏「全屏显示」状态
+        self._fullscreen_transitioning = False  # 盖板过渡期间吞掉重复 Esc
         saved_screen = str(self.settings.get("extension_screen_name") or "").strip()
         self._extension_screen_name = saved_screen or None
 
@@ -145,8 +153,19 @@ class MainWindow(QMainWindow):
         self._extension_sync_timer.timeout.connect(self._sync_extension_scroll)
 
     def _deferred_startup(self):
+        # 切到上次使用的圣经版本（需在 UI 就绪后；历史随后按新库回填）
+        self._apply_saved_bible_file()
         self.nav_panel.load_history(self.config.load_history())
         self.nav_panel.history_changed.connect(self._save_history)
+        # 启动默认停在「历史」tab，便于直接恢复上次位置
+        self.nav_panel.show_history_tab()
+        # 屏幕插拔即时重估单屏/多屏形态
+        app = QApplication.instance()
+        if app is not None:
+            app.screenAdded.connect(self._on_screens_changed)
+            app.screenRemoved.connect(self._on_screens_changed)
+        self._disable_dwm_transitions()
+        self._apply_screen_mode()
         # 稍后再补齐其余书卷页，避免和首屏抢同一帧
         QTimer.singleShot(50, self.nav_panel.warm_book_tabs)
         # 启动数秒后静默检查更新（仅有新版本才弹窗）
@@ -447,7 +466,116 @@ class MainWindow(QMainWindow):
         if self._sermon_session_active():
             self.stop_sermon_presentation()
             return
+        if getattr(self, "_fullscreen_transitioning", False):
+            return
+        if self._main_fullscreen:
+            self._toggle_main_fullscreen()
+            return
         self._close_extension()
+
+    def _disable_dwm_transitions(self):
+        """禁用 DWM 窗口过渡动画：投影软件的全屏/最大化需要瞬时切换，不要缩放动画。"""
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+
+            hwnd = int(self.winId())
+            # DWMWA_TRANSITIONS_FORCEDISABLED = 3，TRUE = 禁用过渡
+            val = ctypes.c_int(1)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, 3, ctypes.byref(val), ctypes.sizeof(val)
+            )
+        except Exception:
+            pass
+
+    def _toggle_main_fullscreen(self):
+        """单屏「全屏显示」：纯经文画面（隐藏工具栏/导航/状态栏）。仅单屏使用。"""
+        if getattr(self, "_fullscreen_transitioning", False):
+            return
+        if self._main_fullscreen:
+            # 盖板先上屏并等 DWM 真正合成，再在盖板底下完成窗口切换
+            from PyQt6.QtWidgets import QLabel
+
+            cover = QWidget(
+                None,
+                Qt.WindowType.FramelessWindowHint
+                | Qt.WindowType.Tool
+                | Qt.WindowType.WindowStaysOnTopHint
+                | Qt.WindowType.WindowTransparentForInput,
+            )
+            cover.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            pic = QLabel(cover)
+            pic.setPixmap(self.grab())
+            pic.setScaledContents(True)
+            pic.resize(self.geometry().size())
+            cover.setGeometry(self.geometry())
+            cover.show()
+            cover.raise_()
+            self._main_fullscreen = False
+            self._fullscreen_transitioning = True
+            # 80ms ≈ 5 个合成周期：确保盖板已被 DWM 画上屏幕
+            QTimer.singleShot(80, lambda: self._finish_exit_fullscreen(cover))
+            return
+        editor = getattr(self, "_sermon_editor", None)
+        if editor is not None and editor.isVisible() and hasattr(editor, "request_close"):
+            editor.request_close()
+        self.toolbar.hide()
+        self.nav_panel.hide()
+        self.statusBar().hide()
+        # 无副屏舞台：退出 letterbox，铺满屏幕原生分辨率
+        self.preview_host.clear_stage()
+        self.preview_host.set_fullscreen_hint(True)
+        self.showFullScreen()
+        self._main_fullscreen = True
+        self.toolbar.set_extend_active(True)
+        self.status_label.setText("全屏显示 · Esc 退出")
+
+    def _finish_exit_fullscreen(self, cover):
+        """盖板已上屏：在盖板底下完成 全屏→最大化，然后揭盖板。"""
+        self.hide()
+        self.setWindowState(Qt.WindowState.WindowNoState)
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            self.setGeometry(screen.availableGeometry())
+        self.toolbar.show()
+        self.nav_panel.show()
+        self.statusBar().show()
+        self.toolbar.set_extend_active(False)
+        self.preview_host.set_fullscreen_hint(False)
+        self.show()
+        self.setWindowState(self.windowState() | Qt.WindowState.WindowMaximized)
+        self._fullscreen_transitioning = False
+        self.status_label.setText("已退出全屏")
+        # 真窗口完成首帧绘制后揭盖板
+        QTimer.singleShot(200, cover.deleteLater)
+
+    def _apply_screen_mode(self):
+        """按当前屏幕数切换单屏/多屏形态（按钮文案、讲篇可用性）。"""
+        single = len(QApplication.screens()) <= 1
+        if not single:
+            if self._main_fullscreen:
+                self._toggle_main_fullscreen()
+            if self.extension_window is not None and self.extension_window.isVisible():
+                self._close_extension()
+        else:
+            # 单屏时副屏已无意义：屏幕减少后若扩展窗还开着则一并关闭
+            if self.extension_window is not None and self.extension_window.isVisible():
+                self._close_extension()
+            # 清掉可能残留的副屏舞台，预览/全屏按本机分辨率铺满
+            self.preview_host.clear_stage()
+        self.toolbar.set_screen_mode(single)
+        button = getattr(self, "sermon_button", None)
+        if button is not None:
+            button.setEnabled(not single)
+            button.setToolTip(
+                "单屏模式下讲篇不可用"
+                if single
+                else "打开讲篇编辑（叠在主界面上；再点一次可返回经文）"
+            )
+
+    def _on_screens_changed(self, _screen=None):
+        QTimer.singleShot(0, self._apply_screen_mode)
 
     def _wrap_nav(self, fn):
         def handler():
@@ -526,7 +654,102 @@ class MainWindow(QMainWindow):
         status.addWidget(self.status_label)
         self.setStatusBar(status)
 
+    def _apply_saved_bible_file(self):
+        """启动时切到上次使用的圣经版本；失败保持默认（不弹窗）。"""
+        saved = str(self.settings.get("bible_file", "") or "")
+        if saved:
+            self._switch_bible_version(saved, quiet=True)
+
+    def _remap_book_name(self, old_name, old_meta):
+        """跨译本书卷名映射：书名 → 简称 → 拼音，逐级匹配新库；失败返回 None。"""
+        if old_name in self.db.book_meta:
+            return old_name
+        info = old_meta.get(old_name)
+        if not info:
+            return None
+        for key in ("short", "pinyin"):
+            value = str(info.get(key) or "").strip()
+            if not value:
+                continue
+            matches = [
+                name
+                for name, meta in self.db.book_meta.items()
+                if str(meta.get(key) or "").strip() == value
+            ]
+            if len(matches) == 1:
+                return matches[0]
+        return None
+
+    def _switch_bible_version(self, filename, quiet=False):
+        """切换圣经数据库；成功后刷新在屏经文、书卷网格与搜索结果。"""
+        from core.bible_versions import available_bible_versions, resolve_bible_path
+
+        path = resolve_bible_path(filename)
+        if path is None:
+            if not quiet:
+                QMessageBox.warning(self, "圣经版本", f"未找到版本文件：{filename}")
+            return False
+        old_meta = dict(self.db.book_meta)
+        old_selection = self.current_selection
+        try:
+            self.db.reopen(str(path))
+        except Exception as exc:
+            logger.warning("切换圣经版本失败: %s", exc, exc_info=True)
+            if not quiet:
+                QMessageBox.warning(
+                    self, "圣经版本", f"无法加载该版本：\n{exc}\n\n已保持当前版本。"
+                )
+            return False
+        self._bible_file = filename
+        # 当前选区迁移到新译本的书卷名（各译本书卷命名可能不同）
+        new_selection = None
+        if old_selection is not None:
+            new_book = self._remap_book_name(old_selection.book, old_meta)
+            if new_book:
+                try:
+                    new_selection = ScriptureSelection(
+                        new_book,
+                        tuple(
+                            VerseSpan(s.chapter, s.start, s.end)
+                            for s in old_selection.spans
+                        ),
+                    )
+                except Exception:
+                    logger.warning("切换版本后选区迁移失败", exc_info=True)
+        if new_selection is not None:
+            try:
+                self._load_selection(new_selection, reset_scroll=False)
+            except Exception:
+                logger.warning("切换版本后重取经文失败", exc_info=True)
+        else:
+            self._clear_display()
+        self.nav_panel.refresh_books()
+        if new_selection is not None:
+            self.nav_panel.sync_from_selection(new_selection)
+        # 全文搜索的旧结果已过时，直接清空
+        panel = getattr(self, "_scripture_search_widget", None)
+        if panel is not None and hasattr(panel, "_clear_results"):
+            try:
+                panel._clear_results()
+            except Exception:
+                pass
+        version_name = next(
+            (
+                v["name"]
+                for v in available_bible_versions()
+                if v["file"] == filename
+            ),
+            filename,
+        )
+        self.status_label.setText(f"圣经版本：{version_name}")
+        return True
+
     def _on_settings_changed(self, s):
+        new_file = str(s.get("bible_file", "") or "")
+        if new_file != str(self.settings.get("bible_file", "") or ""):
+            if not self._switch_bible_version(new_file):
+                s = dict(s)
+                s["bible_file"] = str(self.settings.get("bible_file", "") or "")
         self.settings.update(s)
         self._apply_settings(s)
         self.config.save_display_settings(s)
@@ -587,7 +810,7 @@ class MainWindow(QMainWindow):
                 editor.request_close()
         self._load_selection(selection)
         self.nav_panel.add_selection_to_history(selection)
-        self.nav_panel.sync_from_selection(selection)
+        self.nav_panel.sync_from_selection(selection, focus_book=True)
         self._close_search()
 
     def _on_book_selected(self, b, c):
@@ -617,6 +840,10 @@ class MainWindow(QMainWindow):
         selection = self._coerce_selection(selection)
         if selection is None:
             return
+        # 历史条目属于其它译本时先切过去
+        bible_file = str(getattr(selection, "bible_file", "") or "")
+        if bible_file and bible_file != self._bible_file:
+            self._switch_bible_version(bible_file, quiet=True)
         self._load_selection(selection)
 
     @staticmethod
@@ -839,7 +1066,8 @@ class MainWindow(QMainWindow):
             return
         mode = extension_open_mode(len(QApplication.screens()))
         if mode == "none":
-            self.status_label.setText("未检测到第二块屏幕")
+            # 单屏：按钮与 F12 的语义是「全屏显示」
+            self._toggle_main_fullscreen()
             return
         if mode == "ask":
             self.toolbar.popup_extend_screen_menu()

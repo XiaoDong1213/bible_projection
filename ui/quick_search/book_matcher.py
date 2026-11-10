@@ -15,20 +15,36 @@ class BookMatcher:
         meta = self.db.book_meta.get(book, {})
         return self.normalize(meta.get("pinyin", ""))
 
+    def aliases(self, book):
+        """书卷的全部可匹配别名：拼音码 / 简称 / 书卷名（均归一化）。
+
+        中文库：拼音码 + 中文 书卷名；英文库：拼音列（常含英文缩写）+
+        英文缩写 + 英文全名。多语言译本通用。
+        """
+        meta = self.db.book_meta.get(book, {})
+        aliases = [self.code(book), self.normalize(meta.get("short", "")), self.normalize(book)]
+        return [a for a in aliases if a]
+
     def candidates(self, query):
-        """返回符合当前简拼前缀的书卷。"""
+        """返回符合当前前缀的书卷（拼音码 / 简称 / 书卷名前缀）。"""
         query = self.normalize(query)
         if query in self._cache:
             return self._cache[query]
-        result = [book for book in self.db.book_names if self.code(book).startswith(query)] if query else []
+        if query:
+            result = [
+                book for book in self.db.book_names
+                if any(a.startswith(query) for a in self.aliases(book))
+            ]
+        else:
+            result = []
         self._cache[query] = result
         return result
 
     def exact(self, query):
-        """查找简拼完全匹配的书卷。"""
+        """查找完全匹配的书卷。"""
         query = self.normalize(query)
         for book in self.db.book_names:
-            if self.code(book) == query:
+            if query in self.aliases(book):
                 return book
         return None
 
@@ -37,6 +53,8 @@ class BookMatcher:
         candidates = self.candidates(query)
         if len(query) == 1 and len(candidates) == 1:
             return candidates[0]
-        if len(candidates) == 1 and self.code(candidates[0]) == self.normalize(query):
-            return candidates[0]
+        if len(candidates) == 1:
+            q = self.normalize(query)
+            if q in self.aliases(candidates[0]):
+                return candidates[0]
         return None
