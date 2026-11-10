@@ -125,6 +125,9 @@ def main():
             from ui.sermon import attach_sermon_editor
 
             attach_sermon_editor(window)
+        # 讲篇按钮已就位：按屏幕数重估单屏形态（单屏时禁用讲篇）
+        if hasattr(window, "_apply_screen_mode"):
+            window._apply_screen_mode()
 
     QTimer.singleShot(0, _after_show)
     sys.exit(app.exec())

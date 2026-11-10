@@ -4,8 +4,10 @@ from PyQt6.QtWidgets import (
     QLineEdit, QStackedWidget, QButtonGroup, QApplication,
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
+from pathlib import Path
 from core.selection import ScriptureSelection
 from core.logical import normalize_selection
+from core.bible_versions import available_bible_versions
 from ui.history.items import HistoryListWidget
 
 
@@ -85,6 +87,9 @@ class BookGridWidget(QScrollArea):
 
         for index, (book, short_name) in enumerate(books):
             label = short_name if short else book
+            # 长书名（如 厄斯德拉下（乃赫米雅））把括注换到第二行
+            if not short and "（" in label and len(label) > 7:
+                label = label.replace("（", "\n（", 1)
             btn = QPushButton(label)
             btn.setObjectName("bookBtn")
             btn.setCheckable(True)
@@ -111,6 +116,13 @@ class BookGridWidget(QScrollArea):
         for btn in self._buttons:
             btn.setChecked(btn.property("bookName") == book)
 
+    def reveal_selected(self):
+        """滚动到当前选中的书卷按钮，使其可见。"""
+        for btn in self._buttons:
+            if btn.isChecked():
+                self.ensureWidgetVisible(btn)
+                return
+
 
 class NavigationPanel(QWidget):
     book_selected = pyqtSignal(str, int)
@@ -122,6 +134,11 @@ class NavigationPanel(QWidget):
     MODE_SINGLE = 0
     MODE_CROSS = 1
     MODE_SKIP = 2
+
+    TAB_OLD = 0
+    TAB_NEW = 1
+    TAB_SHORT = 2
+    TAB_HISTORY = 3
 
     def __init__(self, db, parent=None):
         super().__init__(parent)
@@ -244,25 +261,35 @@ class NavigationPanel(QWidget):
         skip_layout = QVBoxLayout(skip_page)
         skip_layout.setContentsMargins(0, 4, 0, 0)
         skip_layout.setSpacing(6)
-        skip_top = QHBoxLayout()
-        skip_top.setSpacing(6)
+        skip_row = QHBoxLayout()
+        skip_row.setSpacing(6)
         self.skip_chapter_spin = self._make_range_spin(1, 150)
         self.skip_chapter_spin.setFixedWidth(78)
         self.skip_chapter_spin.valueChanged.connect(self._on_skip_chapter_changed)
-        skip_top.addLayout(self._inline_field("章", self.skip_chapter_spin))
-        skip_top.addStretch(1)
-        skip_layout.addLayout(skip_top)
+        skip_row.addLayout(self._inline_field("章", self.skip_chapter_spin))
+        skip_verse_label = QLabel("节")
+        skip_verse_label.setObjectName("fieldLabel")
+        skip_row.addWidget(skip_verse_label)
         self.skip_edit = QLineEdit()
         self.skip_edit.setObjectName("skipVerseEdit")
         self.skip_edit.setPlaceholderText("16-18 20 22-25")
         self.skip_edit.setClearButtonEnabled(True)
-        skip_layout.addWidget(self.skip_edit)
+        skip_row.addWidget(self.skip_edit, 1)
+        skip_layout.addLayout(skip_row)
         self.skip_hint = QLabel("连续 -　·　多段空格")
         self.skip_hint.setObjectName("navHint")
         skip_layout.addWidget(self.skip_hint)
         self.range_stack.addWidget(skip_page)
 
         bottom_layout.addWidget(self.range_stack)
+
+        self.book_info = QLabel("本卷共 — 章 · 本章共 — 节")
+        self.book_info.setObjectName("navHint")
+        self.book_info.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.book_info.setWordWrap(True)
+        bottom_layout.addWidget(self.book_info)
 
         action_row = QHBoxLayout()
         action_row.setSpacing(8)
@@ -328,6 +355,8 @@ class NavigationPanel(QWidget):
         self.range_stack.setCurrentIndex(mode)
         if self.selected_book:
             self._sync_mode_limits()
+        else:
+            self._update_book_info()
 
     def _current_mode(self):
         checked = self.mode_group.checkedId()
@@ -390,6 +419,15 @@ class NavigationPanel(QWidget):
         for grid in self._iter_book_grids(populated_only=False):
             self._populate_book_grid(grid)
 
+    def refresh_books(self):
+        """圣经版本切换后重建书卷网格（书卷名可能不同）。"""
+        for grid in self._iter_book_grids(populated_only=False):
+            grid._populated = False
+            self._populate_book_grid(grid)
+        if self.selected_book is not None and self.selected_book not in self.db.book_meta:
+            self.selected_book = None
+        self._update_book_info()
+
     def _iter_book_grids(self, populated_only=False):
         for grid in (self.old_list, self.new_list, self.short_list):
             if grid is None:
@@ -403,6 +441,32 @@ class NavigationPanel(QWidget):
         for grid in self._iter_book_grids(populated_only=True):
             grid.select_book(book)
         self.book_selected.emit(book, self.chapter_spin.value())
+
+    def _update_book_info(self):
+        """刷新「书卷 · 本卷共X章 · 本章共Y节」信息行（纯显示）。"""
+        if not self.selected_book:
+            self.book_info.setText("本卷共 — 章 · 本章共 — 节")
+            self.book_info.setToolTip("")
+            return
+        book = self.selected_book
+        short = self.db._short_name(book)
+        name = f"{book}（{short}）" if short and short != book else book
+        total_ch = max(1, self.db.get_chapter_count(book))
+        mode = self._current_mode()
+        if mode == self.MODE_CROSS:
+            start_v = max(1, self.db.get_verse_count(book, int(self.cross_start_ch.value())))
+            end_v = max(1, self.db.get_verse_count(book, int(self.cross_end_ch.value())))
+            self.book_info.setText(
+                f"{name} · 本卷共 {total_ch} 章 · 起章 {start_v} 节 · 止章 {end_v} 节"
+            )
+        else:
+            if mode == self.MODE_SKIP:
+                chapter = int(self.skip_chapter_spin.value())
+            else:
+                chapter = int(self.chapter_spin.value())
+            total_v = max(1, self.db.get_verse_count(book, chapter))
+            self.book_info.setText(f"{name} · 本卷共 {total_ch} 章 · 本章共 {total_v} 节")
+        self.book_info.setToolTip(book)
 
     def _set_selected_book(self, book, whole_chapter=False):
         self.selected_book = book
@@ -462,10 +526,9 @@ class NavigationPanel(QWidget):
         elif not self.skip_edit.text().strip():
             self.skip_edit.setText("1-5" if max_v >= 5 else f"1-{max_v}")
 
-        self.skip_hint.setText(f"本章 {max_v} 节　·　例 16-18 20")
-
     def _sync_mode_limits(self):
         if not self.selected_book:
+            self._update_book_info()
             return
         book = self.selected_book
         max_ch = max(1, self.db.get_chapter_count(book))
@@ -487,8 +550,7 @@ class NavigationPanel(QWidget):
         self._set_verse_spin_limit(self.cross_end_v, book, ec)
 
         skip_ch = int(self.skip_chapter_spin.value())
-        skip_max = max(1, self.db.get_verse_count(book, skip_ch))
-        self.skip_hint.setText(f"本章 {skip_max} 节　·　例 16-18 20")
+        self._update_book_info()
 
     def _on_chapter_changed(self, chapter):
         if self.selected_book:
@@ -511,6 +573,7 @@ class NavigationPanel(QWidget):
             int(chapter),
             reset_to_max=True,
         )
+        self._update_book_info()
 
     def _on_cross_end_ch_changed(self, chapter):
         if not self.selected_book:
@@ -521,12 +584,13 @@ class NavigationPanel(QWidget):
             int(chapter),
             reset_to_max=True,
         )
+        self._update_book_info()
 
     def _on_skip_chapter_changed(self, chapter):
         if self.selected_book and not self._history_updating:
             max_v = max(1, self.db.get_verse_count(self.selected_book, int(chapter)))
             self.skip_edit.setText(f"1-{max_v}")
-            self.skip_hint.setText(f"本章 {max_v} 节　·　例 16-18 20")
+            self._update_book_info()
 
     def sync_selection(self, book, chapter, start, end):
         self._history_updating = True
@@ -553,8 +617,23 @@ class NavigationPanel(QWidget):
         finally:
             self._history_updating = False
 
-    def sync_from_selection(self, selection: ScriptureSelection):
-        """按选择同步左侧模式与控件。"""
+    def show_history_tab(self):
+        """切到历史 tab（启动默认位置）。"""
+        self.tab_widget.setCurrentIndex(self.TAB_HISTORY)
+
+    def _book_tab_index(self, book):
+        """书卷归属 tab：0=旧约，1=新约（以当前译本的新旧约边界为准）。"""
+        try:
+            return (
+                self.TAB_OLD
+                if self.db.book_names.index(book) < self.db.old_testament_count()
+                else self.TAB_NEW
+            )
+        except ValueError:
+            return self.TAB_OLD
+
+    def sync_from_selection(self, selection: ScriptureSelection, *, focus_book=False):
+        """按选择同步左侧模式与控件；focus_book 时切到书卷所在 tab 并滚动定位。"""
         selection = normalize_selection(self.db, selection)
         self._history_updating = True
         try:
@@ -597,8 +676,12 @@ class NavigationPanel(QWidget):
             else:
                 span = selection.spans[0]
                 self.sync_selection(selection.book, span.chapter, span.start, span.end)
-                return
             self._sync_mode_limits()
+            if focus_book and self.selected_book:
+                idx = self._book_tab_index(self.selected_book)
+                self.tab_widget.setCurrentIndex(idx)
+                grid = self.old_list if idx == self.TAB_OLD else self.new_list
+                grid.reveal_selected()
         finally:
             self._history_updating = False
 
@@ -629,6 +712,8 @@ class NavigationPanel(QWidget):
             )
             if selection is None:
                 self.skip_hint.setText(f"格式无效　·　可用 1–{max_v}")
+            else:
+                self.skip_hint.setText("连续 -　·　多段空格")
             return selection
 
         chapter = int(self.chapter_spin.value())
@@ -668,11 +753,17 @@ class NavigationPanel(QWidget):
         if selection is None:
             return
         selection = normalize_selection(self.db, selection)
+        try:
+            # frozen dataclass：沿类内惯例用 object.__setattr__ 打上版本标记
+            object.__setattr__(selection, "bible_file", Path(self.db.db_path).name)
+        except Exception:
+            pass
         self.history = [
             item for item in self.history
             if not (
                 item.book == selection.book
                 and item.spans == selection.spans
+                and item.bible_file == selection.bible_file
             )
         ]
         self.history.insert(0, selection)
@@ -680,12 +771,28 @@ class NavigationPanel(QWidget):
         self._update_history_list(selected_index=0)
         self.history_changed.emit([item.to_history_entry() for item in self.history])
 
-    @staticmethod
-    def _history_label(selection: ScriptureSelection):
-        return selection.label()
+    def _history_version_names(self):
+        """{文件名: 显示名}；历史只涉及一个译本时返回 None（不加标注）。"""
+        used = {
+            str(getattr(entry, "bible_file", "") or "")
+            for entry in self.history
+        }
+        used.discard("")
+        if len(used) <= 1:
+            return None
+        return {v["file"]: v["name"] for v in available_bible_versions()}
+
+    def _history_label(self, selection: ScriptureSelection, name_map=None):
+        suffix = ""
+        bible_file = getattr(selection, "bible_file", "")
+        if name_map and bible_file:
+            name = name_map.get(bible_file) or Path(bible_file).stem
+            suffix = f"（{name}）"
+        return f"{selection.label()}{suffix}"
 
     def _update_history_list(self, selected_index=-1):
-        texts = [self._history_label(entry) for entry in self.history]
+        name_map = self._history_version_names()
+        texts = [self._history_label(entry, name_map) for entry in self.history]
         self.history_list.set_entries(texts, selected_index=selected_index)
 
     def _on_history_clicked(self, index):

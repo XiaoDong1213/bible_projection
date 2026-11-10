@@ -31,3 +31,7 @@ _bootstrap_*.py
 *.swp
 Thumbs.db
 Desktop.ini
+
+# 会话数据与内部试验脚本
+.zcode/
+tools/_*

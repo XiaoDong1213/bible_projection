@@ -5,13 +5,19 @@ from PyQt6.QtWidgets import (
     QHBoxLayout, QVBoxLayout, QSpinBox, QColorDialog,
     QFileDialog, QLineEdit, QDialogButtonBox, QWidget, QSizePolicy,
     QTabWidget, QGroupBox, QFrame, QGridLayout, QComboBox, QCompleter,
-    QToolButton, QMenu,
+    QToolButton, QMenu, QStyledItemDelegate, QStyle, QCheckBox,
 )
 from PyQt6.QtCore import Qt, QSize, QStringListModel, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QFontDatabase, QColor, QPainter, QPen
 
 from app.feature_flags import ENABLE_SCRIPTURE_TITLES, ENABLE_SERMON
 from app.version import APP_VERSION
+from core.bible_versions import (
+    available_bible_versions,
+    open_user_bibles_dir,
+    resolve_bible_path,
+    user_bibles_dir,
+)
 
 
 # 全进程共用一份字体列表，避免打开设置时扫 5 遍
@@ -511,6 +517,7 @@ class DisplaySettingsDialog(QDialog):
             self.title_font_combo,
             self.scripture_title_font_combo,
             self.verse_font_combo,
+            self.caption_font_combo,
             self.footer_font_combo,
         )
 
@@ -584,6 +591,12 @@ class DisplaySettingsDialog(QDialog):
         body_form.addRow("正文字体", self.font_combo)
         body_form.addRow("正文字号", self.font_size)
         body_form.addRow("正文颜色", ColorPreviewSlot(self.font_color_btn))
+        self.punct_compact_cb = QCheckBox("标点紧凑（半角标点）")
+        self.punct_compact_cb.setToolTip(
+            "开启：逗号、句号、括号、引号等标点用半角字形，行内更紧凑；\n"
+            "关闭：保留全角标点原字形（旧行为）"
+        )
+        body_form.addRow("标点样式", self.punct_compact_cb)
         text_tabs.addTab(body_page, "正文")
 
         title_page = QWidget()
@@ -614,7 +627,39 @@ class DisplaySettingsDialog(QDialog):
         verse_form.addRow("节号字体", self.verse_font_combo)
         verse_form.addRow("节号字号", self.verse_size)
         verse_form.addRow("节号颜色", ColorPreviewSlot(self.verse_color_btn))
+        self.verse_gap_left = self._make_spin(0, 50)
+        self.verse_gap_left.setSuffix(" px")
+        self.verse_gap_left.setSpecialValueText("自动")
+        self.verse_gap_left.setToolTip("节号左侧间距；0 = 自动（随节号字号）")
+        verse_form.addRow("节号前间距", self.verse_gap_left)
+        self.verse_gap_right = self._make_spin(0, 50)
+        self.verse_gap_right.setSuffix(" px")
+        self.verse_gap_right.setSpecialValueText("自动")
+        self.verse_gap_right.setToolTip("节号右侧间距；0 = 自动（随节号字号）")
+        verse_form.addRow("节号后间距", self.verse_gap_right)
         text_tabs.addTab(verse_page, "节号")
+
+        caption_page = QWidget()
+        caption_form = self._make_settings_form(caption_page)
+        self.show_captions_cb = QCheckBox("显示题注（篇首注/说话人标签/细拉）")
+        self.show_captions_cb.setToolTip(
+            "开启：放映时显示题注表内容（需要译本数据库带题注表）；\n"
+            "细拉跟随所在经节的末尾内联显示，其余题注显示在经节上方"
+        )
+        caption_form.addRow("显示题注", self.show_captions_cb)
+        self.caption_font_combo = SettingsFontComboBox()
+        self.caption_size = self._make_spin(10, 200)
+        self.caption_color_btn = ColorPreview("#87CEEB")
+        caption_form.addRow("题注字体", self.caption_font_combo)
+        caption_form.addRow("题注字号", self.caption_size)
+        caption_form.addRow("题注颜色", ColorPreviewSlot(self.caption_color_btn))
+        self.caption_italic_cb = QCheckBox("斜体（区别于小标题）")
+        self.caption_italic_cb.setToolTip(
+            "开启：题注以斜体显示，与小标题的粗体形成层级；\n"
+            "关闭：题注用正常字形"
+        )
+        caption_form.addRow("题注样式", self.caption_italic_cb)
+        text_tabs.addTab(caption_page, "题注")
 
         footer_page = QWidget()
         footer_form = self._make_settings_form(footer_page)
@@ -678,6 +723,46 @@ class DisplaySettingsDialog(QDialog):
         bg_layout.addRow("背景图片", bg_row)
         tabs.addTab(bg_page, "背景")
 
+        bible_page = QWidget()
+        bible_form = QFormLayout(bible_page)
+        bible_form.setContentsMargins(20, 20, 20, 20)
+        bible_form.setHorizontalSpacing(18)
+        bible_form.setVerticalSpacing(14)
+        self.bible_version_combo = QComboBox()
+        # 与字体下拉同款弹层样式：Qt6 的 QSS ::item 只对可编辑下拉的弹层生效
+        self.bible_version_combo.setEditable(True)
+        self.bible_version_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.bible_version_combo.setMaxVisibleItems(14)
+        self.bible_version_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.bible_version_combo.setMinimumContentsLength(4)
+        view = self.bible_version_combo.view()
+        view.setTextElideMode(Qt.TextElideMode.ElideRight)
+        view.setUniformItemSizes(True)
+        # 输入框只读：可编辑只为弹层样式，不允许手输版本名
+        self.bible_version_combo.lineEdit().setReadOnly(True)
+        self.bible_version_combo.currentIndexChanged.connect(self._update_bible_version_info)
+        bible_form.addRow("当前版本", self.bible_version_combo)
+        self.bible_version_info = QLabel("")
+        self.bible_version_info.setWordWrap(True)
+        bible_form.addRow("", self.bible_version_info)
+        hint = QLabel(
+            "添加新译本：把对应格式的 .db 圣经数据库放入版本文件夹，重启或重新打开本窗口即可选择"
+        )
+        hint.setWordWrap(True)
+        hint.setObjectName("navHint")
+        bible_form.addRow("", hint)
+        folder_row = QHBoxLayout()
+        self.bibles_folder_label = QLineEdit()
+        self.bibles_folder_label.setReadOnly(True)
+        bibles_open = QPushButton("打开文件夹")
+        bibles_open.clicked.connect(self._open_bibles_folder)
+        folder_row.addWidget(self.bibles_folder_label, 1)
+        folder_row.addWidget(bibles_open)
+        bible_form.addRow("版本文件夹", folder_row)
+        tabs.addTab(bible_page, "圣经版本")
+
         root.addWidget(tabs, 1)
         bg_choose.clicked.connect(self._choose_bg)
         bg_clear.clicked.connect(self._clear_bg)
@@ -687,6 +772,7 @@ class DisplaySettingsDialog(QDialog):
             ("title_color", "title_color_btn"),
             ("scripture_title_color", "scripture_title_color_btn"),
             ("verse_num_color", "verse_color_btn"),
+            ("caption_color", "caption_color_btn"),
             ("footer_color", "footer_color_btn"),
             ("bg_color", "bg_color_btn"),
         ]:
@@ -780,8 +866,40 @@ class DisplaySettingsDialog(QDialog):
     def _clear_bg(self):
         self.bg_image.clear()
 
+    def _reload_bible_versions(self):
+        """扫描可用圣经版本填充下拉（每次打开对话框时刷新）。"""
+        combo = self.bible_version_combo
+        combo.blockSignals(True)
+        combo.clear()
+        for version in available_bible_versions():
+            label = version["name"] if version["builtin"] else f"{version['name']}（用户）"
+            combo.addItem(label, version["file"])
+        combo.blockSignals(False)
+
+    def _select_bible_file(self, bible_file):
+        combo = self.bible_version_combo
+        index = combo.findData(str(bible_file or ""))
+        combo.setCurrentIndex(index if index >= 0 else 0)  # 缺省 = 内置版本
+        self._update_bible_version_info()
+
+    def _update_bible_version_info(self):
+        filename = str(self.bible_version_combo.currentData() or "")
+        path = resolve_bible_path(filename)
+        if path is None:
+            self.bible_version_info.setText("未找到该版本的数据库文件")
+        else:
+            self.bible_version_info.setText(f"数据库文件：{path}")
+
+    def _open_bibles_folder(self):
+        if not open_user_bibles_dir():
+            self.bible_version_info.setText(
+                f"无法打开文件夹，请手动访问：{user_bibles_dir()}"
+            )
+
     def _load_settings(self):
         s = self.settings
+        self._reload_bible_versions()
+        self._select_bible_file(s.get("bible_file", ""))
         self.font_combo.setCurrentFont(QFont(s.get("font_family", "微软雅黑")))
         self.font_size.setValue(int(s.get("font_size", 24)))
         self.title_font_combo.setCurrentFont(QFont(s.get("title_font_family", "微软雅黑")))
@@ -792,6 +910,22 @@ class DisplaySettingsDialog(QDialog):
         self.scripture_title_size.setValue(int(s.get("scripture_title_size", 30)))
         self.verse_font_combo.setCurrentFont(QFont(s.get("verse_num_font_family", "微软雅黑")))
         self.verse_size.setValue(int(s.get("verse_num_size", 24)))
+        self.verse_gap_left.setValue(max(0, int(s.get("verse_num_gap_left", 0) or 0)))
+        self.verse_gap_right.setValue(max(0, int(s.get("verse_num_gap_right", 0) or 0)))
+        self.caption_font_combo.setCurrentFont(QFont(s.get("caption_font_family", "微软雅黑")))
+        self.caption_size.setValue(int(s.get("caption_size", 24)))
+        self.show_captions_cb.setChecked(
+            str(s.get("show_captions", "True")).strip().lower()
+            in ("true", "1", "yes", "on")
+        )
+        self.caption_italic_cb.setChecked(
+            str(s.get("caption_italic", "True")).strip().lower()
+            in ("true", "1", "yes", "on")
+        )
+        self.punct_compact_cb.setChecked(
+            str(s.get("punct_halfwidth", "True")).strip().lower()
+            in ("true", "1", "yes", "on")
+        )
         self.footer_font_combo.setCurrentFont(QFont(s.get("footer_font_family", "微软雅黑")))
         self.footer_size.setValue(int(s.get("footer_size", 14)))
         self.line_spacing.setValue(int(s.get("line_spacing", 160)))
@@ -809,6 +943,7 @@ class DisplaySettingsDialog(QDialog):
             ("title_color", "title_color_btn", "#87CEEB"),
             ("scripture_title_color", "scripture_title_color_btn", "#87CEEB"),
             ("verse_num_color", "verse_color_btn", "#FFD700"),
+            ("caption_color", "caption_color_btn", "#87CEEB"),
             ("footer_color", "footer_color_btn", "#AAAAAA"),
             ("bg_color", "bg_color_btn", "#000000"),
         ]:
@@ -824,6 +959,7 @@ class DisplaySettingsDialog(QDialog):
     def get_settings(self):
         s = dict(self.settings)
         s.update({
+            "bible_file": str(self.bible_version_combo.currentData() or ""),
             "font_family": self.font_combo.currentFont().family(),
             "font_size": self.font_size.value(),
             "font_color": self._color_hex("font_color", "#FFFFFF"),
@@ -835,7 +971,15 @@ class DisplaySettingsDialog(QDialog):
             "scripture_title_color": self._color_hex("scripture_title_color", "#87CEEB"),
             "verse_num_font_family": self.verse_font_combo.currentFont().family(),
             "verse_num_size": self.verse_size.value(),
+            "verse_num_gap_left": int(self.verse_gap_left.value()),
+            "verse_num_gap_right": int(self.verse_gap_right.value()),
+            "punct_halfwidth": self.punct_compact_cb.isChecked(),
             "verse_num_color": self._color_hex("verse_num_color", "#FFD700"),
+            "caption_font_family": self.caption_font_combo.currentFont().family(),
+            "caption_size": self.caption_size.value(),
+            "caption_color": self._color_hex("caption_color", "#87CEEB"),
+            "caption_italic": self.caption_italic_cb.isChecked(),
+            "show_captions": self.show_captions_cb.isChecked(),
             "footer_font_family": self.footer_font_combo.currentFont().family(),
             "footer_size": self.footer_size.value(),
             "footer_color": self._color_hex("footer_color", "#AAAAAA"),
@@ -875,6 +1019,8 @@ class ToolBarWidget(QToolBar):
         self.settings = {}
         self._speed = 0
         self._settings_dialog = None
+        self._single_screen = False
+        self._extend_active = False
 
         # 模式胶囊已去掉；保留 no-op 接口以免主窗口调用报错
         self.mode_badge = None
@@ -1084,11 +1230,31 @@ class ToolBarWidget(QToolBar):
             self.extend_screen_picked.emit(str(name))
 
     def set_extend_active(self, active):
-        if active:
-            self.extend_btn.setText("关闭扩展")
-            self.extend_btn.setToolTip("关闭扩展显示  Esc")
-            self.topmost_btn.setEnabled(True)
+        self._extend_active = bool(active)
+        if self._extend_active:
+            if getattr(self, "_single_screen", False):
+                self.extend_btn.setText("退出全屏")
+                self.extend_btn.setToolTip("退出全屏显示  Esc / F12")
+            else:
+                self.extend_btn.setText("关闭扩展")
+                self.extend_btn.setToolTip("关闭扩展显示  Esc")
+                self.topmost_btn.setEnabled(True)
         else:
-            self.extend_btn.setText("扩展显示")
-            self.extend_btn.setToolTip("开启 / 关闭扩展显示  F12")
-            self.topmost_btn.setEnabled(False)
+            if getattr(self, "_single_screen", False):
+                self.extend_btn.setText("全屏显示")
+                self.extend_btn.setToolTip("全屏显示  F12")
+            else:
+                self.extend_btn.setText("扩展显示")
+                self.extend_btn.setToolTip("开启 / 关闭扩展显示  F12")
+                self.topmost_btn.setEnabled(False)
+
+    def set_screen_mode(self, single):
+        """按屏幕数切换形态：单屏时按钮变「全屏显示」，无屏幕选择菜单。"""
+        self._single_screen = bool(single)
+        self.extend_arrow.setVisible(not self._single_screen)
+        # 三角隐藏后胶囊右侧圆角改由主按钮承担（QSS [solo="true"]）
+        self.extend_btn.setProperty("solo", self._single_screen)
+        style = self.extend_btn.style()
+        style.unpolish(self.extend_btn)
+        style.polish(self.extend_btn)
+        self.set_extend_active(getattr(self, "_extend_active", False))

@@ -1,4 +1,4 @@
-"""从 Gitea / GitHub Release 检查 / 下载新版本安装包（优先 Gitea）。"""
+"""从 GitHub Release 检查 / 下载新版本安装包。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,9 @@ import re
 import ssl
 import tempfile
 import threading
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -25,11 +27,15 @@ _USER_AGENT = f"BiblePro/{APP_VERSION} (+https://github.com/XiaoDong1213/bible_p
 _SETUP_FIXED = "Bible_Pro_Setup.exe"
 _SETUP_NAME = re.compile(r"^Bible_Pro(_.+)?_Setup\.exe$", re.IGNORECASE)
 
-# 本机测速最快节点（其它慢源一律不用）
-_FAST_PROXY = "https://gh.acmsz.top/"
+# 加速节点：gh-proxy 双域名（Anycast 多节点互备，官方文档支持 API/Release/Range 续传）
+_PROXY_PREFIXES = (
+    "https://gh-proxy.org/",
+    "https://gh-proxy.com/",
+)
 _RANGE_PARTS = 6  # 多连接加速；段数过多易有几段卡死
 _RANGE_RETRIES = 4
 _RANGE_TIMEOUT = 25  # 单段读超时（秒），卡住就重试该段
+_CHECK_RETRIES = 3  # 检查更新轮数：镜像的 TLS 重置是阵发的，多轮显著提高成功率
 
 
 @dataclass(frozen=True)
@@ -81,31 +87,41 @@ def _github_asset_urls(version: str, asset_name: str) -> list[str]:
     ]
 
 
-def _via_fast_proxy(url: str) -> str:
-    """快节点前缀 + 完整 GitHub URL。"""
-    if url.startswith(_FAST_PROXY):
-        return url
-    return _FAST_PROXY.rstrip("/") + "/" + url
+def _via_proxy(url: str) -> str:
+    """主加速前缀 + 完整 GitHub URL（已是加速地址则原样返回）。"""
+    for prefix in _PROXY_PREFIXES:
+        if url.startswith(prefix):
+            return url
+    return _PROXY_PREFIXES[0] + url
 
 
 def _candidate_download_urls(official: str, *, version: str = "", asset_name: str = "") -> list[str]:
-    """只用本机最快的加速节点，不再回退慢源。"""
+    """下载候选：gh-proxy 双域名逐个尝试 → latest 动态直链 → 直连兜底。"""
     github_seeds: list[str] = []
+    if official and "github.com" in official:
+        github_seeds.append(official)
     if version:
         github_seeds.extend(_github_asset_urls(version, asset_name or _SETUP_FIXED))
-    if official and "github.com" in official:
-        github_seeds.insert(0, official)
-    if not github_seeds and official:
-        # 非 GitHub 直链（极少）：仍套同一快节点前缀试试
-        return [_via_fast_proxy(official)]
 
     urls: list[str] = []
     seen: set[str] = set()
+
+    def add(url):
+        if url and url not in seen:
+            seen.add(url)
+            urls.append(url)
+
     for seed in github_seeds:
-        u = _via_fast_proxy(seed)
-        if u not in seen:
-            seen.add(u)
-            urls.append(u)
+        for prefix in _PROXY_PREFIXES:
+            add(prefix + seed)
+    # latest 动态直链：不依赖具体版本号，自动解析最新资产
+    name = asset_name or _SETUP_FIXED
+    add(
+        f"{_PROXY_PREFIXES[0]}https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}"
+        f"/releases/latest/download/{name}"
+    )
+    for seed in github_seeds:
+        add(seed)  # 直连兜底（有网络的用户最快）
     return urls
 
 
@@ -132,9 +148,6 @@ def _parse_release_payload(data: dict) -> UpdateInfo | None:
         return None
     name = str(chosen.get("name") or "")
     download_url = str(chosen.get("browser_download_url") or "")
-    # Gitea 偶发只有相对路径 / 无 browser_download_url
-    if not download_url:
-        download_url = str(chosen.get("download_url") or chosen.get("url") or "")
     if not download_url:
         return None
     try:
@@ -151,39 +164,40 @@ def _parse_release_payload(data: dict) -> UpdateInfo | None:
 
 
 def fetch_latest_release() -> UpdateInfo | None:
-    """读 GitHub Release 版本信息；安装包下载另走快节点。
+    """读 GitHub Release 版本信息；安装包下载走 gh-proxy 加速。
 
-    查版本只用 GitHub（API 经 gh-proxy.com，官方文档支持；失败再直连）。
-    不用 gh.acmsz.top 查 API（该站对 API 常返回空正文）。
+    查版本链路：gh-proxy.org API → gh-proxy.com API → 直连 API，共 3 轮重试
+    （镜像的 TLS 重置是阵发的，多轮显著提高成功率）。
+    notes 随 API 返回（「发现新版本」弹窗的「本次更新内容」）。
     """
     errors: list[str] = []
-    apis = (
-        ("https://gh-proxy.com/" + GITHUB_RELEASES_LATEST_API, "application/vnd.github+json"),
-        (GITHUB_RELEASES_LATEST_API, "application/vnd.github+json"),
-    )
-    for api, accept in apis:
-        try:
-            raw = _http_get(api, accept=accept)
-            text = raw.decode("utf-8").strip()
-            if not text:
-                errors.append(f"{api}: empty body")
-                continue
-            info = _parse_release_payload(json.loads(text))
-            if info is not None:
-                # 保证 download_url 是官方 GitHub 附件地址
-                if info.version and "github.com" not in (info.download_url or ""):
-                    gh = _github_asset_urls(info.version, info.asset_name)[0]
-                    info = UpdateInfo(
-                        version=info.version,
-                        download_url=gh,
-                        notes=info.notes,
-                        asset_name=info.asset_name or _SETUP_FIXED,
-                        size=info.size,
-                    )
-                return info
-            errors.append(f"{api}: no setup asset")
-        except Exception as exc:  # noqa: BLE001
-            errors.append(f"{api}: {exc}")
+    for attempt in range(_CHECK_RETRIES):
+        for prefix in (*_PROXY_PREFIXES, ""):
+            api = prefix + GITHUB_RELEASES_LATEST_API if prefix else GITHUB_RELEASES_LATEST_API
+            try:
+                raw = _http_get(api, accept="application/vnd.github+json")
+                text = raw.decode("utf-8").strip()
+                if not text:
+                    errors = [f"{api}: empty body"]
+                    continue
+                info = _parse_release_payload(json.loads(text))
+                if info is not None:
+                    # 保证 download_url 是官方 GitHub 附件地址
+                    if info.version and "github.com" not in (info.download_url or ""):
+                        gh = _github_asset_urls(info.version, info.asset_name)[0]
+                        info = UpdateInfo(
+                            version=info.version,
+                            download_url=gh,
+                            notes=info.notes,
+                            asset_name=info.asset_name or _SETUP_FIXED,
+                            size=info.size,
+                        )
+                    return info
+                errors = [f"{api}: no setup asset"]
+            except Exception as exc:  # noqa: BLE001
+                errors = [f"{api}: {exc}"]
+        if attempt < _CHECK_RETRIES - 1:
+            time.sleep(0.5)
     if errors:
         raise RuntimeError("；".join(errors))
     return None
@@ -418,29 +432,33 @@ def download_installer(
     )
     expected = int(info.size or 0)
 
-    for url in candidates:
-        if cancel_event is not None and cancel_event.is_set():
-            raise DownloadCancelled()
-        try:
-            _download_one(
-                url,
-                partial,
-                expected_size=expected,
-                on_progress=on_progress,
-                cancel_event=cancel_event,
-            )
-            partial.replace(dest)
-            return dest
-        except DownloadCancelled:
-            raise
-        except Exception as exc:  # noqa: BLE001 — 换镜像再试
-            last_error = exc
-            if partial.exists():
-                try:
-                    partial.unlink()
-                except OSError:
-                    pass
-            continue
+    # 候选遍历共两轮：镜像的 TLS 重置是阵发的，整轮重试能吃进间歇窗口
+    for attempt in range(2):
+        for url in candidates:
+            if cancel_event is not None and cancel_event.is_set():
+                raise DownloadCancelled()
+            try:
+                _download_one(
+                    url,
+                    partial,
+                    expected_size=expected,
+                    on_progress=on_progress,
+                    cancel_event=cancel_event,
+                )
+                partial.replace(dest)
+                return dest
+            except DownloadCancelled:
+                raise
+            except Exception as exc:  # noqa: BLE001 — 换镜像再试
+                last_error = exc
+                if partial.exists():
+                    try:
+                        partial.unlink()
+                    except OSError:
+                        pass
+                continue
+        if attempt == 0:
+            time.sleep(0.5)
 
     if last_error is not None:
         raise last_error

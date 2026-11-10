@@ -67,9 +67,9 @@ class PreviewHost(QWidget):
         # 叠在预览之上的引导字：不进 Stack，避免挡住 / 盖住舞台背景
         self.empty_hint = QLabel(self)
         self.empty_hint.setObjectName("previewEmptyHint")
-        self.empty_hint.setText(
-            "输入卷章或点左侧书卷\n按 Enter 快速定位 · Ctrl+F 全文搜索"
-        )
+        self._hint_default = "输入卷章或点左侧书卷\n按 Enter 快速定位 · Ctrl+F 全文搜索"
+        self._hint_fullscreen = "输入卷章 节号，按 Enter 快速定位\nEsc 退出全屏"
+        self.empty_hint.setText(self._hint_default)
         self.empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty_hint.setWordWrap(True)
         self.empty_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -79,6 +79,10 @@ class PreviewHost(QWidget):
 
         self.apply_theme(theme_tokens("dark"))
         QTimer.singleShot(0, self._fit_view)
+
+    def set_fullscreen_hint(self, on: bool):
+        """单屏全屏时引导字不含「点左侧书卷 / Ctrl+F」。"""
+        self.empty_hint.setText(self._hint_fullscreen if on else self._hint_default)
 
     def set_empty(self, empty: bool):
         """无经文时叠引导字；背景始终走经文舞台（含背景图）。"""

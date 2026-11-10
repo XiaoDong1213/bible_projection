@@ -394,7 +394,7 @@ class SearchWidget(QWidget):
             self._last_valid_book_text = ""
             self._update_hint(self.DEFAULT_HINT)
             return
-        if re.fullmatch(r"[A-Za-z]+", query):
+        if re.fullmatch(r"[A-Za-z0-9]+", query):
             candidates = self.matcher.candidates(query)
             if len(query) == 1 and len(candidates) == 1:
                 self._convert_book(candidates[0])

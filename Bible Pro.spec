@@ -8,12 +8,14 @@ resources = project_root / "resources"
 
 # Only package files required by the application.
 # User configuration (config.ini) is intentionally NOT included.
+# All bible translations (*.db in resources/) ship with the installer;
+# 和合本.db stays the default until the user picks another version.
 a = Analysis(
     ["main.py"],
     pathex=[str(project_root)],
     binaries=[],
     datas=[
-        (str(resources / "和合本.db"), "."),
+        *[(str(db), ".") for db in sorted(resources.glob("*.db"))],
         (str(resources / "icon.ico"), "."),
         (str(resources / "styles"), "styles"),
         (str(resources / "install.mark"), "."),

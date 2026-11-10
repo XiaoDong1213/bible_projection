@@ -37,6 +37,7 @@ class ScriptureSelection:
 
     book: str
     spans: tuple[VerseSpan, ...]
+    bible_file: str = ""  # 产生该记录的圣经版本文件名（历史记录标注用）
 
     def __post_init__(self):
         if not self.book:
@@ -143,13 +144,16 @@ class ScriptureSelection:
         return self.label()
 
     def to_history_entry(self) -> dict:
-        return {
+        entry = {
             "book": self.book,
             "spans": [
                 {"c": span.chapter, "s": span.start, "e": span.end}
                 for span in self.spans
             ],
         }
+        if self.bible_file:
+            entry["bible_file"] = self.bible_file
+        return entry
 
     @classmethod
     def from_history_entry(cls, entry) -> "ScriptureSelection | None":
@@ -162,7 +166,11 @@ class ScriptureSelection:
                 )
                 if not spans:
                     return None
-                return cls(book=book, spans=spans)
+                return cls(
+                    book=book,
+                    spans=spans,
+                    bible_file=str(entry.get("bible_file", "") or ""),
+                )
             if isinstance(entry, (list, tuple)) and len(entry) == 4:
                 return cls.from_legacy(entry[0], entry[1], entry[2], entry[3])
         except (KeyError, TypeError, ValueError):
