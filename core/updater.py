@@ -87,14 +87,6 @@ def _github_asset_urls(version: str, asset_name: str) -> list[str]:
     ]
 
 
-def _via_proxy(url: str) -> str:
-    """主加速前缀 + 完整 GitHub URL（已是加速地址则原样返回）。"""
-    for prefix in _PROXY_PREFIXES:
-        if url.startswith(prefix):
-            return url
-    return _PROXY_PREFIXES[0] + url
-
-
 def _candidate_download_urls(official: str, *, version: str = "", asset_name: str = "") -> list[str]:
     """下载候选：gh-proxy 双域名逐个尝试 → latest 动态直链 → 直连兜底。"""
     github_seeds: list[str] = []

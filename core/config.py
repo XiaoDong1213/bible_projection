@@ -2,7 +2,6 @@ import json
 import os
 import sys
 import time
-from pathlib import Path
 from configparser import ConfigParser
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QMessageBox

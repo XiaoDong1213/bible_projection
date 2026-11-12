@@ -1,28 +1,28 @@
 # 经文显示核心控件
-# 提词器式滚动：QTextDocument + 浮点偏移绘制，避免滚动条整像素台阶
+# 行布局完全自绘：断行/禁则/两端对齐由本模块自己计算，不经过 Qt 文本引擎。
+# 「节号+正文首字」是同一个不可分原子（grp），任何字体/宽度/缩放下
+# 都不可能出现「节号悬在行尾、正文另起一行」。
+import math
 import os
 import re
+
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PyQt6.QtCore import (
-    Qt, QTimer, QElapsedTimer, pyqtSignal, QPropertyAnimation, QEasingCurve,
-    pyqtProperty, QRectF,
+    Qt, QTimer, QElapsedTimer, pyqtSignal, QPointF,
 )
 from PyQt6.QtGui import (
-    QFont, QColor, QPixmap, QFontMetrics, QPainter, QTextDocument, QShortcut, QKeySequence,
-    QTextCursor, QTextBlockFormat,
+    QFont, QColor, QPixmap, QFontMetrics, QFontMetricsF, QPainter, QShortcut, QKeySequence,
 )
 
-from app.feature_flags import ENABLE_SCRIPTURE_TITLES
 
 # 收尾标点：不能出现在行首（中文禁则）
-_PUNCT_CLOSING = "，。；：？！、）”』》〉…—％·’"
+_PUNCT_CLOSING = "，。；：？！、）”』》〉〕…—％·’"
+# 开引号/开括号：不能出现在行尾
+_PUNCT_OPENING = "（“『「《〈〔‘"
 # 节末内联题注文本（细拉/Selah，与转换器写库的字面一致）；其余题注显示在节上方
 _SELAH_TEXTS = {"（细拉）", "（細拉）", "Selah"}
-# 节中说话人标签独立行（转换器以 \n 分隔写入正文，如「〔新娘〕」），按题注样式渲染
+# 节中说话人标签独立行（转换器以 \n 分隔写入正文，如「〔新娘〕〕」），按题注样式渲染
 _STANDALONE_CAPTION_RE = re.compile(r"^〔[^〕]*〕$")
-# 开引号/开括号：不能出现在行尾
-_PUNCT_OPENING = "（“『「《〈‘"
-_CJK_RANGES = "\u4e00-\u9fff\u3000-\u303f\uff00-\uffef\u2018\u2019\u201c\u201d（）【】《》〈〉…—％·’‘"
 
 # 渲染用半角标点映射：全角标点字格一半以上是空白，多字连续时
 # 叠加出大空隙；半角字形无此问题（视觉等同专业排版的标点压缩）
@@ -41,38 +41,116 @@ _PUNCT_HALF = {
     u'\uff08': '(',
     u'\uff09': ')',
 }
-# 行首 禁排 (halfwidth closing)
+# 半角形式的行首禁排/行尾禁排字符
 _HALF_CLOSING = ',.;:?!' + chr(8217) + chr(8221) + ')'
 _HALF_OPENING = '(' + chr(8220) + chr(8216)
-
-
-def _inject_break_points(text):
-    """禁则感知断点：在相邻可断中文之间注入零宽空格 U+200B。
-
-    作用：给两端对齐提供字间拉伸/断行点（纯中文行无空格，Qt 靠它才能
-    把行撑满到右边距）。保持中文禁则：跳过「下一个字是收尾标点」和
-    「当前字是开引号/开括号」的边界，行首永不出现标点。
-    """
-    chars = list(text)
-    out = []
-    for i, ch in enumerate(chars):
-        out.append(ch)
-        if i + 1 >= len(chars):
-            break
-        nxt = chars[i + 1]
-        # 只在纯汉字之间注入：标点旁不留拉伸/断行点，
-        # 标点簇（说："看 、 人'， ）保持紧凑，不被两端对齐拉开
-        if not ("\u4e00" <= ch <= "\u9fff"):
-            continue
-        if not ("\u4e00" <= nxt <= "\u9fff"):
-            continue
-        out.append("\u200b")
-    return "".join(out)
 
 
 def _halfwidth(text):
     """全角标点 → 半角字形（仅渲染层转换，不改源文本）。"""
     return "".join(_PUNCT_HALF.get(ch, ch) for ch in str(text))
+
+
+# 可见空白统一折叠为半角空格。旧 QTextDocument/HTML 渲染本来就会折叠它们
+# （U+3000 神版记号、连续空格、其他 Unicode 空白在旧版里都显示为窄空格），
+# 自绘布局必须显式对齐该行为，否则 U+3000 会按字面渲染成整字宽。
+_WS_RUN_RE = re.compile(r"\s+")
+
+
+def _norm_ws(text):
+    return _WS_RUN_RE.sub(" ", str(text))
+
+
+def _is_closing_punct(ch):
+    """收尾标点：不能出现在行首。"""
+    return ch in _PUNCT_CLOSING or ch in _HALF_CLOSING
+
+
+def _is_opening_punct(ch):
+    """开引号/开括号：不能出现在行尾。"""
+    return ch in _PUNCT_OPENING or ch in _HALF_OPENING
+
+
+def _tokens(text):
+    """词元切分：拉丁字母/数字连续串为一个词元（含 don't / 1,000 / well-known），
+    其余字符逐个成词元，空格单独成词元。返回 [(kind, text)]，kind: 'w'|'sp'。"""
+    text = str(text)
+    toks = []
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch == " ":
+            toks.append(("sp", ch)); i += 1
+            continue
+        if ch.isascii() and ch.isalnum():
+            j = i
+            word = ""
+            while j < n:
+                c = text[j]
+                if c.isascii() and c.isalnum():
+                    word += c; j += 1
+                elif c in "-'" or c == chr(8217):
+                    # 词内连字符/撇号：仅当两侧都是字母数字时并入（don't / well-known / 1,000）
+                    if word and j + 1 < n and text[j + 1].isascii() and text[j + 1].isalnum() and word[-1].isascii() and word[-1].isalnum():
+                        word += c; j += 1
+                    else:
+                        break
+                elif c in ",." and word and j + 1 < n and text[j + 1].isdigit() and word[-1].isdigit():
+                    word += c; j += 1
+                else:
+                    break
+            toks.append(("w", word)); i = j
+            continue
+        toks.append(("w", ch)); i += 1
+    return toks
+
+
+def _clusters(text):
+    """把文本切成「不可分簇」：断行只允许发生在簇与簇之间。
+
+    - 拉丁词整体一簇（词内不断行）
+    - 收尾标点并向前簇（禁则：行首不出现标点）
+    - 开引号/开括号向后簇合并（禁则：行尾不出现标点）
+    返回 [(kind, text)]，kind: 'c'=簇 | 'sp'=空格（断行点/拉伸点）。
+    """
+    out = []
+    open_pending = False
+    for kind, s in _tokens(text):
+        if kind == "sp":
+            out.append(["sp", s]); open_pending = False
+            continue
+        if len(s) == 1 and _is_opening_punct(s):
+            if open_pending and out:
+                out[-1][1] += s
+            else:
+                out.append(["c", s])
+            open_pending = True
+            continue
+        if open_pending and out:
+            out[-1][1] += s; open_pending = False
+            continue
+        open_pending = False
+        if len(s) == 1 and _is_closing_punct(s) and out:
+            if out[-1][0] == "c":
+                out[-1][1] += s
+                continue
+            if out[-1][0] == "sp":
+                # 空格后的收尾标点：连同空格并入前簇，标点不得落到行首
+                k = len(out)
+                while k > 0 and out[k - 1][0] == "sp":
+                    k -= 1
+                if k > 0 and out[k - 1][0] == "c":
+                    out[k - 1][1] += " " * (len(out) - k) + s
+                    del out[k:]
+                    continue
+        out.append(["c", s])
+    return out
+
+
+# 字形宽度缓存：{(family, px, bold, italic) -> {text: 逻辑宽}}。
+# CJK 无 kerning，可按字符缓存累加；拉丁词整词缓存（保留词内 shaping）。
+# 命中后量宽近零成本，跨章节/重排复用。
+_ADV_CACHE = {}
 
 
 def _coerce_color(value, fallback="#87CEEB"):
@@ -93,88 +171,371 @@ def _coerce_bool(value, default=False):
 
 
 class ScriptureBody(QWidget):
-    """经文正文区：用浮点 scroll_y 平移绘制，观感接近网页提词器。"""
+    """经文正文区：自绘行布局 + 浮点 scroll_y 平移绘制，观感接近网页提词器。
+
+    断行/禁则/两端对齐全部由 _relayout 自己实现（不经过 Qt 断行器）：
+    - 「节号+正文首字」在同一个 grp 原子里，物理上不可能分行悬空
+    - 拉丁词内不断行；行首不出现收尾标点；行尾不出现开引号
+    - 两端对齐把剩余空间均分到「纯汉字之间的边界与空格」上，标点簇保持紧凑
+    """
     scroll_changed = pyqtSignal(float)
+
     def __init__(self, parent=None):
-        super().__init__(parent); self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False); self.setFocusPolicy(Qt.FocusPolicy.NoFocus); self.setMouseTracking(True); self._doc = QTextDocument(self); self._doc.setDocumentMargin(0); self._scroll_y = 0.0; self._pad_left = 0; self._pad_right = 0; self._pad_bottom = 0; self._wheel_step = 48.0; self._follow_only = False
-    def set_html(self, html, justify=True):
-        self._doc.setHtml(html); self._doc.setDocumentMargin(0)
-        # HTML 里的 text-align:justify 会被 Qt 静默忽略：程序化补对齐。
-        # 中文（无空格断行）用两端对齐字间拉伸撑满行尾；
-        # 英文等拉丁文本用左对齐（强行两端对齐会拉出巨大词间距）
-        cursor = QTextCursor(self._doc)
-        cursor.select(QTextCursor.SelectionType.Document)
-        block_fmt = QTextBlockFormat()
-        block_fmt.setAlignment(
-            Qt.AlignmentFlag.AlignJustify if justify else Qt.AlignmentFlag.AlignLeft
-        )
-        cursor.mergeBlockFormat(block_fmt)
-        self._clamp_scroll(); self.update()
-    def set_pads(self,left,right,bottom): self._pad_left=max(0,int(left)); self._pad_right=max(0,int(right)); self._pad_bottom=max(0,int(bottom)); self._fit_text_width(); self._clamp_scroll(); self.update()
-    def set_text_width(self,width): self._doc.setTextWidth(max(1.0,float(width))); self._clamp_scroll(); self.update()
-    def _fit_text_width(self): self._doc.setTextWidth(float(max(1,self.width()-self._pad_left-self._pad_right)))
-    def content_height(self): return float(self._doc.size().height())
-    def view_height(self): return max(1.0,float(max(0,self.height()-self._pad_bottom)))
-    def max_scroll(self): return max(0.0,self.content_height()-self.view_height())
-    def scroll_y(self): return self._scroll_y
-    def set_scroll_y(self,value,emit=True):
-        try: y=float(value)
-        except (TypeError,ValueError): return
-        y=max(0.0,min(y,self.max_scroll()))
-        if abs(y-self._scroll_y)<1e-4: self._scroll_y=y; return
-        self._scroll_y=y; self.update()
-        if emit: self.scroll_changed.emit(self._scroll_y)
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setMouseTracking(True)
+        self._content = []        # 原子列表（ScriptureDisplay._build_content 生成）
+        self._styles = {}         # 样式名 -> (QFont, QColor)
+        self._justify = True      # 两端对齐（中文译本开，英文译本关）
+        self._line_factor = 1.6   # line_spacing% / 100
+        self._pad_top = 0.0
+        self._doc_pad_bottom = 0.0
+        self._text_width = 1.0
+        self._lines = []          # 布局结果：[{y, advance, baseline, cells}]
+        self._content_h = 0.0
+        self._scroll_y = 0.0
+        self._pad_left = 0; self._pad_right = 0; self._pad_bottom = 0
+        self._wheel_step = 48.0
+        self._follow_only = False
+        self._fms = {}
+        self._adv_cache = {}   # 样式名 -> 该字体配置的全局宽度缓存（set_content 时刷新）
+
+    # ---------- 内容与样式 ----------
+
+    def set_content(self, atoms, styles, justify, pad_top, pad_bottom, line_spacing_pct):
+        """接收原子序列与样式表，重建行布局。原子结构见 _build_content。"""
+        self._content = list(atoms or [])
+        self._styles = dict(styles or {})
+        self._justify = bool(justify)
+        self._line_factor = max(0.5, float(line_spacing_pct) / 100.0)
+        self._pad_top = max(0.0, float(pad_top))
+        self._doc_pad_bottom = max(0.0, float(pad_bottom))
+        self._fms = {}
+        self._adv_cache = {}
+        self._relayout(); self._clamp_scroll(); self.update()
+
+    def _style(self, name):
+        st = self._styles.get(name)
+        if st is None:
+            font = QFont()
+            font.setPixelSize(16)
+            return (font, QColor("#FFFFFF"))
+        return st
+
+    def _fm(self, name):
+        fm = self._fms.get(name)
+        if fm is None:
+            fm = QFontMetricsF(self._style(name)[0])
+            self._fms[name] = fm
+        return fm
+
+    def _advance(self, style, text):
+        """文本逻辑宽度（带缓存）。纯 CJK/标点簇按字符累加（无 kerning），
+        其余（拉丁词/混合）整串量宽并缓存。"""
+        cache = self._adv_cache.get(style)
+        if cache is None:
+            font, _color = self._style(style)
+            key = (font.family(), font.pixelSize(), font.bold(), font.italic())
+            cache = _ADV_CACHE.setdefault(key, {})
+            self._adv_cache[style] = cache
+        w = cache.get(text)
+        if w is not None:
+            return w
+        fm = self._fm(style)
+        if len(text) > 1 and not any(ch.isascii() and ch.isalnum() for ch in text):
+            w = 0.0
+            for ch in text:
+                cw = cache.get(ch)
+                if cw is None:
+                    cw = fm.horizontalAdvance(ch)
+                    cache[ch] = cw
+                w += cw
+        else:
+            w = fm.horizontalAdvance(text)
+        cache[text] = w
+        return w
+
+    def _atom_width(self, atom):
+        w = atom.get("w")
+        if w is not None:
+            return w
+        kind = atom["kind"]
+        if kind == "w":
+            w = self._advance(atom["style"], atom["text"])
+        elif kind == "grp":
+            w = 0.0
+            for piece in atom["pieces"]:
+                if piece["k"] == "text":
+                    piece["w"] = self._advance(piece["style"], piece["text"])
+                    w += piece["w"]
+                else:
+                    w += float(piece["w"])
+        elif kind == "sp":
+            w = self._advance("body", " ")
+        elif kind == "gap":
+            w = float(atom["gap"])
+        else:
+            w = 0.0
+        atom["w"] = w
+        return w
+
+    # ---------- 断行与布局 ----------
+
+    def _relayout(self):
+        for atom in self._content:
+            self._atom_width(atom)
+        width = max(1.0, float(self._text_width))
+        raw = []   # [(行内原子列表, 是否允许两端对齐)]
+        chunk = []
+        for atom in self._content:
+            if atom["kind"] == "br":
+                if chunk:
+                    self._wrap_chunk(chunk, width, raw)
+                    chunk = []
+                elif raw:
+                    raw.append(([], False))   # 连续换行的空行
+            else:
+                chunk.append(atom)
+        if chunk:
+            self._wrap_chunk(chunk, width, raw)
+
+        # 垂直排布：行高 = 行内最大字体高 × line_spacing%，基线居中于行距增量
+        lines = []
+        y = self._pad_top
+        factor = self._line_factor
+        body_fm = self._fm("body")
+        for atoms, just in raw:
+            cells, nat_h, max_asc = self._layout_line(atoms, width, just and self._justify)
+            if nat_h <= 0.0:
+                nat_h = body_fm.height(); max_asc = body_fm.ascent()
+            # 与旧 QTextDocument 渲染一致：行高先取整再乘 line-height%，
+            # 额外行距放在行下方（文字贴行盒顶部），首行基线 = ascent
+            advance = math.ceil(nat_h) * factor
+            baseline = y + max_asc
+            lines.append({"y": y, "advance": advance, "baseline": baseline, "cells": cells})
+            y += advance
+        self._lines = lines
+        self._content_h = y + self._doc_pad_bottom
+
+    def _wrap_chunk(self, atoms, width, raw):
+        """一个强制换行块内的贪心断行。atoms 为非 br 原子。
+
+        在溢出点直接断行：拉丁词本身是不可分原子，溢出时整体下移；
+        行尾空格由 _push_line 剥离。不回退到行中空格——中文里最近的
+        空格可能在十几个原子之外（如「起初　神创造天地」的 U+3000），
+        回退会丢弃大半行内容，再被两端对齐拉出巨洞。
+        """
+        line = []
+        line_w = 0.0
+        for atom in atoms:
+            kind = atom["kind"]
+            w = atom["w"]
+            if kind == "sp":
+                if not line:
+                    continue   # 行首空格丢弃
+                line.append(atom); line_w += w
+                continue
+            if line and line_w + w > width:
+                self._push_line(raw, line, True)
+                line = []; line_w = 0.0
+            line.append(atom); line_w += w
+        self._push_line(raw, line, False)   # 块末行（自然段末行）不拉伸
+
+    @staticmethod
+    def _push_line(raw, atoms, justify):
+        while atoms and atoms[-1]["kind"] == "sp":
+            atoms.pop()   # 行尾空格不占宽
+        if atoms:
+            raw.append((atoms, justify))
+
+    def _layout_line(self, atoms, width, justify):
+        """把一行原子平铺成绘制单元并做两端对齐。返回 (cells, nat_h, max_asc)。
+
+        cell 结构：{"k": "t"/"sp", "x", "text", "style", "raise", "w"}
+        拉伸点 = 相邻两个纯汉字单元之间的边界 + 空格；标点簇旁不拉伸（保持密排）。
+        """
+        cells = []
+        x = 0.0
+
+        def push_text(text, style, raise_, w):
+            nonlocal x
+            cells.append({"k": "t", "x": x, "text": text, "style": style,
+                          "raise": raise_, "w": w})
+            x += w
+
+        for a in atoms:
+            if a["kind"] == "sp":
+                cells.append({"k": "sp", "x": x, "text": "", "style": "body",
+                              "raise": 0.0, "w": a["w"]})
+                x += a["w"]
+                continue
+            if a["kind"] == "grp":
+                for piece in a["pieces"]:
+                    if piece["k"] == "gap":
+                        x += float(piece["w"])
+                        prev_cjk = False
+                    else:
+                        push_text(piece["text"], piece["style"], piece["raise"],
+                                  piece["w"])
+                continue
+            push_text(a["text"], a["style"], 0.0, a["w"])
+
+        natural = x
+        # 两端对齐：剩余空间均匀分布到所有字间边界。按「平移原始坐标」实现——
+        # 原始 x 已包含 grp 原子内部的节号间隙，直接重排会把它抹掉。
+        # 不用「拉伸点均分」：行内汉字边界太少时（如「号,定节令,日子,年岁,」
+        # 只有 2 个）整行富余会拉成巨洞；均匀化后每处只多零点几个字宽。
+        # 节号与它正文首字之间不参与，节号不漂离正文。
+        if justify and cells and natural < width:
+            extra = width - natural
+            if extra > 0 and len(cells) > 1:
+                weights = [0.0]
+                prev_style = cells[0]["style"]
+                for c in cells[1:]:
+                    weights.append(0.0 if prev_style == "num" else 1.0)
+                    prev_style = c["style"]
+                total_w = sum(weights)
+                if total_w > 0:
+                    acc = 0.0
+                    for idx, c in enumerate(cells):
+                        if idx:
+                            acc += extra * weights[idx] / total_w
+                            c["x"] += acc
+
+        # 合并相邻同样式且紧贴的单元（减少 drawText 调用；拉丁词本身已是一格）
+        merged = []
+        for c in cells:
+            if c["k"] != "t":
+                continue
+            if merged:
+                last = merged[-1]
+                if (last["style"] == c["style"] and last["raise"] == c["raise"]
+                        and abs(last["x"] + last["w"] - c["x"]) < 0.01):
+                    last["text"] += c["text"]
+                    last["w"] += c["w"]
+                    continue
+            merged.append(dict(c))
+        nat_h = 0.0; max_asc = 0.0
+        for c in merged:
+            fm = self._fm(c["style"])
+            if fm.height() > nat_h: nat_h = fm.height()
+            if fm.ascent() > max_asc: max_asc = fm.ascent()
+        return merged, nat_h, max_asc
+
+    # ---------- 视口/滚动 ----------
+
+    def set_pads(self, left, right, bottom):
+        self._pad_left = max(0, int(left)); self._pad_right = max(0, int(right)); self._pad_bottom = max(0, int(bottom))
+        self._fit_text_width(); self._clamp_scroll(); self.update()
+
+    def set_text_width(self, width):
+        w = max(1.0, float(width))
+        if abs(w - self._text_width) < 0.5:
+            return
+        self._text_width = w
+        self._relayout(); self._clamp_scroll(); self.update()
+
+    def _fit_text_width(self):
+        self.set_text_width(max(1, self.width() - self._pad_left - self._pad_right))
+
+    def content_height(self):
+        return max(1.0, self._content_h)
+
+    def view_height(self):
+        return max(1.0, float(max(0, self.height() - self._pad_bottom)))
+
+    def max_scroll(self):
+        return max(0.0, self.content_height() - self.view_height())
+
+    def scroll_y(self):
+        return self._scroll_y
+
+    def set_scroll_y(self, value, emit=True):
+        try:
+            y = float(value)
+        except (TypeError, ValueError):
+            return
+        y = max(0.0, min(y, self.max_scroll()))
+        if abs(y - self._scroll_y) < 1e-4:
+            self._scroll_y = y; return
+        self._scroll_y = y; self.update()
+        if emit:
+            self.scroll_changed.emit(self._scroll_y)
+
     def _clamp_scroll(self):
         self.set_scroll_y(self._scroll_y, emit=False)
+
     def scroll_fraction(self):
         maximum = self.max_scroll()
         return 0.0 if maximum <= 0 else self._scroll_y / maximum
+
     def set_scroll_fraction(self, fraction):
         try:
             value = max(0.0, min(1.0, float(fraction)))
         except (TypeError, ValueError):
             return
         self.set_scroll_y(value * self.max_scroll())
-    def scroll_by(self,delta):
-        try: delta=float(delta)
-        except (TypeError,ValueError): return
-        self.set_scroll_y(self._scroll_y+delta)
+
+    def scroll_by(self, delta):
+        try:
+            delta = float(delta)
+        except (TypeError, ValueError):
+            return
+        self.set_scroll_y(self._scroll_y + delta)
+
     def set_follow_only(self, on: bool):
         self._follow_only = bool(on)
-    def wheelEvent(self,event):
+
+    def wheelEvent(self, event):
         if self._follow_only:
             event.accept()
             return
-        angle=event.angleDelta().y(); pixel=event.pixelDelta().y()
-        if pixel: delta=-float(pixel)
-        elif angle: delta=-(float(angle)/120.0)*self._wheel_step
-        else: event.ignore(); return
-        old=self._scroll_y; self.scroll_by(delta)
-        if abs(self._scroll_y-old)>1e-4: event.accept()
-        else: event.ignore()
-    def resizeEvent(self,event): super().resizeEvent(event); self._fit_text_width(); self._clamp_scroll()
-    def paintEvent(self,event):
-        painter=QPainter(self); painter.setRenderHint(QPainter.RenderHint.TextAntialiasing,True); painter.setRenderHint(QPainter.RenderHint.Antialiasing,True); clip=self.rect()
-        if self._pad_bottom: clip.setHeight(max(0,clip.height()-self._pad_bottom))
-        painter.setClipRect(clip); painter.translate(float(self._pad_left),-self._scroll_y)
-        # 大文档（多章）下 drawContents 全量遍历每帧 35ms+，拖慢整个界面。
-        # 文档不大时保持原路径（渲染逐像素一致）；大文档才按可见区裁剪，
-        # 每帧只画屏幕上的几行，耗时与经文总量无关
-        if float(self._doc.size().height()) <= 30000.0:
-            self._doc.drawContents(painter)
+        angle = event.angleDelta().y(); pixel = event.pixelDelta().y()
+        if pixel:
+            delta = -float(pixel)
+        elif angle:
+            delta = -(float(angle) / 120.0) * self._wheel_step
         else:
-            buf = max(8.0, float(clip.height()) * 0.05)
-            vis_h = max(1.0, float(clip.height()) + 2.0 * buf)
-            tw = float(self._doc.textWidth())
-            if tw <= 0: tw = float(max(1, self.width() - self._pad_left - self._pad_right))
-            self._doc.drawContents(painter, QRectF(0.0, self._scroll_y - buf, tw, vis_h))
-    def document(self): return self._doc
+            event.ignore(); return
+        old = self._scroll_y; self.scroll_by(delta)
+        if abs(self._scroll_y - old) > 1e-4:
+            event.accept()
+        else:
+            event.ignore()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event); self._fit_text_width(); self._clamp_scroll()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        clip = self.rect()
+        if self._pad_bottom:
+            clip.setHeight(max(0, clip.height() - self._pad_bottom))
+        painter.setClipRect(clip)
+        painter.translate(float(self._pad_left), -self._scroll_y)
+        # 只画可见区附近的行（滚动耗时与文档总行数基本无关）
+        top = self._scroll_y - 40.0
+        bottom = self._scroll_y + clip.height() + 40.0
+        for line in self._lines:
+            if line["y"] + line["advance"] < top:
+                continue
+            if line["y"] > bottom:
+                break
+            base = line["baseline"]
+            for cell in line["cells"]:
+                font, color = self._style(cell["style"])
+                painter.setFont(font)
+                painter.setPen(color)
+                painter.drawText(QPointF(cell["x"], base - cell["raise"]), cell["text"])
 
 
 class ScriptureDisplay(QWidget):
-    scroll_changed=pyqtSignal(int); scroll_finished=pyqtSignal(); _TICK_MS_LEGACY=30.0
+    scroll_changed=pyqtSignal(int); scroll_finished=pyqtSignal(); content_changed=pyqtSignal(); _TICK_MS_LEGACY=30.0
     def __init__(self,parent=None):
-        super().__init__(parent); self.font_family="微软雅黑"; self.font_size=24; self.font_color=QColor("#FFFFFF"); self.bg_color=QColor("#000000"); self.bg_image=None; self._bg_pixmap=None; self._bg_pixmap_path=None; self._bg_scaled=None; self._bg_scaled_size=None; self.line_spacing=160; self.margin_left=60; self.margin_right=60; self.title_font_family="微软雅黑"; self.title_color=QColor("#87CEEB"); self.title_size=36; self.title_min_size=12; self.title_spacing=12; self.show_scripture_titles=False; self.show_captions=True; self.scripture_title_font_family="微软雅黑"; self.scripture_title_size=30; self.scripture_title_color=QColor("#87CEEB"); self.scripture_title_spacing=8; self.scripture_title_line_spacing=120; self.caption_font_family="微软雅黑"; self.caption_size=24; self.caption_color=QColor("#87CEEB"); self.caption_italic=True; self.verse_num_color=QColor("#FFD700"); self.verse_num_size=24; self.verse_num_font_family="微软雅黑"; self.footer_text=""; self.footer_height=45; self.footer_size=14; self.footer_color=QColor("#AAAAAA"); self.footer_font_family="微软雅黑"; self.scroll_speed=0; self._scroll_anim=None; self._scroll_clock=QElapsedTimer(); self._refresh_hz=60.0; self._screen_hooked=False; self._title_text=""; self.verses=[]; self.verse_segmentation=False; self._show_chapter_nums=False; self._reference_size=None; self._design_height=1080; self.scroll_timer=QTimer(self); self.scroll_timer.setTimerType(Qt.TimerType.PreciseTimer); self.scroll_timer.timeout.connect(self._auto_scroll); self._apply_refresh_interval(); self._init_ui(); self.setFocusPolicy(Qt.FocusPolicy.StrongFocus); self._home_shortcut=QShortcut(QKeySequence(Qt.Key.Key_Home),self); self._home_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut); self._home_shortcut.activated.connect(self._scroll_to_top); self._end_shortcut=QShortcut(QKeySequence(Qt.Key.Key_End),self); self._end_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut); self._end_shortcut.activated.connect(self._scroll_to_bottom); self.punct_halfwidth=False
+        super().__init__(parent); self.font_family="微软雅黑"; self.font_size=24; self.font_color=QColor("#FFFFFF"); self.bg_color=QColor("#000000"); self.bg_image=None; self._bg_pixmap=None; self._bg_pixmap_path=None; self._bg_scaled=None; self._bg_scaled_size=None; self.line_spacing=160; self.margin_left=60; self.margin_right=60; self.title_font_family="微软雅黑"; self.title_color=QColor("#87CEEB"); self.title_size=36; self.title_min_size=12; self.title_spacing=12; self.show_scripture_titles=False; self.show_captions=True; self.scripture_title_font_family="微软雅黑"; self.scripture_title_size=30; self.scripture_title_color=QColor("#87CEEB"); self.scripture_title_spacing=8; self.scripture_title_line_spacing=120; self.caption_font_family="微软雅黑"; self.caption_size=24; self.caption_color=QColor("#87CEEB"); self.caption_italic=True; self.verse_num_color=QColor("#FFD700"); self.verse_num_size=24; self.verse_num_font_family="微软雅黑"; self.footer_text=""; self.footer_height=45; self.footer_size=14; self.footer_color=QColor("#AAAAAA"); self.footer_font_family="微软雅黑"; self.scroll_speed=0; self._scroll_anim=None; self._scroll_clock=QElapsedTimer(); self._refresh_hz=60.0; self._screen_hooked=False; self._title_text=""; self.verses=[]; self.verse_segmentation=False; self._show_chapter_nums=False; self._reference_size=None; self._design_height=1080; self.scroll_timer=QTimer(self); self.scroll_timer.setTimerType(Qt.TimerType.PreciseTimer); self.scroll_timer.timeout.connect(self._auto_scroll); self._apply_refresh_interval(); self._fill_scale=None; self._init_ui(); self.setFocusPolicy(Qt.FocusPolicy.StrongFocus); self._home_shortcut=QShortcut(QKeySequence(Qt.Key.Key_Home),self); self._home_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut); self._home_shortcut.activated.connect(self._scroll_to_top); self._end_shortcut=QShortcut(QKeySequence(Qt.Key.Key_End),self); self._end_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut); self._end_shortcut.activated.connect(self._scroll_to_bottom); self.punct_halfwidth=False; self._text_justify=True
     def _init_ui(self):
         # 自己在 paintEvent 里铺底色/背景图，不要让样式表/调色板先盖一层黑
         self.setAutoFillBackground(False)
@@ -186,7 +547,18 @@ class ScriptureDisplay(QWidget):
     def _scroll_to_bottom(self):
         if self.scroll_speed>0 or self.scroll_timer.isActive(): self.set_scroll_speed(0); self.scroll_finished.emit()
         self.set_scroll_position(self.max_scroll())
-    def layout_scale(self): return max(0.55,min(3.0,float(self._reference_size[1])/float(self._design_height))) if self._reference_size else max(0.55,min(3.0,float(max(1,self.height()))/float(self._design_height)))
+    def layout_scale(self):
+        if self._reference_size:
+            return max(0.55,min(3.0,float(self._reference_size[1])/float(self._design_height)))
+        if self._fill_scale is not None:
+            return self._fill_scale
+        return max(0.55,min(3.0,float(max(1,self.height()))/float(self._design_height)))
+    def recalibrate_fill_scale(self):
+        """显示面突变（进入/退出全屏）后重估冻结的 fill 缩放并重排。"""
+        if self._reference_size is not None:
+            return
+        self._fill_scale=None
+        self._refresh_layout_metrics()
     def _px(self,value): return max(1,int(round(float(value)*self.layout_scale())))
     def set_stage_size(self,width,height): self.set_reference_size(width,height)
     def clear_stage_size(self): self.clear_reference_size()
@@ -269,7 +641,7 @@ class ScriptureDisplay(QWidget):
         title=self._logical_title_from_verses(selection,verses)
         self.set_scripture(selection.book,selection.primary_chapter,selection.primary_start,selection.primary_end,verses,title=title,show_chapter_nums=selection.is_multi_chapter,reset_scroll=reset_scroll)
     def clear_scripture(self):
-        self.verses=[]; self._show_chapter_nums=False; self._set_adaptive_title(""); self.text_display.set_html(""); self.set_scroll_position(0); self.update()
+        self.verses=[]; self._show_chapter_nums=False; self._set_adaptive_title(""); self.text_display.set_content([], self._body_styles(), True, 0, 0, self.line_spacing); self.set_scroll_position(0); self.update()
     def _set_adaptive_title(self,text):
         self._title_text=str(text or ""); shown=self._punct(self._title_text); size=max(self._px(self.title_min_size),self._px(self.title_size)); font=QFont(self.title_font_family,size); font.setBold(True); pad=self._px(24); avail=max(100,self.title_bar.width()-pad*2); min_size=self._px(self.title_min_size)
         while QFontMetrics(font).horizontalAdvance(shown)>avail and size>min_size:
@@ -279,11 +651,6 @@ class ScriptureDisplay(QWidget):
         enabled=bool(enabled)
         if self.verse_segmentation==enabled:return
         old=self.scroll_fraction(); self.verse_segmentation=enabled
-        if self.verses:self._render_scripture(); self.set_scroll_fraction(old)
-    def set_scripture_titles(self,enabled):
-        enabled=bool(enabled) and ENABLE_SCRIPTURE_TITLES
-        if self.show_scripture_titles==enabled:return
-        old=self.scroll_fraction(); self.show_scripture_titles=enabled
         if self.verses:self._render_scripture(); self.set_scroll_fraction(old)
     def _verse_row(self,row):
         if row is None:return None,None,"",[],[]
@@ -305,123 +672,140 @@ class ScriptureDisplay(QWidget):
             if not s: continue
             if _STANDALONE_CAPTION_RE.match(s):
                 if self.show_captions:
-                    segs.append(("caption",s))
+                    segs.append(("caption",_norm_ws(s).strip()))
             else:
-                segs.append(("body",s))
+                segs.append(("body",_norm_ws(s).strip()))
         return segs
-    def _verse_html(self,chapter,n,t,leading_gap=True,inline_captions=None):
-        vn=self._px(self.verse_num_size); fs=self._px(self.font_size)
+    def _body_styles(self):
+        """正文区四种样式的字体/颜色（QFont 以像素字号构建，与绘制一致）。"""
+        vn=self._px(self.verse_num_size)
+        def mk(family,px,bold=False,italic=False):
+            font=QFont(str(family)); font.setPixelSize(max(1,int(round(px)))); font.setBold(bold); font.setItalic(italic); return font
+        return {
+            "body": (mk(self.font_family,self._px(self.font_size)), self.font_color),
+            "caption": (mk(self.caption_font_family,self._px(self.caption_size),italic=self.caption_italic), self.caption_color),
+            "title": (mk(self.scripture_title_font_family,self._px(self.scripture_title_size),bold=True), self.scripture_title_color),
+            "num": (mk(self.verse_num_font_family,vn*0.66,bold=True), self.verse_num_color),
+        }
+    def _verse_atoms(self,chapter,n,t,leading_gap,inline_captions):
+        """一节的原子序列。核心保证：节号与正文（或首段题注）的第一簇
+        在同一个 grp 原子里——断行以原子为单位，节号永远不可能单独悬在行尾。"""
+        vn=self._px(self.verse_num_size)
         label=f"{chapter}:{n}" if getattr(self,"_show_chapter_nums",False) and chapter is not None else str(n)
-        # 节号前后间隙用 margin（边距不是两端对齐的拉伸点，恒定不变形）；
-        # 节与节的分隔不用空格字符——空格会被对齐拉伸出大空隙
         gl=max(2,self._px(self.verse_num_gap_left)) if self.verse_num_gap_left>0 else max(6,int(vn*1.0))
         gr=max(2,self._px(self.verse_num_gap_right)) if self.verse_num_gap_right>0 else max(6,int(vn*1.0))
-        lead = f'<span style="letter-spacing:{gl}px;font-size:{gl}px;">​</span>' if leading_gap else ''
-        # 前间隙：零宽字符+正字距（跟随节号字号；段首/行首不 leading）
-        # 前后间隙用「零宽字符+正字距」span：Qt 对 letter-spacing 渲染可靠，
-        # 且该间隙不是空格字符，不会被两端对齐拉伸出大空隙
-        def esc(s): return str(s).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
-        num_span = (f'<span style="color:{self.verse_num_color.name()};font-size:{vn}px;font-family:&quot;{self.verse_num_font_family}&quot;;font-weight:bold;vertical-align:super;">{label}</span>')
-        text_style = f'color:{self.font_color.name()};font-size:{fs}px;font-family:&quot;{self.font_family}&quot;;'
+        raise_px=int(round(vn*0.30))   # 节号上标抬升
+        def cluster_atoms(text,style):
+            out=[]
+            for ck,cs in _clusters(self._punct(str(text))):
+                if ck=="sp":
+                    out.append({"kind":"sp"})
+                else:
+                    out.append({"kind":"w","text":cs,"style":style})
+            return out
+        pieces=[]
+        if leading_gap:
+            pieces.append({"k":"gap","w":float(gl)})
+        pieces.append({"k":"text","text":label,"style":"num","raise":raise_px})
         segs=self._verse_segments(t)
-        if not segs:
-            return num_span + self._inline_captions_html(inline_captions)
-        # U+2060 WORD JOINER：节号与正文首字之间禁止断行（不会分离）
-        bind = '⁠'
-        out=(f'{lead}{num_span}'
-             f'<span style="letter-spacing:{gr}px;font-size:{gr}px;">{bind}</span>{bind}')
-        first_body=True
-        for kind,s in segs:
-            if kind=="caption":
-                # 节中说话人标签：独立行、题注样式，不并入正文行内
-                out+=f'<br><span style="{self._caption_style()}">{self._punct(esc(s))}</span>'
-                continue
-            h=self._punct(esc(s))
-            if first_body:
-                first, rest = (h[:1], h[1:]) if h else ("", "")
-                rest = _inject_break_points(rest)
-                out+=(f'<span style="{text_style}">{first}</span>'
-                      f'<span style="{text_style}">{rest}</span>')
-                first_body=False
-            else:
-                h=_inject_break_points(h)
-                out+=f'<br><span style="{text_style}">{h}</span>'
-        return out + self._inline_captions_html(inline_captions)
-    def _title_html(self,text):
-        safe=self._punct(str(text or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")).replace("\n","<br>"); fs=self._px(self.scripture_title_size); return f'<p style="margin:0 0 8px 0;padding:0;line-height:{self.line_spacing}%;"><span style="color:{self.scripture_title_color.name()};font-size:{fs}px;font-family:&quot;{self.scripture_title_font_family}&quot;;font-weight:bold;">{safe}</span></p>'
-    def _title_inline_html(self,text):
-        safe=self._punct(str(text or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")).replace("\n","<br>"); fs=self._px(self.scripture_title_size); return f'<br><span style="color:{self.scripture_title_color.name()};font-size:{fs}px;font-family:&quot;{self.scripture_title_font_family}&quot;;font-weight:bold;">{safe}</span><br>'
-    def _caption_style(self):
-        # 题注（篇首注/说话人标签/细拉）：独立设置项，斜体可选、不加粗以区别于小标题
-        fs=self._px(self.caption_size)
-        style=(f'color:{self.caption_color.name()};font-size:{fs}px;'
-               f'font-family:&quot;{self.caption_font_family}&quot;;font-weight:normal;')
-        if getattr(self,"caption_italic",True): style+="font-style:italic;"
-        return style
-    def _caption_html(self,text):
-        safe=self._punct(str(text or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")).replace("\n","<br>")
-        return f'<p style="margin:0 0 8px 0;padding:0;line-height:{self.line_spacing}%;"><span style="{self._caption_style()}">{safe}</span></p>'
-    def _caption_inline_html(self,text):
-        safe=self._punct(str(text or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")).replace("\n","<br>")
-        return f'<br><span style="{self._caption_style()}">{safe}</span><br>'
-    def _inline_captions_html(self,captions):
-        """节末内联题注（细拉/Selah）：跟随经文排版，用 margin 间隙避免两端对齐拉伸。"""
-        if not captions: return ""
-        gap=max(6,self._px(self.caption_size)//3)
-        parts=[]
-        for c in captions or []:
-            safe=self._punct(str(c or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;"))
-            parts.append(f'<span style="{self._caption_style()}margin-left:{gap}px;">{safe}</span>')
-        return "".join(parts)
+        seg_atom_lists=[("body" if kind=="body" else "caption", cluster_atoms(s,"body" if kind=="body" else "caption")) for kind,s in segs]
+        # 节末内联题注（细拉/Selah）
+        inline_gap=max(6,self._px(self.caption_size)//3)
+        inline_atoms=[]
+        for i,cap in enumerate(inline_captions or []):
+            if i: inline_atoms.append({"kind":"gap","gap":inline_gap})
+            inline_atoms.extend(cluster_atoms(cap,"caption"))
+        # 首段首簇并入节号原子（节号+间距+首字 物理一体）
+        if seg_atom_lists and seg_atom_lists[0][1]:
+            pieces.append({"k":"gap","w":float(gr)})
+            first=seg_atom_lists[0][1].pop(0)
+            pieces.append({"k":"text","text":first["text"],"style":first["style"],"raise":0.0})
+        elif inline_atoms and inline_atoms[0]["kind"]=="w":
+            # 无正文段的节：首个内联题注簇并入，节号同样不悬空
+            pieces.append({"k":"gap","w":float(gr)})
+            first=inline_atoms.pop(0)
+            pieces.append({"k":"text","text":first["text"],"style":first["style"],"raise":0.0})
+        while pieces and pieces[-1]["k"]=="gap":
+            pieces.pop()
+        atoms=[{"kind":"grp","pieces":pieces}]
+        for si,(style,seg) in enumerate(seg_atom_lists):
+            if si: atoms.append({"kind":"br"})
+            atoms.extend(seg)
+        atoms.extend(inline_atoms)
+        return atoms
+    def _build_content(self):
+        """把 self.verses 组装成原子序列（三种排版模式，结构与旧 HTML 版一致）。"""
+        rows=[self._verse_row(row) for row in self.verses]
+        show_titles=self.show_scripture_titles; show_captions=self.show_captions
+        atoms=[]
+        def br():
+            if atoms and atoms[-1]["kind"]!="br":
+                atoms.append({"kind":"br"})
+        def flow(text,style):
+            parts=str(text or "").split("\n")
+            for i,part in enumerate(parts):
+                if i: br()
+                for ck,cs in _clusters(self._punct(_norm_ws(part).strip())):
+                    if ck=="sp":
+                        atoms.append({"kind":"sp"})
+                    else:
+                        atoms.append({"kind":"w","text":cs,"style":style})
+        if self.verse_segmentation:
+            for ch,n,t,titles,captions in rows:
+                if show_titles:
+                    for subtitle in titles: br(); flow(subtitle,"title"); br()
+                above,inline=self._split_captions(captions)
+                if show_captions:
+                    for caption in above: br(); flow(caption,"caption"); br()
+                else:
+                    inline=[]
+                br()
+                atoms.extend(self._verse_atoms(ch,n,t,leading_gap=False,inline_captions=inline))
+        elif show_titles or show_captions:
+            has_content=False
+            for ch,n,t,titles,captions in rows:
+                if show_titles:
+                    for subtitle in titles:
+                        atoms.append({"kind":"br"}); flow(subtitle,"title"); atoms.append({"kind":"br"}); has_content=True
+                above,inline=self._split_captions(captions)
+                if show_captions:
+                    for caption in above:
+                        atoms.append({"kind":"br"}); flow(caption,"caption"); atoms.append({"kind":"br"}); has_content=True
+                else:
+                    inline=[]
+                atoms.extend(self._verse_atoms(ch,n,t,leading_gap=has_content,inline_captions=inline)); has_content=True
+        else:
+            for vi,(ch,n,t,_titles,_captions) in enumerate(rows):
+                atoms.extend(self._verse_atoms(ch,n,t,leading_gap=(vi>0),inline_captions=[]))
+        while atoms and atoms[-1]["kind"]=="br":
+            atoms.pop()
+        return atoms
     def _split_captions(self,captions):
         """题注分两类：节上方（篇首注/说话人）与节末内联（细拉/Selah）。"""
         above=[]; inline=[]
         for c in captions or []:
             (inline if str(c) in _SELAH_TEXTS else above).append(c)
         return above,inline
-    def _verse_block_html(self,chapter,n,t,inline_captions=None): return f"<p style='margin:0;padding:0;line-height:{self.line_spacing}%;'>{self._verse_html(chapter,n,t,leading_gap=False,inline_captions=inline_captions)}</p>"
     def _render_scripture(self):
+        # fill 模式缩放冻结：首次真实渲染时按当时窗口高定格，此后缩放窗口
+        # 不再改变字号（否则每节经文加载都按新窗口高重算，字号跟着漂移）；
+        # 全屏等显示面突变走 recalibrate_fill_scale 重估
+        if self._reference_size is None and self._fill_scale is None and self.height()>=200:
+            self._fill_scale=max(0.55,min(3.0,float(self.height())/float(self._design_height)))
+            self._update_viewport_margins()   # 边距/底注与冻结后的字号同刻度
         # 语种检测：中日韩字符占多数 → 两端对齐；拉丁文（英文译本）→ 左对齐
         sample = "".join(str(self._verse_row(row)[2] or "") for row in self.verses)
         cjk = sum(1 for ch in sample if "一" <= ch <= "鿿" or "㐀" <= ch <= "䶿")
         latin = sum(1 for ch in sample if ch.isascii() and ch.isalpha())
         self._text_justify = cjk >= latin
-        fs=self._px(self.font_size); top=max(10,int(fs*0.35)); bottom=max(12,int(fs*0.45)); html=f"<div style='padding-top:{top}px;padding-bottom:{bottom}px;margin:0;line-height:{self.line_spacing}%;'>"; rows=[self._verse_row(row) for row in self.verses]
-        show_titles=self.show_scripture_titles; show_captions=self.show_captions
-        if self.verse_segmentation:
-            blocks=[]
-            for ch,n,t,titles,captions in rows:
-                if show_titles:
-                    for subtitle in titles: blocks.append(self._title_html(subtitle))
-                above,inline=self._split_captions(captions)
-                if show_captions:
-                    for caption in above: blocks.append(self._caption_html(caption))
-                else:
-                    inline=[]
-                blocks.append(self._verse_block_html(ch,n,t,inline_captions=inline))
-            html+="".join(blocks)
-        elif show_titles or show_captions:
-            html+="<p style='margin:0;padding:0;white-space:normal;'>"; has_content=False
-            for ch,n,t,titles,captions in rows:
-                if show_titles:
-                    for subtitle in titles:
-                        if has_content: html+="<br>"
-                        html+=self._title_inline_html(subtitle); has_content=True
-                above,inline=self._split_captions(captions)
-                if show_captions:
-                    for caption in above:
-                        if has_content: html+="<br>"
-                        html+=self._caption_inline_html(caption); has_content=True
-                else:
-                    inline=[]
-                html+=self._verse_html(ch,n,t,leading_gap=has_content,inline_captions=inline); has_content=True
-            html+="</p>"
-        else:
-            flow_parts=[]
-            for vi,(ch,n,t,_titles,_captions) in enumerate(rows):
-                flow_parts.append(self._verse_html(ch,n,t,leading_gap=(vi>0)))
-            html+="<p style='margin:0;padding:0;white-space:normal;'>"+"".join(flow_parts)+"</p>"
-        self.text_display.set_html(html+"</div>", justify=getattr(self, "_text_justify", True)); self._fit_document_width()
+        # 旧 QTextDocument 渲染里 div 的 padding-top/bottom 实测不生效（文档高=行进之和），
+        # 自绘布局同样不加首尾衬距，保持观感与滚动量一致
+        self._fit_document_width()   # 先把行宽就位，避免 set_content 在过期宽度上白排一遍
+        atoms=self._build_content()
+        self.text_display.set_content(
+            atoms, self._body_styles(), justify=getattr(self,"_text_justify",True),
+            pad_top=0, pad_bottom=0, line_spacing_pct=self.line_spacing,
+        )
     def _update_footer_style(self):
         fs=self._px(self.footer_size); self.footer_label.setText(self._punct(self.footer_text)); self.footer_label.setFont(QFont(self.footer_font_family,fs)); self.footer_label.setStyleSheet(f'color:{self.footer_color.name()};font-family:"{self.footer_font_family}";'+f"font-size:{fs}px;background:transparent;")
     def _ensure_bg_pixmap(self):
@@ -483,8 +867,6 @@ class ScriptureDisplay(QWidget):
         self.title_size=int(settings.get("title_size",self.title_size))
         self.title_spacing=int(settings.get("title_spacing",self.title_spacing))
         self.show_scripture_titles=_coerce_bool(settings.get("show_scripture_titles",self.show_scripture_titles),self.show_scripture_titles)
-        if not ENABLE_SCRIPTURE_TITLES:
-            self.show_scripture_titles=False
         self.show_captions=_coerce_bool(settings.get("show_captions",getattr(self,"show_captions",True)),True)
         self.scripture_title_font_family=str(settings.get("scripture_title_font_family",self.scripture_title_font_family))
         try: self.scripture_title_size=max(10,min(200,int(settings.get("scripture_title_size",self.scripture_title_size))))
@@ -507,7 +889,6 @@ class ScriptureDisplay(QWidget):
         self.footer_text=settings.get("footer_text",self.footer_text)
         self.footer_height=int(settings.get("footer_height",self.footer_height))
         self._refresh_layout_metrics(); self._update_footer_style(); self.update()
-    def set_title(self,title): self._set_adaptive_title(title)
     def _update_overlay_geometry(self):
         if not self.footer_label:return
         h=self._px(self.footer_height); self.footer_label.setGeometry(0,max(0,self.height()-h),self.width(),h)

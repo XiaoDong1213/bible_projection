@@ -15,10 +15,6 @@ from PyQt6.QtGui import QDesktopServices
 logger = logging.getLogger(__name__)
 
 
-def office_apps_hint() -> str:
-    return "请安装 WPS 演示或 Microsoft PowerPoint，并用其打开 .pptx。"
-
-
 def _unique_existing(paths: list[Path]) -> list[Path]:
     seen: set[str] = set()
     out: list[Path] = []

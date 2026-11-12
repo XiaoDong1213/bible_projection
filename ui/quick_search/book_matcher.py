@@ -48,13 +48,3 @@ class BookMatcher:
                 return book
         return None
 
-    def unique_match(self, query):
-        """仅在匹配结果唯一时返回书卷。"""
-        candidates = self.candidates(query)
-        if len(query) == 1 and len(candidates) == 1:
-            return candidates[0]
-        if len(candidates) == 1:
-            q = self.normalize(query)
-            if q in self.aliases(candidates[0]):
-                return candidates[0]
-        return None

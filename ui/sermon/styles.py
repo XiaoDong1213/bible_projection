@@ -788,9 +788,6 @@ class SermonComboBox(QComboBox):
         self._apply_edit_mode()
         polish_sermon_combo(self, self._sermon_theme)
 
-    def set_searchable(self, searchable: bool):
-        self._searchable = bool(searchable)
-        self._apply_edit_mode()
 
     def _apply_edit_mode(self):
         edit = self.lineEdit()

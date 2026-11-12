@@ -416,13 +416,6 @@ class SlideStage(QGraphicsView):
                 )
         self.render_slide_pixmap(doc, slide, prepare_anims=prepare_anims)
 
-    def snapshot_current(self):
-        """空闲时记下当前画面，下次换页当旧图，避免按键时 grab。"""
-        if self._hold_item is not None or self._page_anim is not None:
-            return
-        pix = self.grab_slide_pixmap()
-        if pix is not None and not pix.isNull():
-            self._old_snap = pix
 
     def take_old_snapshot(self) -> QPixmap:
         """只返回空闲时记下的图，按键时不再 grab 全屏。"""
@@ -658,11 +651,6 @@ class SlideStage(QGraphicsView):
             a.start()
         return True
 
-    def grab_slide_pixmap(self) -> QPixmap:
-        vp = self.viewport()
-        if vp is None or vp.width() < 8 or vp.height() < 8:
-            return QPixmap()
-        return vp.grab()
 
     def play_dual_pixmap_transition(
         self,

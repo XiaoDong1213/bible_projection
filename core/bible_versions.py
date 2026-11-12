@@ -23,31 +23,6 @@ def user_bibles_dir() -> Path:
     return data_dir() / USER_BIBLES_DIRNAME
 
 
-def ensure_user_bibles_dir() -> Path:
-    path = user_bibles_dir()
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        pass
-    return path
-
-
-def open_user_bibles_dir() -> bool:
-    """在资源管理器中打开版本文件夹；成功返回 True。"""
-    import subprocess
-    import sys
-
-    path = ensure_user_bibles_dir()
-    try:
-        if sys.platform == "win32":
-            os.startfile(str(path))
-            return True
-        subprocess.Popen(["xdg-open", str(path)])
-        return True
-    except Exception:
-        return False
-
-
 def resolve_bible_path(filename: str) -> Path | None:
     """按文件名解析版本路径：用户目录优先，其次内置 resources。"""
     name = str(filename or "").strip()

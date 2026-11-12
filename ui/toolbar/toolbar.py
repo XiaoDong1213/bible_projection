@@ -10,14 +10,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QSize, QStringListModel, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QFontDatabase, QColor, QPainter, QPen
 
-from app.feature_flags import ENABLE_SCRIPTURE_TITLES, ENABLE_SERMON
 from app.version import APP_VERSION
-from core.bible_versions import (
-    available_bible_versions,
-    open_user_bibles_dir,
-    resolve_bible_path,
-    user_bibles_dir,
-)
+from core.bible_versions import available_bible_versions
 
 
 # 全进程共用一份字体列表，避免打开设置时扫 5 遍
@@ -112,9 +106,6 @@ class ColorPreviewSlot(QWidget):
         layout.setSpacing(0)
         layout.addWidget(preview)
 
-    def set_preview_visible(self, visible: bool):
-        self.preview.setVisible(visible)
-
 
 class ToolbarButton(QPushButton):
     """顶栏按钮：高度接近原版；速度档位略窄以利一行排布。"""
@@ -199,20 +190,36 @@ class HelpShortcutsDialog(QDialog):
         self.setWindowTitle("帮助")
         self.setObjectName("helpShortcutsDialog")
         self.setMinimumWidth(640)
+        self._wrap_desc_labels = []
         self._build_ui()
         self.adjustSize()
 
+        # 初始宽度先定住；高度在 showEvent 里按真实几何精调
+        # （未显示的窗口布局不生效，sizeHint 在真实字体下也虚高，预显示阶段无法算准）
+        self.setFixedWidth(720)
+        self.adjustSize()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if getattr(self, "_sized_once", False):
+            return
+        self._sized_once = True
+        # 同关于对话框：sizeHint 有缓存虚高，定高用布局自己的 heightForWidth
+        for lab in self._wrap_desc_labels:
+            lab.ensurePolished()
+            lab.updateGeometry()
+        lay = self.layout()
+        lay.invalidate()
+        width = self.width()
+        height = lay.heightForWidth(width) if lay.hasHeightForWidth() else self.sizeHint().height()
         screen = self.screen()
         if screen:
-            available = screen.availableGeometry()
-            width = min(720, max(640, self.sizeHint().width()))
-            height = min(available.height() - 80, self.sizeHint().height() + 8)
-            self.setFixedSize(width, height)
-            frame = self.frameGeometry()
-            frame.moveCenter(available.center())
-            self.move(frame.topLeft())
-        else:
-            self.setFixedSize(max(640, self.sizeHint().width()), self.sizeHint().height() + 8)
+            height = min(screen.availableGeometry().height() - 80, height)
+        self.setFixedSize(width, height)
+        frame = self.frameGeometry()
+        if screen:
+            frame.moveCenter(screen.availableGeometry().center())
+        self.move(frame.topLeft())
 
     def _build_ui(self):
         root = QVBoxLayout(self)
@@ -241,14 +248,6 @@ class HelpShortcutsDialog(QDialog):
 
         sections = []
         for section_title, rows in self.SECTIONS:
-            if section_title == "讲篇放映" and not ENABLE_SERMON:
-                continue
-            if section_title == "其他" and not ENABLE_SERMON:
-                rows = tuple(
-                    r for r in rows if "讲篇" not in r[0] and "讲篇" not in r[1]
-                )
-                if not rows:
-                    continue
             sections.append((section_title, rows))
         positions = (
             (0, 0, 1, 1),
@@ -280,8 +279,7 @@ class HelpShortcutsDialog(QDialog):
         footer_layout.setSpacing(12)
 
         tip_text = f"当前版本 {APP_VERSION}。输入框内按键交给当前控件。"
-        if ENABLE_SERMON:
-            tip_text += "放映中空格和方向键用于步进 / 翻页。讲篇与经文切换的淡化时长在显示设置里。"
+        tip_text += "放映中空格和方向键用于步进 / 翻页。讲篇与经文切换的淡化时长在显示设置里。"
         tip = QLabel(tip_text)
         tip.setObjectName("helpTip")
         tip.setWordWrap(True)
@@ -291,6 +289,7 @@ class HelpShortcutsDialog(QDialog):
         update_btn.setObjectName("helpUpdateBtn")
         update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         update_btn.setFixedHeight(34)
+        update_btn.setMinimumWidth(90)
         update_btn.clicked.connect(self._check_update)
         footer_layout.addWidget(update_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
@@ -298,7 +297,7 @@ class HelpShortcutsDialog(QDialog):
         close_btn.setObjectName("helpCloseBtn")
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         close_btn.setFixedHeight(34)
-        close_btn.setMinimumWidth(88)
+        close_btn.setMinimumWidth(90)
         close_btn.clicked.connect(self.accept)
         footer_layout.addWidget(
             close_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
@@ -335,13 +334,14 @@ class HelpShortcutsDialog(QDialog):
         keycap = QLabel(key)
         keycap.setObjectName("helpKeycap")
         keycap.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        keycap.setMinimumWidth(88)
+        keycap.setMinimumWidth(90)
         keycap.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         layout.addWidget(keycap, 0, Qt.AlignmentFlag.AlignVCenter)
 
         description = QLabel(desc)
         description.setObjectName("helpDesc")
-        description.setWordWrap(False)
+        description.setWordWrap(True)
+        self._wrap_desc_labels.append(description)
         layout.addWidget(description, 1, Qt.AlignmentFlag.AlignVCenter)
         return row
 
@@ -699,8 +699,7 @@ class DisplaySettingsDialog(QDialog):
         lf.addRow("左右边距", self.margin)
         lf.addRow("底注区域高度", self.footer_height)
         lf.addRow("底注文字", self.footer_text)
-        if ENABLE_SERMON:
-            lf.addRow("讲篇/经文切换", self.channel_fade_ms)
+        lf.addRow("讲篇/经文切换", self.channel_fade_ms)
         tabs.addTab(layout_page, "布局与底注")
 
         bg_page = QWidget()
@@ -724,43 +723,18 @@ class DisplaySettingsDialog(QDialog):
         tabs.addTab(bg_page, "背景")
 
         bible_page = QWidget()
-        bible_form = QFormLayout(bible_page)
-        bible_form.setContentsMargins(20, 20, 20, 20)
-        bible_form.setHorizontalSpacing(18)
-        bible_form.setVerticalSpacing(14)
-        self.bible_version_combo = QComboBox()
-        # 与字体下拉同款弹层样式：Qt6 的 QSS ::item 只对可编辑下拉的弹层生效
-        self.bible_version_combo.setEditable(True)
-        self.bible_version_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.bible_version_combo.setMaxVisibleItems(14)
-        self.bible_version_combo.setSizeAdjustPolicy(
-            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-        )
-        self.bible_version_combo.setMinimumContentsLength(4)
-        view = self.bible_version_combo.view()
-        view.setTextElideMode(Qt.TextElideMode.ElideRight)
-        view.setUniformItemSizes(True)
-        # 输入框只读：可编辑只为弹层样式，不允许手输版本名
-        self.bible_version_combo.lineEdit().setReadOnly(True)
-        self.bible_version_combo.currentIndexChanged.connect(self._update_bible_version_info)
-        bible_form.addRow("当前版本", self.bible_version_combo)
-        self.bible_version_info = QLabel("")
-        self.bible_version_info.setWordWrap(True)
-        bible_form.addRow("", self.bible_version_info)
-        hint = QLabel(
-            "添加新译本：把对应格式的 .db 圣经数据库放入版本文件夹，重启或重新打开本窗口即可选择"
-        )
-        hint.setWordWrap(True)
-        hint.setObjectName("navHint")
-        bible_form.addRow("", hint)
-        folder_row = QHBoxLayout()
-        self.bibles_folder_label = QLineEdit()
-        self.bibles_folder_label.setReadOnly(True)
-        bibles_open = QPushButton("打开文件夹")
-        bibles_open.clicked.connect(self._open_bibles_folder)
-        folder_row.addWidget(self.bibles_folder_label, 1)
-        folder_row.addWidget(bibles_open)
-        bible_form.addRow("版本文件夹", folder_row)
+        bible_root = QVBoxLayout(bible_page)
+        bible_root.setContentsMargins(20, 20, 20, 20)
+        bible_root.setSpacing(12)
+        # 译本名卡片网格：只能选择，不能在此新增（新译本 = 放入 .db 数据库文件）
+        self.bible_version_grid = QWidget()
+        self.bible_version_grid.setObjectName("versionCardGrid")
+        self.bible_grid = QGridLayout(self.bible_version_grid)
+        self.bible_grid.setSpacing(10)
+        bible_root.addWidget(self.bible_version_grid)
+        bible_root.addStretch(1)
+        self._version_cards = {}
+        self._selected_bible_file = ""
         tabs.addTab(bible_page, "圣经版本")
 
         root.addWidget(tabs, 1)
@@ -867,34 +841,42 @@ class DisplaySettingsDialog(QDialog):
         self.bg_image.clear()
 
     def _reload_bible_versions(self):
-        """扫描可用圣经版本填充下拉（每次打开对话框时刷新）。"""
-        combo = self.bible_version_combo
-        combo.blockSignals(True)
-        combo.clear()
-        for version in available_bible_versions():
-            label = version["name"] if version["builtin"] else f"{version['name']}（用户）"
-            combo.addItem(label, version["file"])
-        combo.blockSignals(False)
+        """扫描可用译本重建卡片网格（每次打开对话框时刷新）。"""
+        while self.bible_grid.count():
+            item = self.bible_grid.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        self._version_cards = {}
+        versions = available_bible_versions()
+        cols = 4
+        for i, version in enumerate(versions):
+            card = QPushButton(version["name"])
+            card.setObjectName("versionCard")
+            card.setCheckable(True)
+            card.setAutoExclusive(True)
+            card.setCursor(Qt.CursorShape.PointingHandCursor)
+            card.setFixedSize(160, 52)
+            card.setToolTip("点击选择该译本")
+            card.clicked.connect(
+                lambda checked=False, f=version["file"]: self._pick_bible_file(f)
+            )
+            self.bible_grid.addWidget(card, i // cols, i % cols)
+            self._version_cards[str(version["file"])] = card
+        for c in range(cols):
+            self.bible_grid.setColumnStretch(c, 0)
+        self.bible_grid.setColumnStretch(cols, 1)
+
+    def _pick_bible_file(self, bible_file):
+        self._selected_bible_file = str(bible_file)
 
     def _select_bible_file(self, bible_file):
-        combo = self.bible_version_combo
-        index = combo.findData(str(bible_file or ""))
-        combo.setCurrentIndex(index if index >= 0 else 0)  # 缺省 = 内置版本
-        self._update_bible_version_info()
-
-    def _update_bible_version_info(self):
-        filename = str(self.bible_version_combo.currentData() or "")
-        path = resolve_bible_path(filename)
-        if path is None:
-            self.bible_version_info.setText("未找到该版本的数据库文件")
-        else:
-            self.bible_version_info.setText(f"数据库文件：{path}")
-
-    def _open_bibles_folder(self):
-        if not open_user_bibles_dir():
-            self.bible_version_info.setText(
-                f"无法打开文件夹，请手动访问：{user_bibles_dir()}"
-            )
+        target = str(bible_file or "")
+        if target not in self._version_cards and self._version_cards:
+            target = next(iter(self._version_cards))  # 缺省 = 第一个内置译本
+        self._selected_bible_file = target
+        for file, card in self._version_cards.items():
+            card.setChecked(file == target)
 
     def _load_settings(self):
         s = self.settings
@@ -959,7 +941,7 @@ class DisplaySettingsDialog(QDialog):
     def get_settings(self):
         s = dict(self.settings)
         s.update({
-            "bible_file": str(self.bible_version_combo.currentData() or ""),
+            "bible_file": str(getattr(self, "_selected_bible_file", "") or ""),
             "font_family": self.font_combo.currentFont().family(),
             "font_size": self.font_size.value(),
             "font_color": self._color_hex("font_color", "#FFFFFF"),
@@ -994,7 +976,12 @@ class DisplaySettingsDialog(QDialog):
         return s
 
 
-class ToolBarWidget(QToolBar):
+class ToolBarWidget(QWidget):
+    """主工具栏：自适应双行流式布局——窗口窄时按钮折到第二行，不再折叠进 » 菜单。
+
+    兼容旧 QToolBar 调用：addWidget / addSeparator / insertWidget(before, w)。
+    """
+
     settings_changed = pyqtSignal(dict)
     scroll_speed_changed = pyqtSignal(int)
     extend_toggled = pyqtSignal()
@@ -1010,11 +997,11 @@ class ToolBarWidget(QToolBar):
     SPEED_LABELS = ["暂停"] + [f"{i}档" for i in range(1, 10)]
 
     def __init__(self, parent=None):
-        super().__init__("主工具栏", parent)
-        self.setMovable(False)
-        self.setIconSize(QSize(18, 18))
-        self.setFloatable(False)
-        self.setMinimumHeight(56)
+        super().__init__(parent)
+        self.setObjectName("mainToolBar")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._items = []          # 按顺序收集全部条目（按钮/分隔符/容器）
+        self._rows_ready = False  # 双行布局就绪前只收集不装配
         self.theme = "dark"
         self.settings = {}
         self._speed = 0
@@ -1083,10 +1070,7 @@ class ToolBarWidget(QToolBar):
         self.show_titles_btn.setCheckable(True)
         self.show_titles_btn.setToolTip("显示 / 隐藏经文小标题")
         self.show_titles_btn.toggled.connect(self._toggle_scripture_titles)
-        if ENABLE_SCRIPTURE_TITLES:
-            self.addWidget(self.show_titles_btn)
-        else:
-            self.show_titles_btn.hide()
+        self.addWidget(self.show_titles_btn)
 
         # 讲篇 / 全文搜索插到此分隔符之前
         self._search_anchor_action = self.addSeparator()
@@ -1113,10 +1097,12 @@ class ToolBarWidget(QToolBar):
             scroll_layout.addWidget(btn)
         self.addWidget(scroll_wrap)
         self._set_speed(0)
+        self._finish_rows_build()
 
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.addWidget(spacer)
+        self._spacer = spacer  # 弹性占位：单行时把「更多」组顶到右侧，折行时隐藏
         self.addSeparator()
 
         # —— 更多 ——
@@ -1137,18 +1123,18 @@ class ToolBarWidget(QToolBar):
         self.help_btn.clicked.connect(self._open_help)
         self.addWidget(self.help_btn)
 
-        self.update_btn = ToolbarButton("检查更新")
-        self.update_btn.setObjectName("checkUpdateBtn")
-        self.update_btn.setToolTip("从 GitHub 检查是否有新版本")
-        self.update_btn.clicked.connect(self._check_update)
+        self.update_btn = ToolbarButton("关于")
+        self.update_btn.setObjectName("aboutBtn")
+        self.update_btn.setToolTip("软件简介、联系方式与检查更新")
+        self.update_btn.clicked.connect(self._open_about)
         self.addWidget(self.update_btn)
 
         self._update_theme_button()
 
-    def _check_update(self):
-        from ui.update_prompt import run_update_check
+    def _open_about(self):
+        from ui.about_dialog import AboutDialog
 
-        run_update_check(self.window(), quiet=False)
+        AboutDialog(self.window()).exec()
 
     def set_mode_badge(self, text: str, *, tip: str | None = None):
         """兼容旧调用；顶栏不再显示模式胶囊。"""
@@ -1162,9 +1148,7 @@ class ToolBarWidget(QToolBar):
         self.topmost_btn.blockSignals(blocked)
 
         raw_titles = settings.get("show_scripture_titles", False)
-        if not ENABLE_SCRIPTURE_TITLES:
-            show_titles = False
-        elif isinstance(raw_titles, str):
+        if isinstance(raw_titles, str):
             show_titles = raw_titles.strip().lower() in {"true", "1", "yes", "on"}
         else:
             show_titles = bool(raw_titles)
@@ -1173,12 +1157,9 @@ class ToolBarWidget(QToolBar):
         blocked = self.show_titles_btn.blockSignals(True)
         self.show_titles_btn.setChecked(show_titles)
         self.show_titles_btn.blockSignals(blocked)
-        self.show_titles_btn.setVisible(ENABLE_SCRIPTURE_TITLES)
         self._update_theme_button()
 
     def _toggle_scripture_titles(self, checked):
-        if not ENABLE_SCRIPTURE_TITLES:
-            return
         self.settings["show_scripture_titles"] = bool(checked)
         self.settings_changed.emit(dict(self.settings))
 
@@ -1194,6 +1175,109 @@ class ToolBarWidget(QToolBar):
 
     def _open_help(self):
         HelpShortcutsDialog(self.window()).exec()
+
+    # ---- 双行流式布局（替代 QToolBar 的折叠行为） ----
+    def _finish_rows_build(self):
+        """按钮全部创建后挂双行布局，之后按窗口宽度分流。"""
+        self._items = list(self._items)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 8, 12, 8)
+        root.setSpacing(0)
+        self._row1 = QHBoxLayout()
+        self._row1.setSpacing(6)
+        self._row1.setContentsMargins(0, 0, 0, 0)
+        self._row1.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self._row2 = QHBoxLayout()
+        self._row2.setSpacing(6)
+        self._row2.setContentsMargins(0, 0, 0, 0)
+        self._row2.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        root.addLayout(self._row1)
+        root.addLayout(self._row2)
+        self._split_cache = None
+        # 初始全部装第一行；首次 show/resize 后按实际宽度分流
+        for it in self._items:
+            self._row1.addWidget(it)
+        self._rows_ready = True
+
+    def addWidget(self, w):  # noqa: N802（兼容 QToolBar 调用名）
+        self._items.append(w)
+        if self._rows_ready:
+            self._repack()
+        return w
+
+    def addSeparator(self):  # noqa: N802
+        sep = QFrame()
+        sep.setObjectName("mainToolBarSep")
+        sep.setFixedWidth(1)
+        sep.setFixedHeight(40)
+        self.addWidget(sep)
+        return sep
+
+    def insertWidget(self, before, w):  # noqa: N802
+        try:
+            idx = self._items.index(before)
+        except ValueError:
+            self.addWidget(w)
+            return w
+        self._items.insert(idx, w)
+        if self._rows_ready:
+            self._repack()
+        return w
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._relayout()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._relayout()
+
+    def _repack(self):
+        """条目顺序变化后重建两行。"""
+        for row in (self._row1, self._row2):
+            while row.count():
+                w = row.takeAt(0).widget()
+                if w is not None:
+                    w.setParent(self)
+        self._split_cache = None
+        self._relayout()
+
+    def _relayout(self):
+        """按当前宽度分两行：第一行放不下的条目折到第二行。"""
+        if not self._items:
+            return
+        avail = max(160, self.width() - 24)
+        sp = 6
+        split = len(self._items)
+        total = 0
+        for i, it in enumerate(self._items):
+            wd = it.sizeHint().width()
+            if total + wd > avail and i > 0:
+                split = i
+                break
+            total += wd + sp
+        if split == self._split_cache:
+            return
+        self._split_cache = split
+        for row in (self._row1, self._row2):
+            while row.count():
+                w = row.takeAt(0).widget()
+                if w is not None:
+                    w.setParent(self)
+        spacer = getattr(self, "_spacer", None)
+        wrapped = split < len(self._items)
+        for i, it in enumerate(self._items):
+            if it is spacer:
+                # 弹性占位：单行时加 stretch 顶右；折行时隐藏（两行左对齐）
+                if i < split:
+                    self._row1.addStretch(1)
+                spacer.hide()
+                continue
+            if i < split:
+                self._row1.addWidget(it)
+            else:
+                self._row2.addWidget(it)
+        self._row2.setContentsMargins(0, 6 if wrapped else 0, 0, 0)
 
     def _set_speed(self, speed):
         speed = max(0, min(9, int(speed)))

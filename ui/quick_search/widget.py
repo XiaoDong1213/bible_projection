@@ -1,11 +1,14 @@
 import re
 
 from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt, pyqtSignal
+from PyQt6.QtGui import QPainter
 from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QStyle,
+    QStyleOption,
     QVBoxLayout,
     QWidget,
 )
@@ -69,7 +72,10 @@ class SearchWidget(QWidget):
         self._current_chapter = None
 
         self.setObjectName("searchPanel")
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Popup)
+        # NoDropShadowWindowHint：系统投影按矩形窗口算、不跟圆角，四角会露方形阴影块
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Popup | Qt.WindowType.NoDropShadowWindowHint)
+        # 窗口基底透明：否则圆角外露出一圈矩形底色
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setMinimumWidth(660)
         self.setMaximumWidth(900)
@@ -88,6 +94,12 @@ class SearchWidget(QWidget):
         self.search_input.special_key.connect(self._on_special_key)
         layout.addWidget(self.search_input)
 
+        self.info_label = QLabel("")
+        self.info_label.setObjectName("searchInfo")
+        self.info_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.info_label.setVisible(False)
+        layout.addWidget(self.info_label)
+
         self.hint_label = QLabel(self.DEFAULT_HINT)
         self.hint_label.setObjectName("searchHint")
         self.hint_label.setMinimumHeight(30)
@@ -98,7 +110,7 @@ class SearchWidget(QWidget):
         self.result_list.setObjectName("searchCandidates")
         self.result_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.result_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.result_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.result_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.result_list.setFrameShape(QListWidget.Shape.NoFrame)
         self.result_list.setSpacing(4)
         self.result_list.setUniformItemSizes(True)
@@ -108,6 +120,14 @@ class SearchWidget(QWidget):
 
         self.apply_theme(self._theme)
         self._resize_result_area()
+
+    def paintEvent(self, event):
+        # WA_TranslucentBackground 下 QSS 背景不再自动绘制，需显式画一次：
+        # 面板底色上屏、圆角外保持透明（去掉那圈矩形基底）
+        opt = QStyleOption()
+        opt.initFrom(self)
+        painter = QPainter(self)
+        self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, opt, painter, self)
 
     def apply_theme(self, theme="dark"):
         self._theme = theme if theme in ("dark", "light") else "dark"
@@ -121,6 +141,7 @@ class SearchWidget(QWidget):
         self._current_chapter = None
         self._resize_result_area()
         self._update_hint(self.DEFAULT_HINT)
+        self._update_search_info()
         self.apply_theme(self._theme)
         self.search_input.clear()
         self.search_input.setFocus()
@@ -129,12 +150,34 @@ class SearchWidget(QWidget):
         self.hint_label.setText(text)
         self._resize_result_area()
 
+    def _update_search_info(self):
+        """书卷信息行（按步骤渐进）：识别书卷→本卷共X章；进入节号→补本章共Y节。"""
+        book = self.state.selected_book
+        if not book:
+            self.info_label.setVisible(False)
+            self.info_label.setText("")
+            self._resize_result_area()
+            return
+        short = (self.db.book_meta.get(book, {}).get("short") or "").strip()
+        name = f"{book}（{short}）" if short and short != book else book
+        text = f"{name} · 本卷共 {self._chapter_count(book)} 章"
+        chapter = self._current_chapter
+        if chapter is None and self.state.stage == "verse":
+            chapter = 1
+        if chapter is not None:
+            text += f" · 本章共 {self._verse_count(book, chapter)} 节"
+        self.info_label.setText(text)
+        self.info_label.setVisible(True)
+        self._resize_result_area()
+
     def _resize_result_area(self):
         count = self.result_list.count()
-        visible = min(count, 8)
+        visible = min(count, 8)   # 最多显示 8 条，超出滚动
         if visible:
-            row_h = max(42, self.result_list.sizeHintForRow(0))
-            height = visible * row_h + max(0, visible - 1) * 4 + 8
+            # 行高：QSS 给 ::item 的内边距不计入 sizeHintForRow，
+            # 估足余量保证第 8 行完整可见（不折叠）
+            row_h = max(52, int(self.result_list.sizeHintForRow(0) or 0) + 12)
+            height = visible * row_h + max(0, visible - 1) * 4 + 12
             self.result_list.setFixedHeight(height)
         else:
             self.result_list.setFixedHeight(0)
@@ -178,6 +221,7 @@ class SearchWidget(QWidget):
             self.result_list.clear()
             self._resize_result_area()
             self._update_hint(f"已识别为 {book}　·　仅有1章　·　请输入节号")
+            self._update_search_info()
             self.search_input.setFocus()
             return
 
@@ -190,6 +234,7 @@ class SearchWidget(QWidget):
         self.result_list.clear()
         self._resize_result_area()
         self._update_hint(f"已识别为 {book}　·　请输入章节　·　Space 进入节号")
+        self._update_search_info()
         self.search_input.setFocus()
 
     def _show_candidates(self, books):
@@ -263,6 +308,7 @@ class SearchWidget(QWidget):
         self.state.space_mode = False
         self._set_text(f"{self.state.selected_book} {chapter}:")
         self._update_hint("请输入开始节　·　Space 生成节范围")
+        self._update_search_info()
 
     def _space_after_verse(self):
         raw = self._suffix().strip()

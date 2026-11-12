@@ -144,6 +144,14 @@ def search_panel_style(name: str = "dark") -> str:
         border: 2px solid {t['focus_ring']};
         padding: 0 15px;
     }}
+    QLabel#searchInfo {{
+        background: transparent;
+        color: {t['accent']};
+        border: none;
+        padding: 6px 4px 2px 4px;
+        font-size: 13px;
+        font-weight: 600;
+    }}
     QLabel#searchHint {{
         background: transparent;
         color: {t['text_muted']};
@@ -267,32 +275,21 @@ QMenu::separator {{
 }}
 
 /* ---------- Toolbar ---------- */
-QToolBar {{
+#mainToolBar {{
     background: {t['surface']};
     border: none;
     border-bottom: 1px solid {t['border']};
-    padding: 8px 12px;
-    spacing: 6px;
-    min-height: 56px;
 }}
-QToolBar::separator {{
+QFrame#mainToolBarSep {{
     background: {t['border']};
-    width: 1px;
-    margin: 8px 4px;
 }}
 /* 一行排不下时不显示右侧折叠竖条 */
-QToolBar::extension {{
-    width: 0;
-    max-width: 0;
-    border: none;
-    background: transparent;
-}}
-QToolBar QLabel {{
+#mainToolBar QLabel {{
     color: {t['text_muted']};
     font-size: 13px;
     padding: 0 4px;
 }}
-QToolBar QPushButton {{
+#mainToolBar QPushButton {{
     background: {t['control']};
     color: {t['text']};
     border: 1px solid {t['border']};
@@ -304,12 +301,30 @@ QToolBar QPushButton {{
     max-height: 40px;
     min-width: 56px;
 }}
-QToolBar QPushButton#speedBtn {{
+#mainToolBar QPushButton#speedBtn {{
     padding: 0 2px;
     min-width: 38px;
     max-width: 38px;
     font-weight: 400;
     font-size: 12px;
+}}
+QPushButton#versionCard {{
+    background: {t['control']};
+    color: {t['text']};
+    border: 1px solid {t['border']};
+    border-radius: {r['md']}px;
+    padding: 10px 22px;
+    font-size: 14px;
+    min-height: 42px;
+}}
+QPushButton#versionCard:hover {{
+    border: 1px solid {t['accent']};
+}}
+QPushButton#versionCard:checked {{
+    background: {t['accent']};
+    color: #FFFFFF;
+    border: 1px solid {t['accent']};
+    font-weight: 600;
 }}
 QDialog#helpShortcutsDialog {{
     background: {t['surface']};
@@ -354,6 +369,21 @@ QDialog#helpShortcutsDialog QLabel#helpTip {{
     color: {t['text_muted']};
     font-size: 12px;
 }}
+QDialog#helpShortcutsDialog QPushButton#helpUpdateBtn {{
+    background: {t['accent']};
+    color: #FFFFFF;
+    border: 1px solid {t['accent']};
+    border-radius: {r['sm']}px;
+    padding: 0 18px;
+    font-size: 13px;
+}}
+QDialog#helpShortcutsDialog QPushButton#helpUpdateBtn:hover {{
+    background: {t['accent_hover']};
+    border-color: {t['accent_hover']};
+}}
+QDialog#helpShortcutsDialog QPushButton#helpUpdateBtn:pressed {{
+    background: {t['accent_pressed']};
+}}
 QDialog#helpShortcutsDialog QPushButton#helpCloseBtn {{
     background: {t['accent']};
     color: #FFFFFF;
@@ -367,6 +397,75 @@ QDialog#helpShortcutsDialog QPushButton#helpCloseBtn:hover {{
     border-color: {t['accent_hover']};
 }}
 QDialog#helpShortcutsDialog QPushButton#helpCloseBtn:pressed {{
+    background: {t['accent_pressed']};
+}}
+
+/* ---------- About dialog ---------- */
+QDialog#aboutDialog {{
+    background: {t['surface']};
+}}
+QDialog#aboutDialog QLabel#aboutAppName {{
+    color: {t['text']};
+    font-size: 18px;
+    font-weight: 600;
+}}
+QDialog#aboutDialog QLabel#aboutVersion {{
+    color: {t['text_muted']};
+    font-size: 12px;
+}}
+QDialog#aboutDialog QFrame#helpSection {{
+    background: {t['surface_sunken']};
+    border: 1px solid {t['border']};
+    border-radius: {r['md']}px;
+}}
+QDialog#aboutDialog QLabel#helpSectionTitle {{
+    color: {t['text']};
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 0 2px 0;
+}}
+QDialog#aboutDialog QLabel#aboutBody {{
+    color: {t['text']};
+    font-size: 13px;
+}}
+QDialog#aboutDialog QLabel#aboutDoxology {{
+    color: {t['text']};
+    font-size: 14px;
+    font-weight: 600;
+}}
+QDialog#aboutDialog QLabel#aboutCopyright {{
+    color: {t['text_muted']};
+    font-size: 11px;
+}}
+QDialog#aboutDialog QPushButton#aboutUpdateBtn {{
+    background: {t['accent']};
+    color: #FFFFFF;
+    border: 1px solid {t['accent']};
+    border-radius: {r['sm']}px;
+    padding: 0 18px;
+    font-size: 13px;
+    font-weight: 600;
+}}
+QDialog#aboutDialog QPushButton#aboutUpdateBtn:hover {{
+    background: {t['accent_hover']};
+    border-color: {t['accent_hover']};
+}}
+QDialog#aboutDialog QPushButton#aboutUpdateBtn:pressed {{
+    background: {t['accent_pressed']};
+}}
+QDialog#aboutDialog QPushButton#helpCloseBtn {{
+    background: {t['accent']};
+    color: #FFFFFF;
+    border: 1px solid {t['accent']};
+    border-radius: {r['sm']}px;
+    padding: 0 18px;
+    font-size: 13px;
+}}
+QDialog#aboutDialog QPushButton#helpCloseBtn:hover {{
+    background: {t['accent_hover']};
+    border-color: {t['accent_hover']};
+}}
+QDialog#aboutDialog QPushButton#helpCloseBtn:pressed {{
     background: {t['accent_pressed']};
 }}
 
@@ -457,24 +556,24 @@ QDialog#scriptureScopeDialog QDialogButtonBox QPushButton {{
     padding: 0 16px;
 }}
 
-QToolBar QPushButton:hover {{
+#mainToolBar QPushButton:hover {{
     background: {t['control_hover']};
     border-color: {t['accent']};
 }}
-QToolBar QPushButton:pressed {{
+#mainToolBar QPushButton:pressed {{
     background: {t['control_pressed']};
 }}
-QToolBar QPushButton:disabled {{
+#mainToolBar QPushButton:disabled {{
     background: {t['surface_sunken']};
     color: {t['text_faint']};
     border-color: {t['border']};
 }}
-QToolBar QPushButton:checked {{
+#mainToolBar QPushButton:checked {{
     background: {t['accent_soft']};
     color: {t['accent_text']};
     border-color: {t['accent']};
 }}
-QToolBar QComboBox {{
+#mainToolBar QComboBox {{
     background: {t['control']};
     color: {t['text']};
     border: 1px solid {t['border']};
@@ -485,14 +584,14 @@ QToolBar QComboBox {{
     max-height: 44px;
     font-size: 13px;
 }}
-QToolBar QComboBox:hover {{
+#mainToolBar QComboBox:hover {{
     border-color: {t['accent']};
 }}
-QToolBar QComboBox::drop-down {{
+#mainToolBar QComboBox::drop-down {{
     border: none;
     width: 32px;
 }}
-QToolBar QComboBox QAbstractItemView {{
+#mainToolBar QComboBox QAbstractItemView {{
     background: {t['surface_raised']};
     color: {t['text']};
     border: 1px solid {t['border']};
@@ -501,7 +600,7 @@ QToolBar QComboBox QAbstractItemView {{
     outline: none;
 }}
 
-QToolBar QLabel#toolbarSection {{
+#mainToolBar QLabel#toolbarSection {{
     color: {t['text_faint']};
     font-size: 11px;
     font-weight: 600;
@@ -509,7 +608,7 @@ QToolBar QLabel#toolbarSection {{
     padding: 0 6px 0 4px;
     background: transparent;
 }}
-QToolBar QLabel#modeBadge {{
+#mainToolBar QLabel#modeBadge {{
     color: {t['accent_text']};
     background: {t['accent_soft']};
     border: 1px solid {t['accent']};
@@ -521,17 +620,17 @@ QToolBar QLabel#modeBadge {{
     max-height: 28px;
     min-width: 48px;
 }}
-QToolBar QLabel#modeBadge[presenting="true"] {{
+#mainToolBar QLabel#modeBadge[presenting="true"] {{
     color: #FFFFFF;
     background: {t['danger']};
     border-color: {t['danger']};
 }}
-QToolBar QWidget#extendBtnWrap {{
+#mainToolBar QWidget#extendBtnWrap {{
     background: {t['accent']};
     border: 1px solid {t['accent']};
     border-radius: {r['md']}px;
 }}
-QToolBar QPushButton#extendBtn {{
+#mainToolBar QPushButton#extendBtn {{
     background: transparent;
     color: #FFFFFF;
     border: none;
@@ -545,19 +644,19 @@ QToolBar QPushButton#extendBtn {{
     max-height: 40px;
     min-width: 56px;
 }}
-QToolBar QPushButton#extendBtn[solo="true"] {{
+#mainToolBar QPushButton#extendBtn[solo="true"] {{
     border-top-right-radius: {r['md']}px;
     border-bottom-right-radius: {r['md']}px;
 }}
-QToolBar QPushButton#extendBtn:hover {{
+#mainToolBar QPushButton#extendBtn:hover {{
     background: {t['accent_hover']};
     color: #FFFFFF;
 }}
-QToolBar QPushButton#extendBtn:pressed {{
+#mainToolBar QPushButton#extendBtn:pressed {{
     background: {t['accent_pressed']};
     color: #FFFFFF;
 }}
-QToolBar QToolButton#extendArrowBtn {{
+#mainToolBar QToolButton#extendArrowBtn {{
     background: transparent;
     color: #FFFFFF;
     border: none;
@@ -573,19 +672,19 @@ QToolBar QToolButton#extendArrowBtn {{
     padding: 0;
     font-size: 11px;
 }}
-QToolBar QToolButton#extendArrowBtn:hover {{
+#mainToolBar QToolButton#extendArrowBtn:hover {{
     background: {t['accent_hover']};
     color: #FFFFFF;
 }}
-QToolBar QToolButton#extendArrowBtn:pressed {{
+#mainToolBar QToolButton#extendArrowBtn:pressed {{
     background: {t['accent_pressed']};
     color: #FFFFFF;
 }}
-QToolBar QToolButton#extendArrowBtn::menu-indicator {{
+#mainToolBar QToolButton#extendArrowBtn::menu-indicator {{
     image: none;
     width: 0;
 }}
-QToolBar QPushButton#scriptureSearchToolbarButton {{
+#mainToolBar QPushButton#scriptureSearchToolbarButton {{
     min-width: 56px;
     max-height: 40px;
     min-height: 40px;

@@ -28,16 +28,16 @@ def test_halfwidth_map():
 
 def test_on_converts_puncts():
     w = _make(punct_halfwidth=True)
-    html = w._verse_html(4, 1, "该隐" + LP + "注" + RP + COMMA)
-    assert LP not in html
-    assert "(" in html and ")" in html
+    text = w._punct("该隐" + LP + "注" + RP + COMMA)
+    assert LP not in text
+    assert "(" in text and ")" in text
 
 
 def test_off_keeps_fullwidth():
     w = _make(punct_halfwidth=False)
-    html = w._verse_html(4, 1, "该隐" + LP + "注" + RP + COMMA)
-    assert LP in html and RP in html
-    assert "(" not in html and ")" not in html
+    text = w._punct("该隐" + LP + "注" + RP + COMMA)
+    assert LP in text and RP in text
+    assert "(" not in text and ")" not in text
 
 
 def test_default_is_off():
