@@ -134,8 +134,8 @@ class MainWindow(QMainWindow):
 
         # 先套主题，再建大量控件：避免「先造百余按钮再全局 polish」
         self._load_theme_style()
+        self._create_toolbar()      # 先建工具栏（central 顶部要装它）
         self._create_central_widget()
-        self._create_toolbar()
         self._create_shortcuts()
         app = QApplication.instance()
         if app is not None:
@@ -199,7 +199,6 @@ class MainWindow(QMainWindow):
 
     def _create_toolbar(self):
         self.toolbar = ToolBarWidget()
-        self.addToolBar(self.toolbar)
         self.toolbar.theme = self.theme
         self.toolbar.load_settings(self.settings)
         self.toolbar.scroll_speed_changed.connect(self._on_scroll_speed)
@@ -212,14 +211,13 @@ class MainWindow(QMainWindow):
         self.toolbar.scroll_up.connect(lambda: self._scroll_manual(-40))
         self.toolbar.scroll_down.connect(lambda: self._scroll_manual(40))
         self.toolbar.clear_requested.connect(self._clear_display)
-        self.scripture_display.scroll_changed.connect(self._sync_extension_scroll)
-        self.scripture_display.scroll_finished.connect(self._on_scroll_finished)
 
     def _create_central_widget(self):
         central = QWidget()
         outer = QVBoxLayout(central)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
+        outer.addWidget(self.toolbar)  # 自适应换行工具栏（窄窗口折两行）
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.nav_panel = NavigationPanel(self.db)
@@ -236,6 +234,8 @@ class MainWindow(QMainWindow):
 
         self.preview_host = PreviewHost()
         self.scripture_display = self.preview_host.display
+        self.scripture_display.scroll_changed.connect(self._sync_extension_scroll)
+        self.scripture_display.scroll_finished.connect(self._on_scroll_finished)
         self.preview_host.apply_theme(theme_tokens(self.theme))
         self.preview_host.set_empty(True)
         right_layout.addWidget(self.preview_host, 1)
@@ -526,29 +526,35 @@ class MainWindow(QMainWindow):
         # 无副屏舞台：退出 letterbox，铺满屏幕原生分辨率
         self.preview_host.clear_stage()
         self.preview_host.set_fullscreen_hint(True)
+        self._pre_fullscreen_state = self.windowState() & ~Qt.WindowState.WindowFullScreen
         self.showFullScreen()
         self._main_fullscreen = True
         self.toolbar.set_extend_active(True)
         self.status_label.setText("全屏显示 · Esc 退出")
+        # 显示面尺寸突变：重估 fill 缩放（否则字号仍冻结在全屏前的小窗口刻度）
+        QTimer.singleShot(120, self.scripture_display.recalibrate_fill_scale)
 
     def _finish_exit_fullscreen(self, cover):
-        """盖板已上屏：在盖板底下完成 全屏→最大化，然后揭盖板。"""
-        self.hide()
+        """盖板已上屏：在盖板底下清除全屏态，然后揭盖板。"""
+        # 窗口必须保持可见：Windows 上隐藏状态下恢复原生边框会失效，
+        # 导致之后再最大化丢标题栏。盖板在最上层，中间态用户看不到。
         self.setWindowState(Qt.WindowState.WindowNoState)
-        screen = self.screen() or QApplication.primaryScreen()
-        if screen is not None:
-            self.setGeometry(screen.availableGeometry())
         self.toolbar.show()
         self.nav_panel.show()
         self.statusBar().show()
         self.toolbar.set_extend_active(False)
         self.preview_host.set_fullscreen_hint(False)
-        self.show()
-        self.setWindowState(self.windowState() | Qt.WindowState.WindowMaximized)
         self._fullscreen_transitioning = False
         self.status_label.setText("已退出全屏")
+        # 边框重建完成后再回到进入全屏前的状态（通常是最大化）
+        if self._pre_fullscreen_state & Qt.WindowState.WindowMaximized:
+            QTimer.singleShot(
+                60, lambda: self.setWindowState(Qt.WindowState.WindowMaximized)
+            )
         # 真窗口完成首帧绘制后揭盖板
         QTimer.singleShot(200, cover.deleteLater)
+        # 显示面恢复：重估 fill 缩放（全屏时字号被放大过，退出后回到窗口刻度）
+        QTimer.singleShot(220, self.scripture_display.recalibrate_fill_scale)
 
     def _apply_screen_mode(self):
         """按当前屏幕数切换单屏/多屏形态（按钮文案、讲篇可用性）。"""

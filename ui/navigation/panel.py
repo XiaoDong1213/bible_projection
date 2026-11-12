@@ -738,16 +738,6 @@ class NavigationPanel(QWidget):
         self.history = self.history[:30]
         self._update_history_list()
 
-    def add_to_history(self, book, chapter, start, end):
-        """兼容旧四元组调用。"""
-        try:
-            max_v = max(1, self.db.get_verse_count(str(book), int(chapter)))
-            selection = ScriptureSelection.single_chapter(
-                book, chapter, start, end, max_verse=max_v
-            )
-        except (TypeError, ValueError, AttributeError):
-            return
-        self.add_selection_to_history(selection)
 
     def add_selection_to_history(self, selection: ScriptureSelection):
         if selection is None:
@@ -837,5 +827,3 @@ class NavigationPanel(QWidget):
         self._update_history_list()
         self.history_changed.emit([])
 
-    def get_history(self):
-        return [item.to_history_entry() for item in self.history]

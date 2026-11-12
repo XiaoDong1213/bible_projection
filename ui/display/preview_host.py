@@ -159,9 +159,6 @@ class PreviewHost(QWidget):
         self._apply_chrome_colors()
         self._fit_view()
 
-    def stage_size(self):
-        """返回当前舞台尺寸。"""
-        return self._stage
 
     def _fit_view(self):
         """根据预览区域大小调整舞台缩放比例。"""

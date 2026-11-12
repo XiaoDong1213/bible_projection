@@ -250,6 +250,11 @@ def convert(source: Path, dest: Path, name: str, ver_id: str, lang_name: str,
         captions.extend(c_rows)
     src.close()
 
+    # 章数按实际经文统计（源目录 chapter_count 会把 cid=0 简介页多算一章）
+    actual_chapters: dict[int, int] = {}
+    for bid, cid, *_ in verses:
+        actual_chapters[bid] = max(actual_chapters.get(bid, 0), cid)
+
     # ---- 写目标库 ----
     if dest.exists():
         dest.unlink()
@@ -281,7 +286,8 @@ def convert(source: Path, dest: Path, name: str, ver_id: str, lang_name: str,
             pinyin = f"{base_pinyin} {name_short}".strip()
         else:
             pinyin = base_pinyin
-        books.append((bid, name_short, name_full, int(ch_count), pinyin))
+        chapters = actual_chapters.get(int(bid), int(ch_count))
+        books.append((bid, name_short, name_full, chapters, pinyin))
     out.executemany(
         "INSERT INTO Books(id, ShortName, LongName, ChapterCount, Pinyin) VALUES (?,?,?,?,?)",
         books,

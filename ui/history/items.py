@@ -100,14 +100,6 @@ class HistoryItemWidget(QWidget):
         self.copy_btn.setStyleSheet(action_style)
         self.delete_btn.setStyleSheet(action_style)
 
-    def set_index(self, index):
-        """更新记录对应的索引。"""
-        self.index = index
-
-    def set_text(self, text):
-        """更新历史记录文本。"""
-        self.label.setText(text)
-        self.setToolTip(text)
 
     def set_selected(self, selected):
         """更新当前记录的选中状态。"""

@@ -51,10 +51,6 @@ class BibleDatabase:
         except Exception:
             logger.warning("关闭旧圣经数据库失败", exc_info=True)
 
-    def clear_caches(self):
-        self._chapter_logical_cache.clear()
-        self._chapter_titles_cache.clear()
-        self._chapter_captions_cache.clear()
 
     def _inspect_database(self):
         tables = self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
@@ -282,24 +278,6 @@ class BibleDatabase:
                 return short
         return self.book_meta.get(book, {}).get("short", book[:1])
 
-    def search_books(self, query):
-        q = self._normalize_code(query)
-        if not q or not re.fullmatch(r"[a-z]+", q):
-            return []
-        results = []
-        for book in self.book_names:
-            for code in self._book_pinyin_codes(book):
-                if self._normalize_code(code).startswith(q):
-                    results.append(book)
-                    break
-        return results
-
-    def find_book(self, query):
-        q = self._normalize_code(query)
-        if q in self.book_codes:
-            return self.book_codes[q]
-        results = self.search_books(query)
-        return results[0] if results else None
 
     def old_testament_count(self):
         """旧约书卷数：新约固定 27 卷且排在最后（新旧教通用），余下为旧约。"""
@@ -406,9 +384,6 @@ class BibleDatabase:
                 return label, text
         return str(target), ""
 
-    def get_verses(self, book_name, chapter, start_verse=None, end_verse=None):
-        """读取经文；连接标记归属于前一节并合并为逻辑节号。"""
-        return [(label, text) for label, text, _start, _end in self.get_logical_verses(book_name, chapter, start_verse, end_verse)]
 
     def get_selection_verses(self, selection):
         """按多段选择查询经文，返回 (chapter, verse, text, titles, captions) 列表。"""

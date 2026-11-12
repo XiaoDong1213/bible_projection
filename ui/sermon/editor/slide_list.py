@@ -181,8 +181,6 @@ class SlideListWidget(QWidget):
                 rows.append(i)
         return rows
 
-    def current_index(self) -> int:
-        return self.list.currentRow()
 
     def selected_indexes(self) -> list[int]:
         rows = {self.list.row(item) for item in self.list.selectedItems()}

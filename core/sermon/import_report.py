@@ -15,13 +15,6 @@ def import_notes_list(doc: Any) -> list[str]:
     return notes
 
 
-def import_status_line(doc: Any, *, max_items: int = 3) -> str:
-    notes = import_notes_list(doc)
-    if not notes:
-        return ""
-    return "；".join(notes[:max_items])
-
-
 def import_dialog_body(doc: Any, *, max_items: int = 12) -> str | None:
     notes = import_notes_list(doc)
     skipped = int(getattr(doc, "import_skip_count", 0) or 0)

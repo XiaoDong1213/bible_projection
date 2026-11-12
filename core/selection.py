@@ -88,12 +88,6 @@ class ScriptureSelection:
     def primary_end(self) -> int:
         return self.spans[-1].end if self.is_simple else self.spans[0].end
 
-    def to_legacy(self) -> tuple[str, int, int, int] | None:
-        """仅单章单段时可转回旧四元组。"""
-        if not self.is_simple:
-            return None
-        span = self.spans[0]
-        return self.book, span.chapter, span.start, span.end
 
     def label(self) -> str:
         if self.is_simple and not self.is_multi_chapter:

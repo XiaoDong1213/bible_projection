@@ -85,7 +85,6 @@ def main():
     splash.show()
     app.processEvents()
 
-    from app.feature_flags import ENABLE_SCRIPTURE_SEARCH, ENABLE_SERMON
     from core.config import AppConfig
     from core.database import BibleDatabase
     from ui.main_window import MainWindow
@@ -117,14 +116,12 @@ def main():
 
     def _after_show():
         # 挂载全文搜索按钮（面板仍懒创建）；历史等非关键项已在主窗延后
-        if ENABLE_SCRIPTURE_SEARCH:
-            from ui.fulltext_search import attach_fulltext_search
+        from ui.fulltext_search import attach_fulltext_search
 
-            attach_fulltext_search(window)
-        if ENABLE_SERMON:
-            from ui.sermon import attach_sermon_editor
+        attach_fulltext_search(window)
+        from ui.sermon import attach_sermon_editor
 
-            attach_sermon_editor(window)
+        attach_sermon_editor(window)
         # 讲篇按钮已就位：按屏幕数重估单屏形态（单屏时禁用讲篇）
         if hasattr(window, "_apply_screen_mode"):
             window._apply_screen_mode()
