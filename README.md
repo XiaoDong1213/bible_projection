@@ -259,6 +259,8 @@ dist/Bible Pro/Bible Pro.exe
 
 代码采用 **MIT License**。贡献者：XiaoDong、JiangRTTTR。
 
+感谢 [主内云实验室](https://biblepro.vip) 提供数据支持。
+
 ```text
 Copyright © 2026 XiaoDong and JiangRTTTR
 ```
