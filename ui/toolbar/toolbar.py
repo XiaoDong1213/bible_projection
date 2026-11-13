@@ -1,5 +1,7 @@
 # 顶部工具栏：分组布局 + 速度档位按钮（档位略窄，利一行排布）
 
+import math
+
 from PyQt6.QtWidgets import (
     QToolBar, QPushButton, QLabel, QDialog, QFormLayout,
     QHBoxLayout, QVBoxLayout, QSpinBox, QColorDialog,
@@ -7,11 +9,14 @@ from PyQt6.QtWidgets import (
     QTabWidget, QGroupBox, QFrame, QGridLayout, QComboBox, QCompleter,
     QToolButton, QMenu, QStyledItemDelegate, QStyle, QCheckBox,
 )
-from PyQt6.QtCore import Qt, QSize, QStringListModel, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont, QFontDatabase, QColor, QPainter, QPen
+from PyQt6.QtCore import Qt, QSize, QStringListModel, QTimer, QPointF, QEvent, pyqtSignal
+from PyQt6.QtGui import (
+    QFont, QFontDatabase, QColor, QPainter, QPen, QFontMetrics, QFontMetricsF,
+)
 
 from app.version import APP_VERSION
 from core.bible_versions import available_bible_versions
+from ui.themes import theme_tokens
 
 
 # 全进程共用一份字体列表，避免打开设置时扫 5 遍
@@ -107,6 +112,142 @@ class ColorPreviewSlot(QWidget):
         layout.addWidget(preview)
 
 
+class ProjectionBadge(QWidget):
+    """投影状态胶囊：圆点 + 状态文字，颜色即信息——
+    灰 = 未投影；黄 = 投影中但此刻按速度档无效（焦点在输入框等）；
+    绿 = 按键生效；红 = 本软件窗口未激活（切到别的软件，按键必然无效）。"""
+
+    HEIGHT = 30
+    MODES = ("idle", "scripture", "scripture_focus", "app_lost", "sermon")
+    # 宽度按最长状态文本算，所有状态同宽——切换不跳长度
+    STATE_TEXTS = (
+        "未投影",
+        "投影中 · 经文",
+        "投影中 · 讲篇",
+        "投影中 · 未激活",
+    )
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("projectionBadge")
+        self.theme = "dark"
+        self._mode = "idle"
+        self._text = "未投影"
+        # 度量结果按字体缓存：QFontMetricsF 首次构造要初始化字体引擎（实测 ~1s），
+        # 构造期 FontChange/StyleChange 会触发多次重算，不缓存会重复付这笔钱
+        # shortcut: 缓存键不含屏幕 DPI——跨不同缩放比例的显示器拖动主窗口时
+        # 宽度可能不准；出现实际反馈时把 DPI 加进缓存键
+        self._width_cache = {}
+        self.setFixedHeight(self.HEIGHT)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self._recalc_width()
+
+    def set_theme(self, theme):
+        self.theme = str(theme or "dark")
+        self.update()
+
+    def set_state(self, mode, text):
+        """完整状态由主窗口判定：五态直接传入。"""
+        self._mode = mode if mode in self.MODES else "idle"
+        self._text = str(text or "")
+        self._recalc_width()
+        self._sync_tooltip()
+        self.update()
+
+    def _sync_tooltip(self):
+        tips = {
+            "idle": "未投影",
+            "scripture": "投影中 · 经文（黄=焦点在输入框，速度档按键暂不生效）",
+            "scripture_focus": "投影中 · 经文（速度档按键生效）",
+            "app_lost": "本窗口未激活——点击本软件窗口后才能用键盘控制投影",
+            "sermon": "投影中 · 讲篇",
+        }
+        self.setToolTip(tips.get(self._mode, ""))
+
+    def _palette(self):
+        """返回 (底色, 点/文字色)。淡底 = 实色令牌加 alpha，画在工具栏底上即柔和胶囊。"""
+        tokens = theme_tokens(self.theme)
+        if self._mode == "idle":
+            # 未投影是低强调态，但文字仍须可读：text_muted 比 text_faint 亮一档
+            # （dark 的 text_faint 与工具栏底几乎同色，用户反馈看不清）
+            return (
+                QColor(tokens.get("control", "#1A1F2A")),
+                QColor(tokens.get("text_muted", "#93A0B4")),
+            )
+        if self._mode == "scripture":
+            return self._soft(tokens.get("warning", "#EAB308")), QColor(
+                tokens.get("warning", "#EAB308")
+            )
+        if self._mode == "app_lost":
+            return self._soft(tokens.get("danger", "#EF4444")), QColor(
+                tokens.get("danger", "#EF4444")
+            )
+        return self._soft(tokens.get("success", "#22C55E")), QColor(
+            tokens.get("success", "#22C55E")
+        )
+
+    @staticmethod
+    def _soft(color):
+        c = QColor(color)
+        c.setAlpha(46)
+        return c
+
+    def _needed_width(self):
+        f = self.font()
+        key = (f.family(), f.pixelSize(), f.pointSize(), f.bold(), f.italic())
+        cached = self._width_cache.get(key)
+        if cached is not None:
+            return cached
+        fm = QFontMetricsF(f)
+        # 先用 height() 预热字体引擎（走 ascent/descent，不触发文本 shaping）；
+        # 引擎冷时单次 horizontalAdvance 实测可达 2s+，预热后每条文本 ~2ms
+        fm.height()
+        # 按最长状态文本算宽：所有状态同宽，切换不跳；CJK 字体 advance 与
+        # 实际渲染在不同 hinting 下有偏差，加 15% 余量防截断
+        longest = max(fm.horizontalAdvance(t) for t in self.STATE_TEXTS)
+        width = max(88, int(math.ceil(16 + 8 + 8 + longest * 1.15 + 16)))
+        self._width_cache[key] = width
+        return width
+
+    def _recalc_width(self):
+        self.setFixedWidth(self._needed_width())
+
+    def event(self, ev):
+        # QSS/主题切换改字体度量：FontChange/StyleChange 即时重算，
+        # 不依赖 paintEvent 的绘制时机
+        if ev.type() in (QEvent.Type.FontChange, QEvent.Type.StyleChange):
+            self._recalc_width()
+            self.update()
+        return super().event(ev)
+
+    def paintEvent(self, event):
+        # 兜底校准：即使事件路径漏掉，绘制前也按当前字体核对宽度
+        need = self._needed_width()
+        if need != self.width():
+            self.setFixedWidth(need)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = self.rect().adjusted(1, 1, -1, -1)
+        bg, fg = self._palette()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(bg)
+        painter.drawRoundedRect(rect, rect.height() / 2.0, rect.height() / 2.0)
+        fm = QFontMetricsF(self.font())
+        # 文字按汉字墨迹视觉中心对齐（drawText 的 AlignVCenter 走 metrics 中心，
+        # 与几何中心有偏差，点跟着墨迹中心走才真正居中）
+        ink = fm.boundingRect("永")
+        center_y = rect.center().y()
+        baseline = center_y - (ink.top() + ink.height() / 2.0)
+        # 点 + 文字整体水平居中：固定宽度是按最长状态文本算的，
+        # 短文本（如「未投影」）不居中会右侧空一大块
+        content_w = 8 + 8 + fm.horizontalAdvance(self._text)
+        start_x = rect.left() + (rect.width() - content_w) / 2.0
+        painter.setBrush(fg)
+        painter.drawEllipse(QPointF(start_x + 4, center_y), 4.0, 4.0)
+        painter.setPen(fg)
+        painter.drawText(QPointF(start_x + 8 + 8, baseline), self._text)
+
+
 class ToolbarButton(QPushButton):
     """顶栏按钮：高度接近原版；速度档位略窄以利一行排布。"""
 
@@ -135,52 +276,61 @@ class HelpShortcutsDialog(QDialog):
 
     SECTIONS = (
         (
-            "搜索与定位",
+            "🔍 找经文",
             (
                 ("Enter", "打开 / 关闭快速定位"),
-                ("Ctrl + F", "打开 / 关闭全文搜索（右侧栏）"),
+                ("Ctrl + F", "打开 / 关闭全文搜索"),
                 ("↑ / ↓", "搜索时切换候选项"),
-                ("Space", "选择候选项 / 下一段"),
+                ("Space", "选定候选项"),
             ),
         ),
         (
-            "滚动",
+            "📖 投影经文",
             (
-                ("↑ / ↓", "手动向上 / 向下滚动"),
-                ("Home / End", "滚到顶部 / 底部"),
-                ("Space", "暂停 / 继续自动滚动"),
-                ("1 ～ 9", "设置自动滚动速度"),
-                ("0", "暂停（再按可继续）"),
-            ),
-        ),
-        (
-            "投影显示",
-            (
-                ("F12", "开 / 关扩展屏（关时结束放映）"),
-                ("Esc", "先结束放映，再关扩展屏（主屏与副屏一致）"),
-            ),
-        ),
-        (
-            "经文范围",
-            (
+                ("F12", "开 / 关扩展屏"),
+                ("Esc", "结束放映 / 关扩展屏"),
                 ("← / →", "减少 / 增加结束节"),
                 ("Ctrl + ← / →", "增加 / 减少起始节"),
             ),
         ),
         (
-            "讲篇放映",
+            "🎬 控制滚动",
+            (
+                ("1 ～ 9", "设置自动滚动速度"),
+                ("0", "暂停（再按可继续）"),
+                ("Space", "暂停 / 继续自动滚动"),
+                ("↑ / ↓", "手动向上 / 向下滚动"),
+                ("Home / End", "滚到顶部 / 底部"),
+            ),
+        ),
+        (
+            "🎤 放映讲篇",
             (
                 ("F5", "开始放映当前讲篇"),
                 ("空格 / → / ↓", "下一步或下一页"),
-                ("← / ↑ / 滚轮", "上一页 / 翻页"),
+                ("← / ↑ / 滚轮", "上一步 / 上一页"),
                 ("底栏", "切经文、切讲篇、结束放映"),
             ),
         ),
         (
-            "其他",
+            "✏️ 编辑讲篇",
             (
-                ("F1", "打开本帮助"),
-                ("Ctrl + A", "讲篇编辑：焦点在左侧列或 Ctrl+Shift+A 全选页；画布上全选图层"),
+                ("Ctrl + S", "保存讲篇"),
+                ("Ctrl + Z / Y", "撤销 / 重做"),
+                ("Ctrl + X / C / V", "剪切 / 复制 / 粘贴"),
+                ("Delete", "删除所选图层"),
+                ("Ctrl + A", "左侧列表上全选页，画布上全选图层"),
+                ("Ctrl + Shift + A", "始终全选幻灯片"),
+                ("Esc", "取消画框 / 退出格式刷"),
+            ),
+        ),
+        (
+            "💡 状态胶囊（工具栏最左）",
+            (
+                ('<span style="color:#9CA3AF;">●</span> 灰', "未投影"),
+                ('<span style="color:#22C55E;">●</span> 绿', "速度档按键生效"),
+                ('<span style="color:#EAB308;">●</span> 黄', "焦点在输入框，按键暂不生效"),
+                ('<span style="color:#EF4444;">●</span> 红', "窗口未激活，点回本窗口后生效"),
             ),
         ),
     )
@@ -278,8 +428,10 @@ class HelpShortcutsDialog(QDialog):
         footer_layout.setContentsMargins(0, 2, 0, 0)
         footer_layout.setSpacing(12)
 
-        tip_text = f"当前版本 {APP_VERSION}。输入框内按键交给当前控件。"
-        tip_text += "放映中空格和方向键用于步进 / 翻页。讲篇与经文切换的淡化时长在显示设置里。"
+        tip_text = (
+            f"当前版本 {APP_VERSION} · F1 随时打开本帮助。"
+            "输入框内按键先交给当前控件；放映中空格和方向键用于步进 / 翻页。"
+        )
         tip = QLabel(tip_text)
         tip.setObjectName("helpTip")
         tip.setWordWrap(True)
@@ -607,6 +759,10 @@ class DisplaySettingsDialog(QDialog):
         title_form.addRow("标题字体", self.title_font_combo)
         title_form.addRow("标题字号", self.title_size)
         title_form.addRow("标题颜色", ColorPreviewSlot(self.title_color_btn))
+        self.title_gap = self._make_spin(0, 200)
+        self.title_gap.setSuffix(" px")
+        self.title_gap.setToolTip("标题底部与正文区之间的额外间距")
+        title_form.addRow("标题与正文间距", self.title_gap)
         text_tabs.addTab(title_page, "标题")
 
         scripture_title_page = QWidget()
@@ -617,6 +773,10 @@ class DisplaySettingsDialog(QDialog):
         scripture_title_form.addRow("小标题字体", self.scripture_title_font_combo)
         scripture_title_form.addRow("小标题字号", self.scripture_title_size)
         scripture_title_form.addRow("小标题颜色", ColorPreviewSlot(self.scripture_title_color_btn))
+        self.scripture_title_gap = self._make_spin(0, 200)
+        self.scripture_title_gap.setSuffix(" px")
+        self.scripture_title_gap.setToolTip("小标题底部与后续内容（题注/正文）的间距；0 = 紧贴正文（同大标题），1 起按像素增加")
+        scripture_title_form.addRow("小标题与正文间距", self.scripture_title_gap)
         text_tabs.addTab(scripture_title_page, "小标题")
 
         verse_page = QWidget()
@@ -886,6 +1046,8 @@ class DisplaySettingsDialog(QDialog):
         self.font_size.setValue(int(s.get("font_size", 24)))
         self.title_font_combo.setCurrentFont(QFont(s.get("title_font_family", "微软雅黑")))
         self.title_size.setValue(int(s.get("title_size", 36)))
+        self.title_gap.setValue(max(0, int(s.get("title_gap", 30) or 0)))
+        self.scripture_title_gap.setValue(max(0, int(s.get("scripture_title_gap", 30) or 0)))
         self.scripture_title_font_combo.setCurrentFont(
             QFont(s.get("scripture_title_font_family", "微软雅黑"))
         )
@@ -947,6 +1109,8 @@ class DisplaySettingsDialog(QDialog):
             "font_color": self._color_hex("font_color", "#FFFFFF"),
             "title_font_family": self.title_font_combo.currentFont().family(),
             "title_size": self.title_size.value(),
+            "title_gap": int(self.title_gap.value()),
+            "scripture_title_gap": int(self.scripture_title_gap.value()),
             "title_color": self._color_hex("title_color", "#87CEEB"),
             "scripture_title_font_family": self.scripture_title_font_combo.currentFont().family(),
             "scripture_title_size": self.scripture_title_size.value(),
@@ -1009,8 +1173,10 @@ class ToolBarWidget(QWidget):
         self._single_screen = False
         self._extend_active = False
 
-        # 模式胶囊已去掉；保留 no-op 接口以免主窗口调用报错
-        self.mode_badge = None
+        # 投影状态胶囊：主窗口经 _update_mode_badge 驱动
+        self.mode_badge = ProjectionBadge()
+        self.mode_badge.set_theme(self.theme)
+        self.addWidget(self.mode_badge)
 
         # —— 输出 ——
         extend_wrap = QWidget()
@@ -1136,13 +1302,23 @@ class ToolBarWidget(QWidget):
 
         AboutDialog(self.window()).exec()
 
-    def set_mode_badge(self, text: str, *, tip: str | None = None):
-        """兼容旧调用；顶栏不再显示模式胶囊。"""
-        return
+    def set_mode_badge(self, text: str, *, tip: str | None = None, mode: str = "idle"):
+        """更新投影状态胶囊；mode: idle=未投影 / scripture=投影中·经文 / sermon=投影中·讲篇。"""
+        if self.mode_badge is None:
+            return
+        self.mode_badge.set_state(mode, text)
+        if tip:
+            self.mode_badge.setToolTip(tip)
+
+    def set_theme(self, theme):
+        """主题切换时同步胶囊配色（全局 QSS 重载不会通知自绘控件）。"""
+        self.theme = str(theme or "dark")
+        if self.mode_badge is not None:
+            self.mode_badge.set_theme(self.theme)
 
     def load_settings(self, settings):
         self.settings = dict(settings)
-        self.theme = settings.get("theme", "dark")
+        self.set_theme(settings.get("theme", "dark"))  # 同步自绘胶囊的主题
         blocked = self.topmost_btn.blockSignals(True)
         self.topmost_btn.setChecked(settings.get("extension_topmost", True))
         self.topmost_btn.blockSignals(blocked)

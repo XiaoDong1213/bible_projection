@@ -55,6 +55,7 @@ THEMES = {
         "danger_soft": "#3F1D1D",
         "danger_text": "#FCA5A5",
         "success": "#22C55E",
+        "warning": "#EAB308",
         "preview_bg": "#07090D",
         # 扩展/讲篇等比留白：监视器外框，不用死黑
         "stage_matte": "#12161E",
@@ -95,6 +96,7 @@ THEMES = {
         "danger_soft": "#FEF2F2",
         "danger_text": "#B91C1C",
         "success": "#16A34A",
+        "warning": "#D97706",
         "preview_bg": "#0B0D10",
         "stage_matte": "#E8ECF2",
         "scroll": "#C5CDD9",
