@@ -1427,7 +1427,8 @@ class ToolBarWidget(QWidget):
         split = len(self._items)
         total = 0
         for i, it in enumerate(self._items):
-            wd = it.sizeHint().width()
+            # 隐藏条目（如单屏模式的状态胶囊）不占折行宽度
+            wd = it.sizeHint().width() if it.isVisibleTo(self) else 0
             if total + wd > avail and i > 0:
                 split = i
                 break
@@ -1509,9 +1510,13 @@ class ToolBarWidget(QWidget):
                 self.topmost_btn.setEnabled(False)
 
     def set_screen_mode(self, single):
-        """按屏幕数切换形态：单屏时按钮变「全屏显示」，无屏幕选择菜单。"""
+        """按屏幕数切换形态：单屏时按钮变「全屏显示」，无屏幕选择菜单；
+        状态胶囊整个隐藏（单屏没有「投影中」可言）。"""
         self._single_screen = bool(single)
         self.extend_arrow.setVisible(not self._single_screen)
+        if self.mode_badge is not None:
+            self.mode_badge.setVisible(not self._single_screen)
+        self._relayout()
         # 三角隐藏后胶囊右侧圆角改由主按钮承担（QSS [solo="true"]）
         self.extend_btn.setProperty("solo", self._single_screen)
         style = self.extend_btn.style()
