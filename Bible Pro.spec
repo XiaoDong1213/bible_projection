@@ -32,7 +32,8 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # 排除标准库中用不到的大模块：dll/pyd 更少，杀软启动扫描更快
+    excludes=["tkinter", "unittest", "pydoc_data", "xmlrpc", "lib2to3"],
     noarchive=False,
 )
 
@@ -47,7 +48,8 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # UPX 壳是杀软重点扫描对象（深度扫描拖慢启动、还易误报），禁用
+    upx=False,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -63,7 +65,7 @@ coll = COLLECT(
     a.binaries,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name="Bible Pro",
 )

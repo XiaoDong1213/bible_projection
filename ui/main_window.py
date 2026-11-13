@@ -301,26 +301,54 @@ class MainWindow(QMainWindow):
         return bool(self.sermon_controller.active or self._deck_presenting())
 
     def _update_mode_badge(self):
-        """顶栏模式身份：经文 / 讲篇编辑 / 放映中。"""
+        """顶栏投影状态胶囊（颜色即信息）：未投影=灰；投影中·经文=黄/绿
+        （黄=焦点在输入框等，速度档按键被拦截；绿=按键生效）；
+        投影中·讲篇=绿；本软件窗口未激活（切到别的软件）=红，按键必然无效。"""
         tb = getattr(self, "toolbar", None)
         if tb is None or not hasattr(tb, "set_mode_badge"):
             return
-        editor = getattr(self, "_sermon_editor", None)
-        presenting = bool(
-            editor is not None and getattr(editor, "_presenting", False)
-        ) or bool(self.sermon_controller.active)
-        editor_open = bool(editor is not None and editor.isVisible())
+        presenting = self._sermon_session_active()
+        ext_visible = bool(
+            self.extension_window is not None and self.extension_window.isVisible()
+        )
+        # 本应用完全失活（切到其他软件）：activeWindow 为空，按键必然无效 → 红
+        app_lost = QApplication.activeWindow() is None
         if presenting:
+            if app_lost:
+                tb.set_mode_badge("投影中 · 未激活", tip="点击本软件窗口后才能用键盘控制放映", mode="app_lost")
+                return
             ch = "讲篇" if self._projection_channel == "sermon" else "经文"
             page = self._sermon_session_status_text()
             tip = f"放映中 · 观众看{ch}"
             if page:
                 tip = f"{tip} {page}"
-            tb.set_mode_badge("放映中", tip=tip)
-        elif editor_open:
-            tb.set_mode_badge("讲篇", tip="讲篇编辑中，再点「讲篇」可返回经文")
+            if ch == "讲篇":
+                tb.set_mode_badge("投影中 · 讲篇", tip=tip, mode="sermon")
+            else:
+                mode = "scripture_focus" if not self._focus_blocks_nav_shortcuts() else "scripture"
+                tb.set_mode_badge("投影中 · 经文", tip=tip, mode=mode)
+        elif ext_visible:
+            if app_lost:
+                tb.set_mode_badge("投影中 · 未激活", tip="点击本软件窗口后才能用键盘控制投影", mode="app_lost")
+            elif self._focus_blocks_nav_shortcuts():
+                tb.set_mode_badge("投影中 · 经文", tip="焦点在输入框，速度档按键暂不生效", mode="scripture")
+            else:
+                tb.set_mode_badge("投影中 · 经文", tip="速度档按键生效", mode="scripture_focus")
         else:
-            tb.set_mode_badge("经文", tip="经文投影模式")
+            tb.set_mode_badge("未投影", tip="按 F12 开启扩展显示", mode="idle")
+
+    def _on_focus_changed(self, *_args):
+        """焦点进出输入框/列表时刷新胶囊的按键有效性配色。"""
+        self._update_mode_badge()
+
+    def changeEvent(self, event):
+        # 切到/切回本软件时刷新红色警示态（focusChanged 覆盖不到的失活路径兜底）
+        if event.type() in (
+            QEvent.Type.WindowActivate,
+            QEvent.Type.WindowDeactivate,
+        ):
+            self._update_mode_badge()
+        super().changeEvent(event)
 
     def _update_session_chrome(self, *, sync_editor: bool = True):
         """放映中：主屏用放映台叠层；底栏控制翻页/切频道。"""
@@ -371,10 +399,6 @@ class MainWindow(QMainWindow):
         """底栏附加：讲篇频道只写页码。"""
         if self._projection_channel != "sermon":
             return ""
-        editor = getattr(self, "_sermon_editor", None)
-        if editor is not None and getattr(editor, "_presenting", False):
-            if hasattr(editor, "session_page_text"):
-                return editor.session_page_text() or ""
         ctrl = self.sermon_controller
         if not ctrl.active or ctrl.doc is None or not ctrl.doc.slides:
             return ""
@@ -613,6 +637,8 @@ class MainWindow(QMainWindow):
             s.setContext(Qt.ShortcutContext.WindowShortcut)
             s.activated.connect(self._wrap_nav(fn) if guard else fn)
             self._shortcuts.append(s)
+        # 速度档按键有效性联动：焦点进出输入框/列表即时刷新胶囊配色
+        QApplication.instance().focusChanged.connect(self._on_focus_changed)
 
     def eventFilter(self, obj, event):
         if event.type() != QEvent.Type.KeyPress:
@@ -776,6 +802,8 @@ class MainWindow(QMainWindow):
         self.theme = t
         self.settings["theme"] = t
         self._load_theme_style()
+        if hasattr(self, "toolbar") and hasattr(self.toolbar, "set_theme"):
+            self.toolbar.set_theme(t)
         self.config.save_display_settings({"theme": t})
         editor = getattr(self, "_sermon_editor", None)
         if editor is not None and hasattr(editor, "apply_theme"):
@@ -889,6 +917,7 @@ class MainWindow(QMainWindow):
             if self.extension_window.display_mode == "sermon" or self.sermon_controller.active:
                 self.show_scripture_channel(ensure_extension=False)
         self._update_status()
+        self._update_mode_badge()
 
     def _update_status(self):
         if self.sermon_controller.active:
@@ -916,6 +945,7 @@ class MainWindow(QMainWindow):
         if self.extension_window:
             self.extension_window.scripture_display.clear_scripture()
         self.status_label.setText("已清屏")
+        self._update_mode_badge()
 
     def _output_screens(self):
         screens = QApplication.screens()

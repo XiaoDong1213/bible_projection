@@ -289,7 +289,14 @@ class ScriptureBody(QWidget):
         raw = []   # [(行内原子列表, 是否允许两端对齐)]
         chunk = []
         for atom in self._content:
-            if atom["kind"] == "br":
+            kind = atom["kind"]
+            if kind == "vspace":
+                # 纯垂直空隙：自带断行，不占水平宽度，不参与绘制
+                if chunk:
+                    self._wrap_chunk(chunk, width, raw)
+                    chunk = []
+                raw.append(([atom], False))
+            elif kind == "br":
                 if chunk:
                     self._wrap_chunk(chunk, width, raw)
                     chunk = []
@@ -306,6 +313,9 @@ class ScriptureBody(QWidget):
         factor = self._line_factor
         body_fm = self._fm("body")
         for atoms, just in raw:
+            if len(atoms) == 1 and atoms[0]["kind"] == "vspace":
+                y += atoms[0]["h"]
+                continue
             cells, nat_h, max_asc = self._layout_line(atoms, width, just and self._justify)
             if nat_h <= 0.0:
                 nat_h = body_fm.height(); max_asc = body_fm.ascent()
@@ -535,12 +545,12 @@ class ScriptureBody(QWidget):
 class ScriptureDisplay(QWidget):
     scroll_changed=pyqtSignal(int); scroll_finished=pyqtSignal(); content_changed=pyqtSignal(); _TICK_MS_LEGACY=30.0
     def __init__(self,parent=None):
-        super().__init__(parent); self.font_family="微软雅黑"; self.font_size=24; self.font_color=QColor("#FFFFFF"); self.bg_color=QColor("#000000"); self.bg_image=None; self._bg_pixmap=None; self._bg_pixmap_path=None; self._bg_scaled=None; self._bg_scaled_size=None; self.line_spacing=160; self.margin_left=60; self.margin_right=60; self.title_font_family="微软雅黑"; self.title_color=QColor("#87CEEB"); self.title_size=36; self.title_min_size=12; self.title_spacing=12; self.show_scripture_titles=False; self.show_captions=True; self.scripture_title_font_family="微软雅黑"; self.scripture_title_size=30; self.scripture_title_color=QColor("#87CEEB"); self.scripture_title_spacing=8; self.scripture_title_line_spacing=120; self.caption_font_family="微软雅黑"; self.caption_size=24; self.caption_color=QColor("#87CEEB"); self.caption_italic=True; self.verse_num_color=QColor("#FFD700"); self.verse_num_size=24; self.verse_num_font_family="微软雅黑"; self.footer_text=""; self.footer_height=45; self.footer_size=14; self.footer_color=QColor("#AAAAAA"); self.footer_font_family="微软雅黑"; self.scroll_speed=0; self._scroll_anim=None; self._scroll_clock=QElapsedTimer(); self._refresh_hz=60.0; self._screen_hooked=False; self._title_text=""; self.verses=[]; self.verse_segmentation=False; self._show_chapter_nums=False; self._reference_size=None; self._design_height=1080; self.scroll_timer=QTimer(self); self.scroll_timer.setTimerType(Qt.TimerType.PreciseTimer); self.scroll_timer.timeout.connect(self._auto_scroll); self._apply_refresh_interval(); self._fill_scale=None; self._init_ui(); self.setFocusPolicy(Qt.FocusPolicy.StrongFocus); self._home_shortcut=QShortcut(QKeySequence(Qt.Key.Key_Home),self); self._home_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut); self._home_shortcut.activated.connect(self._scroll_to_top); self._end_shortcut=QShortcut(QKeySequence(Qt.Key.Key_End),self); self._end_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut); self._end_shortcut.activated.connect(self._scroll_to_bottom); self.punct_halfwidth=False; self._text_justify=True
+        super().__init__(parent); self.font_family="微软雅黑"; self.font_size=24; self.font_color=QColor("#FFFFFF"); self.bg_color=QColor("#000000"); self.bg_image=None; self._bg_pixmap=None; self._bg_pixmap_path=None; self._bg_scaled=None; self._bg_scaled_size=None; self.line_spacing=160; self.margin_left=60; self.margin_right=60; self.title_font_family="微软雅黑"; self.title_color=QColor("#87CEEB"); self.title_size=36; self.title_min_size=12; self.title_gap=30; self.scripture_title_gap=30; self.show_scripture_titles=False; self.show_captions=True; self.scripture_title_font_family="微软雅黑"; self.scripture_title_size=30; self.scripture_title_color=QColor("#87CEEB"); self.caption_font_family="微软雅黑"; self.caption_size=24; self.caption_color=QColor("#87CEEB"); self.caption_italic=True; self.verse_num_color=QColor("#FFD700"); self.verse_num_size=24; self.verse_num_font_family="微软雅黑"; self.footer_text=""; self.footer_height=45; self.footer_size=14; self.footer_color=QColor("#AAAAAA"); self.footer_font_family="微软雅黑"; self.scroll_speed=0; self._scroll_anim=None; self._scroll_clock=QElapsedTimer(); self._refresh_hz=60.0; self._screen_hooked=False; self._title_text=""; self.verses=[]; self.verse_segmentation=False; self._show_chapter_nums=False; self._reference_size=None; self._design_height=1080; self.scroll_timer=QTimer(self); self.scroll_timer.setTimerType(Qt.TimerType.PreciseTimer); self.scroll_timer.timeout.connect(self._auto_scroll); self._apply_refresh_interval(); self._fill_scale=None; self._init_ui(); self.setFocusPolicy(Qt.FocusPolicy.StrongFocus); self._home_shortcut=QShortcut(QKeySequence(Qt.Key.Key_Home),self); self._home_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut); self._home_shortcut.activated.connect(self._scroll_to_top); self._end_shortcut=QShortcut(QKeySequence(Qt.Key.Key_End),self); self._end_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut); self._end_shortcut.activated.connect(self._scroll_to_bottom); self.punct_halfwidth=False; self._text_justify=True
     def _init_ui(self):
         # 自己在 paintEvent 里铺底色/背景图，不要让样式表/调色板先盖一层黑
         self.setAutoFillBackground(False)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
-        layout=QVBoxLayout(self); layout.setContentsMargins(0,0,0,0); layout.setSpacing(0); self.title_bar=QLabel(""); self.title_bar.setAlignment(Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter); self.title_bar.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True); layout.addWidget(self.title_bar); self.text_display=ScriptureBody(); self.text_display.scroll_changed.connect(self._on_body_scroll_changed); layout.addWidget(self.text_display,1); self.footer_label=QLabel(self); self.footer_label.setAlignment(Qt.AlignmentFlag.AlignCenter); self.footer_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents); self.footer_label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True); self.footer_label.show(); self._update_footer_style(); self._update_viewport_margins()
+        layout=QVBoxLayout(self); layout.setContentsMargins(0,0,0,0); layout.setSpacing(0); self.title_bar=QLabel(""); self.title_bar.setAlignment(Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignTop); self.title_bar.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True); layout.addWidget(self.title_bar); self.text_display=ScriptureBody(); self.text_display.scroll_changed.connect(self._on_body_scroll_changed); layout.addWidget(self.text_display,1); self.footer_label=QLabel(self); self.footer_label.setAlignment(Qt.AlignmentFlag.AlignCenter); self.footer_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents); self.footer_label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True); self.footer_label.show(); self._update_footer_style(); self._update_viewport_margins()
     def _scroll_to_top(self):
         if self.scroll_speed>0 or self.scroll_timer.isActive(): self.set_scroll_speed(0); self.scroll_finished.emit()
         self.set_scroll_position(0)
@@ -646,7 +656,10 @@ class ScriptureDisplay(QWidget):
         self._title_text=str(text or ""); shown=self._punct(self._title_text); size=max(self._px(self.title_min_size),self._px(self.title_size)); font=QFont(self.title_font_family,size); font.setBold(True); pad=self._px(24); avail=max(100,self.title_bar.width()-pad*2); min_size=self._px(self.title_min_size)
         while QFontMetrics(font).horizontalAdvance(shown)>avail and size>min_size:
             size-=1; font=QFont(self.title_font_family,size); font.setBold(True)
-        h=max(self._px(42),QFontMetrics(font).height()+self._px(6)); self.title_bar.setMinimumHeight(h); self.title_bar.setMaximumHeight(h); self.title_bar.setFont(font); self.title_bar.setStyleSheet(f'color:{self.title_color.name()};font-family:"{self.title_font_family}";'+f"font-size:{size}px;font-weight:bold;background:transparent;padding:0 {pad}px;"); self.title_bar.setText(shown)
+        # 标题栏高度 = 字体上缘 + 收尾 2px + 「标题与正文间距」设置；
+        # 旧公式 height+6 且垂直居中，大字号时 descent 空隙+居中余白
+        # 让标题与正文之间隔出一大截；配 AlignTop 后字贴栏顶、底部只留可调间距
+        h=max(self._px(42),QFontMetrics(font).ascent()+self._px(2)+self._px(self.title_gap)); self.title_bar.setMinimumHeight(h); self.title_bar.setMaximumHeight(h); self.title_bar.setFont(font); self.title_bar.setStyleSheet(f'color:{self.title_color.name()};font-family:"{self.title_font_family}";'+f"font-size:{size}px;font-weight:bold;background:transparent;padding:0 {pad}px;"); self.title_bar.setText(shown)
     def set_verse_segmentation(self,enabled):
         enabled=bool(enabled)
         if self.verse_segmentation==enabled:return
@@ -694,7 +707,16 @@ class ScriptureDisplay(QWidget):
         label=f"{chapter}:{n}" if getattr(self,"_show_chapter_nums",False) and chapter is not None else str(n)
         gl=max(2,self._px(self.verse_num_gap_left)) if self.verse_num_gap_left>0 else max(6,int(vn*1.0))
         gr=max(2,self._px(self.verse_num_gap_right)) if self.verse_num_gap_right>0 else max(6,int(vn*1.0))
-        raise_px=int(round(vn*0.30))   # 节号上标抬升
+        # 节号顶对齐正文顶部（真上标，永远在所在行的左上角）：
+        # 抬升 = 正文上缘 - 节号上缘；旧实现按节号字号的 30% 抬升，
+        # 正文字号大时节号贴着基线，落在行中就跑到「右下角」了
+        try:
+            _st = self._body_styles()
+            _fm_b = QFontMetricsF(_st["body"][0])
+            _fm_n = QFontMetricsF(_st["num"][0])
+            raise_px = max(0, int(round(_fm_b.ascent() - _fm_n.ascent())))
+        except Exception:
+            raise_px = int(round(vn * 0.30))
         def cluster_atoms(text,style):
             out=[]
             for ck,cs in _clusters(self._punct(str(text))):
@@ -739,7 +761,8 @@ class ScriptureDisplay(QWidget):
         show_titles=self.show_scripture_titles; show_captions=self.show_captions
         atoms=[]
         def br():
-            if atoms and atoms[-1]["kind"]!="br":
+            # vspace 自带断行语义，其后不需要再跟 br
+            if atoms and atoms[-1]["kind"] not in ("br","vspace"):
                 atoms.append({"kind":"br"})
         def flow(text,style):
             parts=str(text or "").split("\n")
@@ -750,10 +773,15 @@ class ScriptureDisplay(QWidget):
                         atoms.append({"kind":"sp"})
                     else:
                         atoms.append({"kind":"w","text":cs,"style":style})
+        # 小标题与后续内容的垂直间距（「小标题与正文间距」设置）
+        subtitle_gap=self._subtitle_vspace()
         if self.verse_segmentation:
             for ch,n,t,titles,captions in rows:
                 if show_titles:
-                    for subtitle in titles: br(); flow(subtitle,"title"); br()
+                    for subtitle in titles:
+                        br(); flow(subtitle,"title")
+                        # vspace 自带断行：替代小标题后的尾 br，不再叠加
+                        atoms.append({"kind":"vspace","h":subtitle_gap})
                 above,inline=self._split_captions(captions)
                 if show_captions:
                     for caption in above: br(); flow(caption,"caption"); br()
@@ -764,13 +792,19 @@ class ScriptureDisplay(QWidget):
         elif show_titles or show_captions:
             has_content=False
             for ch,n,t,titles,captions in rows:
+                # 与分节模式一样用 br() helper：直接 append 会在
+                # 小标题尾 br + 题注头 br 处叠出连续两个 br，
+                # _relayout 把它当成一个正文行高的空行 → 巨大垂直空白。
+                # 每段前 br()：小标题/题注各自独立成行，正文仍连排
                 if show_titles:
                     for subtitle in titles:
-                        atoms.append({"kind":"br"}); flow(subtitle,"title"); atoms.append({"kind":"br"}); has_content=True
+                        br(); flow(subtitle,"title")
+                        atoms.append({"kind":"vspace","h":subtitle_gap})
+                        has_content=True
                 above,inline=self._split_captions(captions)
                 if show_captions:
                     for caption in above:
-                        atoms.append({"kind":"br"}); flow(caption,"caption"); atoms.append({"kind":"br"}); has_content=True
+                        br(); flow(caption,"caption"); br(); has_content=True
                 else:
                     inline=[]
                 atoms.extend(self._verse_atoms(ch,n,t,leading_gap=has_content,inline_captions=inline)); has_content=True
@@ -780,6 +814,26 @@ class ScriptureDisplay(QWidget):
         while atoms and atoms[-1]["kind"]=="br":
             atoms.pop()
         return atoms
+    def _subtitle_vspace(self):
+        """小标题后的垂直空隙（像素，允许负值）。
+
+        统一连续公式：贴上偏移 + 设置值。贴上偏移为负空隙，恰好抵消
+        小标题行的 descent 与额外行距，把下一行的行盒顶吸到小标题基线
+        +2px（观感与大标题 0 间距一致）；设置值在其上线性叠加，
+        0→1px 只差 1px，不再有模式切换的跳变。
+        不重叠性：下一行行盒顶 = 小标题基线 + 2px + 设置值，任何
+        字号/行距/间距组合都不会与小标题墨迹重叠。"""
+        gap = max(0, int(getattr(self, "scripture_title_gap", 30)))
+        st = self._body_styles()
+        fm_t = QFontMetricsF(st["title"][0])
+        # 行盒 advance = ceil(行内最大字高) × 行距%，行距因子全局统一（正文行距，
+        # 见 set_content/_line_factor）
+        factor = max(0.5, float(getattr(self, "line_spacing", 160)) / 100.0)
+        extra = math.ceil(fm_t.height()) * (factor - 1.0)
+        # 保留浮点步进，且不能用 _px()：它有 max(1,…) 下限，会把 0px 抬成 1px，
+        # 导致 0→1 无差别（用户反馈的跳变/无变化问题）
+        scale = self.layout_scale()
+        return int(round(2.0 * scale)) - fm_t.descent() - extra + int(round(gap * scale))
     def _split_captions(self,captions):
         """题注分两类：节上方（篇首注/说话人）与节末内联（细拉/Selah）。"""
         above=[]; inline=[]
@@ -865,7 +919,8 @@ class ScriptureDisplay(QWidget):
         self.title_font_family=settings.get("title_font_family",self.title_font_family)
         self.title_color=_coerce_color(settings.get("title_color",self.title_color),"#87CEEB")
         self.title_size=int(settings.get("title_size",self.title_size))
-        self.title_spacing=int(settings.get("title_spacing",self.title_spacing))
+        self.title_gap=max(0,int(settings.get("title_gap",getattr(self,"title_gap",0))or 0))
+        self.scripture_title_gap=max(0,int(settings.get("scripture_title_gap",getattr(self,"scripture_title_gap",30))or 0))
         self.show_scripture_titles=_coerce_bool(settings.get("show_scripture_titles",self.show_scripture_titles),self.show_scripture_titles)
         self.show_captions=_coerce_bool(settings.get("show_captions",getattr(self,"show_captions",True)),True)
         self.scripture_title_font_family=str(settings.get("scripture_title_font_family",self.scripture_title_font_family))

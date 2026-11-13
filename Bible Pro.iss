@@ -2,7 +2,7 @@
 ; Copyright © 2026 XiaoDong and JiangRTTTR
 
 #define MyAppName "Bible Pro"
-#define MyAppVersion "3.1.0"
+#define MyAppVersion "3.2.0"
 #define MyAppPublisher "XiaoDong & JiangRTTTR"
 #define MyAppExeName "Bible Pro.exe"
 ; Paths are relative to this .iss file (project root), so the script works on any machine.
@@ -53,6 +53,37 @@ begin
     DelTree(UserDataDir, True, True, True);
 end;
 
+{ 把安装目录加入 Windows Defender 排除列表：杀软不再逐个扫描程序文件，启动明显更快。
+  使用官方 cmdlet + try/catch：第三方杀软接管或服务不可用时静默跳过，绝不影响安装。 }
+procedure AddDefenderExclusion;
+var
+  Cmd: string;
+  ResultCode: Integer;
+begin
+  Cmd := '-NoProfile -ExecutionPolicy Bypass -Command "try { Add-MpPreference -ExclusionPath ''' + ExpandConstant('{app}') + ''' } catch {}"';
+  Exec('powershell.exe', Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure RemoveDefenderExclusion;
+var
+  Cmd: string;
+  ResultCode: Integer;
+begin
+  Cmd := '-NoProfile -ExecutionPolicy Bypass -Command "try { Remove-MpPreference -ExclusionPath ''' + ExpandConstant('{app}') + ''' } catch {}"';
+  Exec('powershell.exe', Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+  begin
+    AddDefenderExclusion;
+    WizardForm.FinishedLabel.Caption :=
+      '安装完成。已将安装目录加入 Windows Defender 排除列表以加快启动' #13#10 +
+      '（如安装了第三方杀毒软件则自动跳过）。';
+  end;
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   { Only a real uninstall removes user data. Overwrite/upgrade installation does not call this. }
@@ -60,6 +91,8 @@ begin
   begin
     MsgBox('Bible Pro 将删除程序文件以及当前用户保存的配置、历史记录等数据。', mbInformation, MB_OK);
     DeleteUserData;
+    { 卸载时顺带清掉排除项；无管理员权限或第三方杀软时静默失败，无副作用。 }
+    RemoveDefenderExclusion;
   end;
 end;
 

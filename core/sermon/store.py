@@ -246,10 +246,5 @@ class SermonStore:
             if name.endswith(".__old__") or name.startswith("."):
                 shutil.rmtree(child, ignore_errors=True)
 
-    def create_blank(self, title: str = "未命名讲篇") -> SermonDocument:
-        doc = new_document(title=title)
-        self.save(doc)
-        return doc
-
     def default_save_dir(self) -> Path:
         return self.root

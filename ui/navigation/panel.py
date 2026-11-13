@@ -719,8 +719,10 @@ class NavigationPanel(QWidget):
         chapter = int(self.chapter_spin.value())
         start = int(self.start_spin.value())
         end = int(self.end_spin.value())
+        # 单章：起节大于止节时视为同一节
         if end < start:
-            start, end = end, start
+            end = start
+            self.end_spin.setValue(end)
         return ScriptureSelection.single_chapter(book, chapter, start, end)
 
     def _select_range(self):

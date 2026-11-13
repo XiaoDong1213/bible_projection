@@ -102,7 +102,8 @@ class SermonStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             store = SermonStore(root)
-            doc = store.create_blank("keep")
+            doc = new_document(title="keep")
+            store.save(doc)
             stale = root / "gone.__old__"
             stale.mkdir()
             (stale / "x.txt").write_text("x", encoding="utf-8")

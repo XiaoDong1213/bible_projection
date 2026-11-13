@@ -1,8 +1,8 @@
 """单一版本号来源（与 file_version_info.txt、Bible Pro.iss 对齐）。"""
 
 APP_NAME = "Bible Pro"
-APP_VERSION = "3.1.0"
-APP_BUILD = "B20261113"
+APP_VERSION = "3.2.0"
+APP_BUILD = "B20261114"
 
 # 自动更新：版本信息读 GitHub；安装包经 gh-proxy 加速下载
 GITHUB_OWNER = "XiaoDong1213"
