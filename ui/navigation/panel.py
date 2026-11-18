@@ -277,21 +277,16 @@ class NavigationPanel(QWidget):
         self.skip_edit.setClearButtonEnabled(True)
         skip_row.addWidget(self.skip_edit, 1)
         skip_layout.addLayout(skip_row)
+        # 格式提示平时不占行：占位符已示例格式，解析失败时才显示错误
         self.skip_hint = QLabel("连续 -　·　多段空格")
         self.skip_hint.setObjectName("navHint")
+        self.skip_hint.setVisible(False)
         skip_layout.addWidget(self.skip_hint)
         self.range_stack.addWidget(skip_page)
 
         bottom_layout.addWidget(self.range_stack)
 
-        # 信息行固定两行：书卷名一行、章节数据一行，断行位置可控不随宽度乱折
-        self.book_info_name = QLabel("")
-        self.book_info_name.setObjectName("navHint")
-        self.book_info_name.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
-        self.book_info_name.setWordWrap(False)
-        bottom_layout.addWidget(self.book_info_name)
+        # 信息行单行不折行：书卷全名放不下时自动退化为简称（tooltip 保留全名）
         self.book_info_data = QLabel("本卷共 — 章 · 本章共 — 节")
         self.book_info_data.setObjectName("navHint")
         self.book_info_data.setAlignment(
@@ -537,16 +532,14 @@ class NavigationPanel(QWidget):
         self.book_selected.emit(book, self.chapter_spin.value())
 
     def _update_book_info(self):
-        """刷新底部信息行：书卷名一行 + 章节数据一行（纯显示）。"""
+        """刷新底部信息行（单行）：「书卷名 · 本卷共X章 · …」。"""
         if not self.selected_book:
-            self.book_info_name.setText("")
             self.book_info_data.setText("本卷共 — 章 · 本章共 — 节")
-            self.book_info_name.setToolTip("")
             self.book_info_data.setToolTip("")
             return
         book = self.selected_book
         short = self.db._short_name(book)
-        name = f"{book}（{short}）" if short and short != book else book
+        full = f"{book}（{short}）" if short and short != book else book
         total_ch = max(1, self.db.get_chapter_count(book))
         mode = self._current_mode()
         if mode == self.MODE_CROSS:
@@ -560,9 +553,12 @@ class NavigationPanel(QWidget):
                 chapter = int(self.chapter_spin.value())
             total_v = max(1, self.db.get_verse_count(book, chapter))
             data = f"本卷共 {total_ch} 章 · 本章共 {total_v} 节"
-        self.book_info_name.setText(name)
-        self.book_info_data.setText(data)
-        self.book_info_name.setToolTip(book)
+        text = f"{full} · {data}"
+        # 面板固定 320 宽，内容区约 292px：全名放不下时退化简称，永不折行
+        fm = self.book_info_data.fontMetrics()
+        if short and short != book and fm.horizontalAdvance(text) > 292:
+            text = f"{short} · {data}"
+        self.book_info_data.setText(text)
         self.book_info_data.setToolTip(book)
 
     def _set_selected_book(self, book, whole_chapter=False):
@@ -598,6 +594,8 @@ class NavigationPanel(QWidget):
         return max_v
 
     def _set_verse_ranges(self, book, chapter, whole_chapter=False):
+        # 书卷/章号变化后旧文本被重置，错误提示随之失效
+        self.skip_hint.setVisible(False)
         max_v = self._set_verse_spin_limit(
             self.start_spin, book, chapter, value=1, clamp=False
         )
@@ -687,6 +685,7 @@ class NavigationPanel(QWidget):
         if self.selected_book and not self._history_updating:
             max_v = max(1, self.db.get_verse_count(self.selected_book, int(chapter)))
             self.skip_edit.setText(f"1-{max_v}")
+            self.skip_hint.setVisible(False)
             self._update_book_info()
 
     def sync_selection(self, book, chapter, start, end):
@@ -811,8 +810,9 @@ class NavigationPanel(QWidget):
             )
             if selection is None:
                 self.skip_hint.setText(f"格式无效　·　可用 1–{max_v}")
+                self.skip_hint.setVisible(True)
             else:
-                self.skip_hint.setText("连续 -　·　多段空格")
+                self.skip_hint.setVisible(False)
             return selection
 
         chapter = int(self.chapter_spin.value())

@@ -144,18 +144,36 @@ def test_sync_selection_broadcasts_to_other_modes():
     assert p.skip_edit.text() == "3-20"
 
 
-def test_book_info_two_rows():
-    """信息行拆两行：书卷名一行、章节数据一行，不再随宽度乱折。"""
+def test_book_info_single_row():
+    """信息行单行：全名放得下用全名；长书卷退化简称，永不折行。"""
     p = _panel()
     _goto_genesis(p)
-    assert p.book_info_name.text() == "创世记（创）"
-    assert p.book_info_data.text() == "本卷共 50 章 · 本章共 31 节"
+    assert p.book_info_data.text() == "创世记（创） · 本卷共 50 章 · 本章共 31 节"
     _switch(p, NavigationPanel.MODE_CROSS)
     p.cross_start_ch.setValue(2)
     p.cross_end_ch.setValue(3)
     assert "起章 25 节" in p.book_info_data.text()
     assert "止章 24 节" in p.book_info_data.text()
-    # 未选书卷时数据行保留占位、书卷名行为空
+    # 长书卷 + 跨章数据一行放不下 → 退化简称
+    p._set_selected_book("帖撒罗尼迦前书", whole_chapter=False)
+    p._update_book_info()
+    assert p.book_info_data.text().startswith("帖前 · ")
+    assert "本卷共 5 章" in p.book_info_data.text()
+    # 未选书卷时保留占位
     p2 = _panel()
-    assert p2.book_info_name.text() == ""
     assert "—" in p2.book_info_data.text()
+
+
+def test_skip_hint_only_shown_when_invalid():
+    """跳节格式提示平时不占行，输入非法时才出现。"""
+    p = _panel()
+    _goto_genesis(p)
+    _switch(p, NavigationPanel.MODE_SKIP)
+    assert not p.skip_hint.isVisibleTo(p)
+    p.skip_edit.setText("abc")
+    p._current_selection()
+    assert p.skip_hint.isVisibleTo(p)
+    assert "格式无效" in p.skip_hint.text()
+    p.skip_edit.setText("1-5")
+    p._current_selection()
+    assert not p.skip_hint.isVisibleTo(p)
