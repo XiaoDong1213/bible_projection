@@ -662,11 +662,13 @@ class NavigationPanel(QWidget):
     def _on_cross_start_ch_changed(self, chapter):
         if not self.selected_book:
             return
+        # 起章变化：起节默认回到该章第 1 节（止章变化才默认末节）
         self._set_verse_spin_limit(
             self.cross_start_v,
             self.selected_book,
             int(chapter),
-            reset_to_max=True,
+            value=1,
+            clamp=False,
         )
         self._update_book_info()
 

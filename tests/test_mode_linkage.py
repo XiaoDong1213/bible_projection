@@ -177,3 +177,21 @@ def test_skip_hint_only_shown_when_invalid():
     p.skip_edit.setText("1-5")
     p._current_selection()
     assert not p.skip_hint.isVisibleTo(p)
+
+
+def test_cross_chapter_change_resets_verses():
+    """跨章改起章→起节归 1；改止章→止节跳到该章末节。"""
+    p = _panel()
+    _goto_genesis(p)
+    _switch(p, NavigationPanel.MODE_CROSS)
+    p.cross_start_ch.setValue(2)
+    assert p.cross_start_v.value() == 1
+    p.cross_end_ch.setValue(3)
+    assert p.cross_end_v.value() == 24  # 创 3 共 24 节
+    # 历史定位仍能精确回填节号（先归位再显式设值）
+    sel = ScriptureSelection.expand_cross_chapter(
+        "创世记", 2, 3, 3, 20, _DB.get_verse_count
+    )
+    p.sync_from_selection(sel)
+    assert p.cross_start_v.value() == 3
+    assert p.cross_end_v.value() == 20
