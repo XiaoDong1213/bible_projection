@@ -247,13 +247,15 @@ class MainWindow(QMainWindow):
         self.main_splitter = splitter
         outer.addWidget(splitter, 1)
 
-        self.session_bar = SessionBar()
+        # 放映会话浮条：悬浮主窗底部中央，不占布局高度；位置可拖动并记忆
+        self.session_bar = SessionBar(self)
         self.session_bar.to_scripture.connect(self.show_scripture_channel)
         self.session_bar.to_sermon.connect(self.show_sermon_channel)
         self.session_bar.prev_page.connect(self._presenter_prev)
         self.session_bar.next_page.connect(self._presenter_next)
         self.session_bar.end_session.connect(self.stop_sermon_presentation)
-        outer.addWidget(self.session_bar)
+        self._session_bar_pos = self.config.load_session_bar_pos()
+        self.session_bar.drag_moved.connect(self._save_session_bar_pos)
         self.setCentralWidget(central)
         self._build_presenter_shortcuts()
 
@@ -350,6 +352,16 @@ class MainWindow(QMainWindow):
             self._update_mode_badge()
         super().changeEvent(event)
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # 放映会话浮条跟随主窗（用户拖动过的位置则保持相对锚点）
+        if hasattr(self, "session_bar") and self.session_bar.isVisible():
+            self.session_bar.reposition(self, self._session_bar_pos)
+
+    def _save_session_bar_pos(self, x: int, y: int):
+        self._session_bar_pos = (x, y)
+        self.config.save_session_bar_pos(x, y)
+
     def _update_session_chrome(self, *, sync_editor: bool = True):
         """放映中：主屏用放映台叠层；底栏控制翻页/切频道。"""
         active = self._sermon_session_active()
@@ -367,6 +379,7 @@ class MainWindow(QMainWindow):
         page = self._sermon_session_status_text()
 
         self.session_bar.show()
+        self.session_bar.reposition(self, self._session_bar_pos)
         self.session_bar.set_channel(self._projection_channel, page)
         self._refit_sermon_chrome()
         QTimer.singleShot(0, self._refit_sermon_chrome)
@@ -1060,7 +1073,11 @@ class MainWindow(QMainWindow):
         if single:
             win.showMaximized()
         else:
-            win.showFullScreen()
+            # 副屏投影窗是无边框窗且已 setGeometry 到副屏全屏几何，直接 show 即可。
+            # 不能用 showFullScreen：跨屏时 Qt 会把窗口几何错置成主屏逻辑尺寸
+            # （物理像素与 Qt 逻辑脱节，布局按错误几何分配子部件，
+            # 讲篇舞台偏移、经文内容放大裁切——即「分辨率不对」）
+            win.show()
         self._native_place_window(win, target, single=single)
         self.preview_host._fit_view()
         if first_show:
@@ -1100,7 +1117,9 @@ class MainWindow(QMainWindow):
             if single:
                 win.showMaximized()
             else:
-                win.showFullScreen()
+                # 同 _place_extension_on_screen：副屏全屏用几何 show，不用 showFullScreen
+                win.setGeometry(target.geometry())
+                win.show()
         stage = getattr(win, "slide_stage", None)
         if stage is not None and hasattr(stage, "_fit_view"):
             QTimer.singleShot(0, stage._fit_view)
@@ -1369,6 +1388,8 @@ class MainWindow(QMainWindow):
             return
         if deck and editor is not None and hasattr(editor, "on_presentation_stopped"):
             editor.on_presentation_stopped(reshow=self._keep_editor_after_stop)
+            # 编辑器放映结束路径此前漏刷新会话浮条，结束放映后仍残留
+            self._update_session_chrome()
             return
         self._projection_channel = "scripture"
         self._set_extension_scroll_sync(True)
@@ -1417,12 +1438,14 @@ class MainWindow(QMainWindow):
         self._abort_extension_sermon_layer()
         self._projection_channel = "scripture"
         self._set_extension_scroll_sync(True)
-        self._update_session_chrome()
         editor = getattr(self, "_sermon_editor", None)
         keep = bool(getattr(self, "_keep_editor_after_stop", True))
         self._keep_editor_after_stop = True
         if editor is not None:
+            # 先复位编辑器放映态（_presenting），再刷会话浮条；
+            # 否则 _sermon_session_active() 仍视为放映中，浮条会残留（需点两下才消失）
             editor.on_presentation_stopped(reshow=keep)
+        self._update_session_chrome()
         self._update_status()
 
     def _on_sermon_slide_changed(self, doc, index, assets_root):
@@ -1633,7 +1656,8 @@ class MainWindow(QMainWindow):
             if target is not None:
                 self._place_extension_on_screen(target, single=len(QApplication.screens()) < 2)
             else:
-                self.extension_window.showFullScreen()
+                # 同上：跨屏全屏用几何 show，不走 showFullScreen
+                self.extension_window.show()
         self.config.save_display_settings({"extension_topmost": bool(on)})
 
     def _on_scroll_speed(self, speed):

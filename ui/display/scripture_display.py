@@ -386,7 +386,6 @@ class ScriptureBody(QWidget):
                 for piece in a["pieces"]:
                     if piece["k"] == "gap":
                         x += float(piece["w"])
-                        prev_cjk = False
                     else:
                         push_text(piece["text"], piece["style"], piece["raise"],
                                   piece["w"])

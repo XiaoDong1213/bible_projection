@@ -215,6 +215,26 @@ class AppConfig:
         except Exception:
             return None
 
+    def save_session_bar_pos(self, x: int, y: int):
+        """保存放映会话浮条位置（主窗口坐标系）。"""
+        if "Session" not in self.parser:
+            self.parser["Session"] = {"bar_pos": ""}
+        self.parser["Session"]["bar_pos"] = f"{x},{y}"
+        self._save_ini()
+
+    def load_session_bar_pos(self):
+        """读取放映会话浮条位置；未拖动过返回 None。"""
+        if "Session" not in self.parser:
+            return None
+        raw = self.parser["Session"].get("bar_pos", "")
+        if not raw:
+            return None
+        try:
+            x, y = raw.split(",")
+            return int(x), int(y)
+        except (ValueError, AttributeError):
+            return None
+
     def save_history(self, history_list):
         """保存导航历史记录。"""
         if "History" not in self.parser:

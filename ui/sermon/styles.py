@@ -596,56 +596,48 @@ QGraphicsView#sermonSlideStage {{
     border-radius: 0;
 }}
 
-/* 会话底栏 */
+/* 会话底栏：悬浮主窗底部中央的紧凑胶囊，配色随亮暗主题 */
 QWidget#sermonSessionBar {{
-    background: {t['surface']};
-    border-top: 1px solid {t['border']};
-    min-height: 56px;
+    background-color: {t['surface_raised']};
+    border: 1px solid {t['border_strong']};
+    border-radius: 20px;
 }}
 QWidget#sermonSessionBar QLabel#sermonSessionStatus {{
+    background: transparent;
     color: {t['text']};
     font-size: 13px;
-    font-weight: 600;
 }}
 QWidget#sermonSessionBar QPushButton {{
     background: {t['control']};
     color: {t['text']};
     border: 1px solid {t['border']};
-    border-radius: {r['sm']}px;
-    padding: 6px 14px;
-    min-width: 92px;
-    min-height: 36px;
-    font-size: 13px;
+    border-radius: 15px;
+    padding: 0 16px;
+    font-size: 12px;
+}}
+/* 翻页小钮固定 34px 宽，去掉通用内边距（16px 内边距会把内容区挤剩 2px，◀▶ 被裁光） */
+QWidget#sermonSessionBar QPushButton#sermonNavBtn {{
+    padding: 0;
 }}
 QWidget#sermonSessionBar QPushButton:hover {{
     background: {t['control_hover']};
 }}
 QWidget#sermonSessionBar QPushButton:disabled {{
+    background: transparent;
     color: {t['text_faint']};
-    background: {t['surface_sunken']};
+    border-color: {t['border']};
 }}
-QWidget#sermonSessionBar QPushButton:focus {{
-    border: 2px solid {t['focus_ring']};
+QWidget#sermonSessionBar QPushButton#sermonSessionEnd {{
+    color: {t['danger_text']};
+    border-color: {t['danger']};
 }}
-QPushButton#sermonChannelActive {{
+QWidget#sermonSessionBar QPushButton#sermonSessionEnd:hover {{
+    background: {t['danger_soft']};
+}}
+QWidget#sermonSessionBar QPushButton#sermonChannelActive {{
     background: {a['sermon_soft']};
     color: {a['sermon_text']};
-    border: 1px solid {a['sermon']};
-    font-weight: 600;
-}}
-QPushButton#sermonSessionNext {{
-    background: {a['sermon']};
-    color: {a['sermon_on']};
-    border: 1px solid {a['sermon']};
-    font-weight: 600;
-}}
-QPushButton#sermonSessionNext:hover {{
-    background: {a['sermon_hover']};
-}}
-QPushButton#sermonSessionEnd {{
-    background: {t['danger_soft']};
-    color: {t['danger_text']};
-    border: 1px solid {t['danger']};
+    border-color: {a['sermon']};
 }}
 
 /* 主工具栏「讲篇」入口：与「经文搜索」等同权 */

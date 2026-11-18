@@ -11,7 +11,6 @@ from core.sermon.model import Background, ElementStyle, new_slide, new_text_elem
 from core.sermon.pptx_io import (
     _expand_pptx_tabs,
     _font_name_implies_bold,
-    _html_escape,
     _iter_shapes,
     _shape_text_content,
 )
@@ -52,12 +51,6 @@ class SermonTextTests(unittest.TestCase):
         slide = new_slide(background=bg)
         self.assertEqual(slide.background.value, "#112233")
         self.assertIsNot(slide.background, bg)
-
-    def test_html_keeps_spaces_and_tabs(self):
-        html = _html_escape("1.成就 我做了什么")
-        self.assertIn("&nbsp;", html)
-        html2 = _html_escape("复\u3000活")
-        self.assertIn("&#12288;", html2)
 
     def test_tabs_kept_for_tab_stops(self):
         self.assertEqual(_expand_pptx_tabs("复\t活"), "复\t活")

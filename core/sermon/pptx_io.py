@@ -764,21 +764,6 @@ def _run_color_hex(run) -> str | None:
         return None
 
 
-def _html_escape(text: str) -> str:
-    """转义 HTML，并保留空格/Tab/全角空格（默认 HTML 会折叠空白）。"""
-    s = (
-        (text or "")
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-    )
-    s = _expand_pptx_tabs(s)
-    s = s.replace("\u3000", "&#12288;")
-    s = s.replace(" ", "&nbsp;")
-    return s
-
-
 # 与 ui.sermon.text_format.RICH_RUNS_MARK 一致；避免 core→ui 依赖，本地编码
 _RICH_RUNS_MARK = "<!--bp-runs-->"
 
