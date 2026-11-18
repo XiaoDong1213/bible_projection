@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from pathlib import Path
-from core.selection import ScriptureSelection
+from core.selection import ScriptureSelection, chapter_unit
 from core.logical import normalize_selection
 from core.bible_versions import available_bible_versions
 from ui.history.items import HistoryListWidget
@@ -541,18 +541,19 @@ class NavigationPanel(QWidget):
         short = self.db._short_name(book)
         full = f"{book}（{short}）" if short and short != book else book
         total_ch = max(1, self.db.get_chapter_count(book))
+        unit = chapter_unit(book)  # 诗篇/圣咏集计「篇」
         mode = self._current_mode()
         if mode == self.MODE_CROSS:
             start_v = max(1, self.db.get_verse_count(book, int(self.cross_start_ch.value())))
             end_v = max(1, self.db.get_verse_count(book, int(self.cross_end_ch.value())))
-            data = f"本卷共 {total_ch} 章 · 起章 {start_v} 节 · 止章 {end_v} 节"
+            data = f"本卷共 {total_ch} {unit} · 起{unit} {start_v} 节 · 止{unit} {end_v} 节"
         else:
             if mode == self.MODE_SKIP:
                 chapter = int(self.skip_chapter_spin.value())
             else:
                 chapter = int(self.chapter_spin.value())
             total_v = max(1, self.db.get_verse_count(book, chapter))
-            data = f"本卷共 {total_ch} 章 · 本章共 {total_v} 节"
+            data = f"本卷共 {total_ch} {unit} · 本{unit}共 {total_v} 节"
         text = f"{full} · {data}"
         # 面板固定 320 宽，内容区约 292px：全名放不下时退化简称，永不折行
         fm = self.book_info_data.fontMetrics()

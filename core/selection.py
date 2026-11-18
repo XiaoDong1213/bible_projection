@@ -5,6 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Sequence
 
+# 诗篇类书卷以「篇」计章（和合本「诗篇」，思高本译名「圣咏集」）
+PSALM_BOOKS = ("诗篇", "圣咏集")
+
+
+def chapter_unit(book_name: str) -> str:
+    """书卷的章数单位：诗篇 / 圣咏集为「篇」，其余书卷为「章」。"""
+    return "篇" if book_name in PSALM_BOOKS else "章"
+
 
 @dataclass(frozen=True)
 class VerseSpan:
@@ -129,7 +137,7 @@ class ScriptureSelection:
 
     def title(self) -> str:
         """投影标题文案。"""
-        unit = "篇" if self.book == "诗篇" else "章"
+        unit = chapter_unit(self.book)
         if self.is_simple and not self.is_multi_chapter:
             span = self.spans[0]
             if span.start == span.end:

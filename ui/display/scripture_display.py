@@ -14,6 +14,8 @@ from PyQt6.QtGui import (
     QFont, QColor, QPixmap, QFontMetrics, QFontMetricsF, QPainter, QShortcut, QKeySequence,
 )
 
+from core.selection import chapter_unit as _chapter_unit
+
 
 # 收尾标点：不能出现在行首（中文禁则）
 _PUNCT_CLOSING = "，。；：？！、）”』》〉〕…—％·’"
@@ -598,7 +600,7 @@ class ScriptureDisplay(QWidget):
                 elif start_verse==end_verse: title_text=f"{book_name} {chapter}:{start_verse}"
                 else: title_text=f"{book_name} {chapter}:{start_verse}-{end_verse}"
             else:
-                unit="篇" if book_name=="诗篇" else "章"
+                unit=_chapter_unit(book_name)
                 if start_verse is None: title_text=f"{book_name}{chapter}{unit}"
                 elif end_verse is None: title_text=f"{book_name}{chapter}{unit}{start_verse}-末节"
                 elif start_verse==end_verse: title_text=f"{book_name}{chapter}{unit}{start_verse}节"
@@ -641,7 +643,7 @@ class ScriptureDisplay(QWidget):
             if logical_start == logical_end:
                 return f"{selection.book} {span.chapter}:{logical_start}"
             return f"{selection.book} {span.chapter}:{logical_start}-{logical_end}"
-        unit = "篇" if selection.book == "诗篇" else "章"
+        unit = _chapter_unit(selection.book)
         if logical_start == logical_end:
             body = str(logical_start)
         else:
