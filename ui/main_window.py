@@ -206,7 +206,6 @@ class MainWindow(QMainWindow):
         self.toolbar.prepare_extend_menu.connect(self._fill_extend_screen_menu)
         self.toolbar.extend_screen_picked.connect(self._on_extend_screen_picked)
         self.toolbar.settings_changed.connect(self._on_settings_changed)
-        self.toolbar.theme_changed.connect(self._on_theme_changed)
         self.toolbar.topmost_toggled.connect(self._toggle_extension_topmost)
         self.toolbar.scroll_up.connect(lambda: self._scroll_manual(-40))
         self.toolbar.scroll_down.connect(lambda: self._scroll_manual(40))
@@ -796,6 +795,10 @@ class MainWindow(QMainWindow):
                 s = dict(s)
                 s["bible_file"] = str(self.settings.get("bible_file", "") or "")
         self.settings.update(s)
+        # 主题随设置对话框一起应用（顶栏不再有独立切换按钮）
+        new_theme = str(s.get("theme", "") or "")
+        if new_theme and new_theme != str(self.theme):
+            self._on_theme_changed(new_theme)
         self._apply_settings(s)
         self.config.save_display_settings(s)
 

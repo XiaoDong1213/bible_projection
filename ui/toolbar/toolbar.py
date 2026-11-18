@@ -641,7 +641,7 @@ class SettingsFontComboBox(QComboBox):
 class DisplaySettingsDialog(QDialog):
     def __init__(self, settings, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("显示设置")
+        self.setWindowTitle("设置")
         self.setObjectName("settingsDialog")
         self.setMinimumSize(680, 560)
         self.resize(760, 620)
@@ -721,6 +721,28 @@ class DisplaySettingsDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 12)
         root.setSpacing(12)
+
+        # 主题卡片行：界面亮 / 暗两块可点选卡片（复用译本卡片样式）
+        theme_row = QWidget()
+        theme_layout = QHBoxLayout(theme_row)
+        theme_layout.setContentsMargins(4, 0, 4, 0)
+        theme_layout.setSpacing(8)
+        theme_label = QLabel("主题")
+        theme_label.setObjectName("fieldLabel")
+        theme_layout.addWidget(theme_label)
+        self.theme_light_btn = QPushButton("亮色")
+        self.theme_dark_btn = QPushButton("暗色")
+        for btn in (self.theme_light_btn, self.theme_dark_btn):
+            btn.setObjectName("versionCard")
+            btn.setCheckable(True)
+            btn.setAutoExclusive(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedSize(120, 40)
+            theme_layout.addWidget(btn)
+        self.theme_light_btn.clicked.connect(lambda: self._pick_theme("light"))
+        self.theme_dark_btn.clicked.connect(lambda: self._pick_theme("dark"))
+        theme_layout.addStretch(1)
+        root.addWidget(theme_row)
 
         tabs = QTabWidget()
         tabs.setObjectName("settingsTabs")
@@ -1038,10 +1060,20 @@ class DisplaySettingsDialog(QDialog):
         for file, card in self._version_cards.items():
             card.setChecked(file == target)
 
+    def _pick_theme(self, theme):
+        self._selected_theme = str(theme or "dark")
+
+    def _select_theme(self, theme):
+        target = "light" if str(theme or "").lower() == "light" else "dark"
+        self._selected_theme = target
+        self.theme_light_btn.setChecked(target == "light")
+        self.theme_dark_btn.setChecked(target == "dark")
+
     def _load_settings(self):
         s = self.settings
         self._reload_bible_versions()
         self._select_bible_file(s.get("bible_file", ""))
+        self._select_theme(s.get("theme", "dark"))
         self.font_combo.setCurrentFont(QFont(s.get("font_family", "微软雅黑")))
         self.font_size.setValue(int(s.get("font_size", 24)))
         self.title_font_combo.setCurrentFont(QFont(s.get("title_font_family", "微软雅黑")))
@@ -1104,6 +1136,7 @@ class DisplaySettingsDialog(QDialog):
         s = dict(self.settings)
         s.update({
             "bible_file": str(getattr(self, "_selected_bible_file", "") or ""),
+            "theme": str(getattr(self, "_selected_theme", "") or "dark"),
             "font_family": self.font_combo.currentFont().family(),
             "font_size": self.font_size.value(),
             "font_color": self._color_hex("font_color", "#FFFFFF"),
@@ -1152,7 +1185,6 @@ class ToolBarWidget(QWidget):
     prepare_extend_menu = pyqtSignal(object)
     extend_screen_picked = pyqtSignal(str)
     footer_triggered = pyqtSignal()
-    theme_changed = pyqtSignal(str)
     topmost_toggled = pyqtSignal(bool)
     scroll_up = pyqtSignal()
     scroll_down = pyqtSignal()
@@ -1272,16 +1304,10 @@ class ToolBarWidget(QWidget):
         self.addSeparator()
 
         # —— 更多 ——
-        self.settings_btn = ToolbarButton("显示设置")
+        self.settings_btn = ToolbarButton("设置")
         self.settings_btn.setObjectName("settingsBtn")
         self.settings_btn.clicked.connect(self._open_settings)
         self.addWidget(self.settings_btn)
-
-        self.theme_btn = ToolbarButton("亮色")
-        self.theme_btn.setObjectName("themeBtn")
-        self.theme_btn.setToolTip("切换亮色 / 暗色主题")
-        self.theme_btn.clicked.connect(self._toggle_theme)
-        self.addWidget(self.theme_btn)
 
         self.help_btn = ToolbarButton("帮助")
         self.help_btn.setObjectName("helpBtn")
@@ -1294,8 +1320,6 @@ class ToolBarWidget(QWidget):
         self.update_btn.setToolTip("软件简介、联系方式与检查更新")
         self.update_btn.clicked.connect(self._open_about)
         self.addWidget(self.update_btn)
-
-        self._update_theme_button()
 
     def _open_about(self):
         from ui.about_dialog import AboutDialog
@@ -1333,7 +1357,6 @@ class ToolBarWidget(QWidget):
         blocked = self.show_titles_btn.blockSignals(True)
         self.show_titles_btn.setChecked(show_titles)
         self.show_titles_btn.blockSignals(blocked)
-        self._update_theme_button()
 
     def _toggle_scripture_titles(self, checked):
         self.settings["show_scripture_titles"] = bool(checked)
@@ -1465,18 +1488,6 @@ class ToolBarWidget(QWidget):
 
     def current_speed(self):
         return self._speed
-
-    def _toggle_theme(self):
-        self.theme = "light" if self.theme == "dark" else "dark"
-        self._update_theme_button()
-        self.theme_changed.emit(self.theme)
-
-    def _update_theme_button(self):
-        # 按钮文案表示「点击后将切换到」的目标主题
-        self.theme_btn.setText("暗色" if self.theme == "light" else "亮色")
-        self.theme_btn.setToolTip(
-            "当前亮色，点击切换暗色" if self.theme == "light" else "当前暗色，点击切换亮色"
-        )
 
     def popup_extend_screen_menu(self):
         self.prepare_extend_menu.emit(self.extend_menu)
