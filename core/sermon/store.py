@@ -246,5 +246,45 @@ class SermonStore:
             if name.endswith(".__old__") or name.startswith("."):
                 shutil.rmtree(child, ignore_errors=True)
 
+    def cleanup_empty(self) -> None:
+        """删除空壳工作目录（无 sermon.json 且目录内没有任何文件的残留）。"""
+        if not self.root.exists():
+            return
+        for child in list(self.root.iterdir()):
+            if not child.is_dir():
+                continue
+            if (child / "sermon.json").exists():
+                continue
+            if any(f.is_file() for f in child.rglob("*")):
+                continue
+            shutil.rmtree(child, ignore_errors=True)
+
+    def cleanup_all_workdirs(self) -> None:
+        """启动时清空 sermons/ 下全部内容：工作副本目录与 .sermon 等用户文件都删。
+
+        sermons/ 只作会话内工作缓存，不作为包的存放位置（「另存为」默认路径
+        已指向用户文档目录）。仅应在应用启动、尚未打开任何讲篇时调用。"""
+        if not self.root.exists():
+            return
+        for child in list(self.root.iterdir()):
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                try:
+                    child.unlink()
+                except OSError:
+                    pass
+
     def default_save_dir(self) -> Path:
-        return self.root
+        """「另存为」默认目录：用户文档（不再指向 sermons/，避免包存进清理区）。"""
+        from PyQt6.QtCore import QStandardPaths
+
+        docs = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.DocumentsLocation
+        )
+        path = Path(docs) if docs else Path.home() / "Documents"
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            path = Path.home()
+        return path

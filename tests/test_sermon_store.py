@@ -130,6 +130,84 @@ class SermonStoreTests(unittest.TestCase):
             self.assertEqual(loaded.title, "v2")
             self.assertFalse(pkg.with_suffix(".sermon.tmp").exists())
 
+    def test_cleanup_empty_removes_shells(self):
+        """空壳工作目录（无 sermon.json 且无文件）清理，有 json 的保留。"""
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            store = SermonStore(root)
+            # 空目录壳
+            shell = store.sermon_dir("sermon_shell1")
+            shell.mkdir()
+            # 仅含空 assets 的壳
+            shell2 = store.sermon_dir("sermon_shell2")
+            (shell2 / "assets").mkdir(parents=True)
+            # 有 json 的工作副本：保留
+            doc = new_document()
+            store.save(doc)
+            # 含文件但无 json 的目录：保留（有数据，不可判空）
+            blob = store.sermon_dir("sermon_blob")
+            blob.mkdir()
+            (blob / "assets").mkdir()
+            (blob / "assets" / "pic.png").write_bytes(b"x")
+            store.cleanup_empty()
+            self.assertFalse(shell.exists())
+            self.assertFalse(shell2.exists())
+            self.assertTrue(store.sermon_dir(doc.id).is_dir())
+            self.assertTrue(blob.is_dir())
+
+    def test_cleanup_all_workdirs_keeps_package_files(self):
+        """启动全清：sermons/ 下工作副本目录、.sermon 包、散文件全部删除。"""
+        with tempfile.TemporaryDirectory() as raw, tempfile.TemporaryDirectory() as raw_docs:
+            root = Path(raw)
+            docs = Path(raw_docs)
+            store = SermonStore(root)
+            store.default_save_dir = lambda: docs
+            doc = new_document()
+            store.save(doc)
+            pkg = root / "old-default.sermon"  # 旧版默认路径残留在 sermons/ 的包
+            pkg.write_bytes(b"package")
+            stray = root / "loose.txt"
+            stray.write_text("x", encoding="utf-8")
+            store.cleanup_all_workdirs()
+            self.assertFalse(store.sermon_dir(doc.id).exists())
+            self.assertFalse(pkg.exists())  # 用户拍板：sermons/ 下的包也不保留
+            self.assertFalse(stray.exists())
+            # 清空后新建讲篇仍可正常落盘
+            doc2 = new_document()
+            store.save(doc2)
+            self.assertTrue(store.sermon_dir(doc2.id).is_dir())
+
+    def test_default_save_dir_not_in_store_root(self):
+        """「另存为」默认目录是用户文档，绝不在 sermons/ 清理区里。"""
+        with tempfile.TemporaryDirectory() as raw:
+            store = SermonStore(Path(raw))
+            d = store.default_save_dir()
+            self.assertTrue(d.is_dir())
+            self.assertNotIn(str(store.root), str(d))
+
+    def test_drop_unsaved_workdirs_discards_only_unsaved(self):
+        """无包绑定的工作副本列入清理集合；保存后剔除；丢弃时删除目录。"""
+        import sys
+
+        from PyQt6.QtWidgets import QApplication
+
+        _app = QApplication.instance() or QApplication(sys.argv)
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            store = SermonStore(root)
+            from ui.sermon.editor.window import SermonEditorWindow
+
+            editor = SermonEditorWindow(store)
+            sid = editor.doc.id
+            self.assertIn(sid, editor._unsaved_workdirs)
+            self.assertTrue(store.sermon_dir(sid).is_dir())
+            # 保存为包后剔除集合
+            pkg = root / "kept.sermon"
+            self.assertTrue(editor._write_package(pkg))
+            self.assertNotIn(sid, editor._unsaved_workdirs)
+            self.assertTrue(store.sermon_dir(sid).is_dir())
+            editor.close()
+
 
 if __name__ == "__main__":
     unittest.main()

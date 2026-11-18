@@ -82,6 +82,9 @@ class SermonEditorWindow(QWidget):
         self._dirty = False
         self._saved_once = False
         self._presenting = False
+        # 无 .sermon 包绑定的工作副本 id：用户关闭时选「不保存」即删除，
+        # 否则 sermons/ 会随每次新建/导入残留工作副本越积越多
+        self._unsaved_workdirs: set[str] = set()
         self._hold_editor_canvas = False
         self._host_window = None
         self._clip_elements: list[Element] = []
@@ -1338,14 +1341,21 @@ class SermonEditorWindow(QWidget):
         mark_clean: bool = False,
         package_path: Path | str | None = None,
     ):
+        old_path = self._package_path
+        old_doc_id = self.doc.id if hasattr(self, "doc") else None
+        if old_doc_id and old_path is None:
+            # 旧文档从未存过包：其工作副本列入待清理集合
+            self._unsaved_workdirs.add(old_doc_id)
         self.doc = doc
         self._slide_index = 0
         self._undo_stack.clear()
         self._redo_stack.clear()
         if package_path is not None:
             self._package_path = Path(package_path)
+            self._unsaved_workdirs.discard(doc.id)
         else:
             self._package_path = None
+            self._unsaved_workdirs.add(doc.id)
         self._saved_once = bool(self._package_path and self._package_path.is_file())
         # PPT 元数据常写成 Presentation，改用文件名
         from core.sermon.model import normalize_sermon_title
@@ -1591,6 +1601,9 @@ class SermonEditorWindow(QWidget):
             if not self._write_package(dest):
                 self.doc.id = old_id
                 return False
+            # 另存后旧 id 工作副本成为孤儿，列入待清理集合
+            self._unsaved_workdirs.add(old_id)
+            self._unsaved_workdirs.discard(self.doc.id)
             return True
         except Exception:
             self.doc.id = old_id
@@ -1607,6 +1620,7 @@ class SermonEditorWindow(QWidget):
             return False
         self._package_path = saved
         self._saved_once = True
+        self._unsaved_workdirs.discard(self.doc.id)
         self._set_dirty(False)
         self.statusBar().showMessage(f"已保存：{saved}", 5000)
         return True
@@ -1629,6 +1643,8 @@ class SermonEditorWindow(QWidget):
 
     def _confirm_discard(self) -> bool:
         if not self._dirty:
+            # 无未保存改动：历史遗留的无包工作副本也一并清理（内容等同初始态，删除无损）
+            self._drop_unsaved_workdirs()
             return True
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Question)
@@ -1643,7 +1659,18 @@ class SermonEditorWindow(QWidget):
             return False
         if clicked is save_btn:
             return self.save()
+        # 不保存：丢弃改动，同时清掉无包绑定的工作副本，避免 sermons/ 堆积
+        self._drop_unsaved_workdirs()
         return True
+
+    def _drop_unsaved_workdirs(self):
+        """删除未保存过 .sermon 包的工作副本目录（新建/导入后选「不保存」的残留）。"""
+        for sid in list(self._unsaved_workdirs):
+            try:
+                self.store.delete(sid)
+            except Exception:
+                pass
+        self._unsaved_workdirs.clear()
 
     def stash_and_hide(self) -> bool:
         """叠层收起：保留未保存更改；若在放映则继续投屏，不结束会话。"""

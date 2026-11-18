@@ -52,7 +52,11 @@ def _ensure_editor(window):
     from .editor.window import SermonEditorWindow
 
     central = window.centralWidget()
-    editor = SermonEditorWindow(SermonStore(), parent=central)
+    store = SermonStore()
+    # 启动语义：工作副本只是会话内缓存，每次首次打开讲篇编辑器时全部清空
+    # （.sermon 包文件保留，用户把包存在 sermons/ 根下也不受影响）
+    store.cleanup_all_workdirs()
+    editor = SermonEditorWindow(store, parent=central)
     editor._host_window = window
     if hasattr(editor, "reload_last_text_style"):
         editor.reload_last_text_style()

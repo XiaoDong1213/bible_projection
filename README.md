@@ -90,7 +90,7 @@ Bible Pro 基于 **Python + PyQt6 + SQLite**。主屏负责选经文、编讲篇
 - 格式刷、对齐 / 分布、图层顺序；撤销 / 重做（改字时优先文字级撤销）。
 - 元素入场动画（淡入、飞入、缩放、擦除等）与换页过渡。
 - 左侧列表可拖拽改页序；`Ctrl + A` 在列表上全选页、在画布上全选图层；`Ctrl + Shift + A` 始终全选幻灯片。
-- 存档为单个 `.sermon` 包（`sermon.json` + `assets/`）；工作副本在 `sermons/`。打开 / 保存对话框默认优先 `.sermon`。
+- 存档为单个 `.sermon` 包（`sermon.json` + `assets/`）；打开 / 保存对话框默认在「文档」目录，请把包存在那里。`sermons/` 只是编辑 / 放映的工作缓存，**每次启动自动清空**，包不要存进去。
 - 另存到新路径会换新文档 id，避免两个包共用同一工作目录；放映中不可新建 / 打开 / 导入，以免冲掉当前放映。
 - 可导入 / 导出 PPTX（需 `python-pptx`）；导入后会提示跳过项说明。可另存为模板。
 
@@ -196,7 +196,7 @@ python main.py
 
 也可 `python -m app.main`。需能访问 `resources/` 中的经文库。
 
-开发时配置在项目根目录 `config.ini`；讲篇工作副本与模板在 `sermons/`、`templates/`。安装版数据在 `%APPDATA%\bible_projection\`。
+开发时配置在项目根目录 `config.ini`；讲篇模板在 `templates/`，讲篇工作缓存在 `sermons/`（每次启动自动清空，仅 `.sermon` 包文件是存档）。安装版数据在 `%APPDATA%\bible_projection\`。
 
 单测：
 
