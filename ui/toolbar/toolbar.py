@@ -1512,6 +1512,11 @@ class ToolBarWidget(QWidget):
         super().resizeEvent(event)
         self._relayout()
 
+    def minimumSizeHint(self):
+        # 允许窗口变窄由折行接管；若不重写，布局最小宽=单行内容总宽（~1200px），
+        # 窄窗口下顶住不放导致整行溢出被裁（速度档按钮被切一半的根因）
+        return QSize(360, 56)
+
     def showEvent(self, event):
         super().showEvent(event)
         self._relayout()
@@ -1536,7 +1541,12 @@ class ToolBarWidget(QWidget):
         total = 0
         for i, it in enumerate(self._items):
             # 隐藏条目（如单屏模式的状态胶囊）不占折行宽度
-            wd = it.sizeHint().width() if it.isVisibleTo(self) else 0
+            wd = it.sizeHint().width()
+            if wd < 0:
+                # 自绘条目（状态胶囊）/分隔线无 sizeHint，用固定尺寸兜底
+                wd = it.minimumSize().width()
+            if not it.isVisibleTo(self):
+                wd = 0
             if total + wd > avail and i > 0:
                 split = i
                 break
