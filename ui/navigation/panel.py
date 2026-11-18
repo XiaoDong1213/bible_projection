@@ -146,6 +146,7 @@ class NavigationPanel(QWidget):
         self.history = []
         self.selected_book = None
         self._history_updating = False
+        self._active_mode = self.MODE_SINGLE
         self.setObjectName("navPanel")
         self.setMinimumWidth(280)
         self.setMaximumWidth(400)
@@ -283,13 +284,21 @@ class NavigationPanel(QWidget):
 
         bottom_layout.addWidget(self.range_stack)
 
-        self.book_info = QLabel("本卷共 — 章 · 本章共 — 节")
-        self.book_info.setObjectName("navHint")
-        self.book_info.setAlignment(
+        # 信息行固定两行：书卷名一行、章节数据一行，断行位置可控不随宽度乱折
+        self.book_info_name = QLabel("")
+        self.book_info_name.setObjectName("navHint")
+        self.book_info_name.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
-        self.book_info.setWordWrap(True)
-        bottom_layout.addWidget(self.book_info)
+        self.book_info_name.setWordWrap(False)
+        bottom_layout.addWidget(self.book_info_name)
+        self.book_info_data = QLabel("本卷共 — 章 · 本章共 — 节")
+        self.book_info_data.setObjectName("navHint")
+        self.book_info_data.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.book_info_data.setWordWrap(False)
+        bottom_layout.addWidget(self.book_info_data)
 
         action_row = QHBoxLayout()
         action_row.setSpacing(8)
@@ -352,6 +361,8 @@ class NavigationPanel(QWidget):
         if mode is None:
             mode = self._current_mode()
         mode = int(mode)
+        self._carry_over(self._active_mode, mode)
+        self._active_mode = mode
         self.range_stack.setCurrentIndex(mode)
         if self.selected_book:
             self._sync_mode_limits()
@@ -364,12 +375,95 @@ class NavigationPanel(QWidget):
 
     def _set_mode(self, mode):
         mode = int(mode)
+        self._active_mode = mode
         btn = self.mode_group.button(mode)
         if btn is not None:
             blocked = self.mode_group.blockSignals(True)
             btn.setChecked(True)
             self.mode_group.blockSignals(blocked)
         self.range_stack.setCurrentIndex(mode)
+
+    def _skip_first_span(self, book, chapter):
+        """解析跳节输入的第一段（无效时返回 None）。"""
+        max_v = max(1, self.db.get_verse_count(book, int(chapter)))
+        sel = ScriptureSelection.from_space_verses(
+            book, int(chapter), self.skip_edit.text(), max_v
+        )
+        return sel.spans[0] if sel and sel.spans else None
+
+    def _set_single_range(self, chapter, start, end):
+        """免信号写单章三件套（章 + 起止节）。"""
+        max_ch = max(1, self.db.get_chapter_count(self.selected_book))
+        max_v = max(1, self.db.get_verse_count(self.selected_book, int(chapter)))
+        self.chapter_spin.blockSignals(True)
+        self.chapter_spin.setRange(1, max_ch)
+        self.chapter_spin.setValue(int(chapter))
+        self.chapter_spin.blockSignals(False)
+        self.start_spin.blockSignals(True)
+        self.end_spin.blockSignals(True)
+        self.start_spin.setRange(1, max_v)
+        self.end_spin.setRange(1, max_v)
+        self.start_spin.setValue(max(1, min(int(start), max_v)))
+        self.end_spin.setValue(max(1, min(int(end), max_v)))
+        self.start_spin.blockSignals(False)
+        self.end_spin.blockSignals(False)
+
+    def _set_cross_range(self, book, sch, sv, ech, ev):
+        """免信号写跨章四件套（起止章 + 起止节，节按所在章夹取）。"""
+        max_ch = max(1, self.db.get_chapter_count(book))
+        for spin, value in ((self.cross_start_ch, sch), (self.cross_end_ch, ech)):
+            spin.blockSignals(True)
+            spin.setRange(1, max_ch)
+            spin.setValue(int(value))
+            spin.blockSignals(False)
+        self._set_verse_spin_limit(self.cross_start_v, book, int(sch), value=sv, clamp=False)
+        self._set_verse_spin_limit(self.cross_end_v, book, int(ech), value=ev, clamp=False)
+
+    def _set_skip_range(self, chapter, start, end):
+        """免信号写跳节（章 + 第一段文本）。"""
+        spin = self.skip_chapter_spin
+        max_ch = max(1, self.db.get_chapter_count(self.selected_book))
+        spin.blockSignals(True)
+        spin.setRange(1, max_ch)
+        spin.setValue(int(chapter))
+        spin.blockSignals(False)
+        self.skip_edit.setText(f"{max(1, int(start))}-{max(1, int(end))}")
+
+    def _carry_over(self, from_mode, to_mode):
+        """切换模式时把当前内容带到目标模式（单章/跨章/跳节联动）。
+
+        章号与节号都跟过去；跨章范围落到单章/跳节时止节夹到目标章节数，
+        跳节多段只带第一段（其余模式表达不了多段）。"""
+        if from_mode == to_mode or not self.selected_book:
+            return
+        book = self.selected_book
+        if from_mode == self.MODE_SINGLE:
+            ch = int(self.chapter_spin.value())
+            s, e = int(self.start_spin.value()), int(self.end_spin.value())
+        elif from_mode == self.MODE_CROSS:
+            ch = int(self.cross_start_ch.value())
+            s, e = int(self.cross_start_v.value()), int(self.cross_end_v.value())
+        else:
+            ch = int(self.skip_chapter_spin.value())
+            span = self._skip_first_span(book, ch)
+            if span is not None:
+                s, e = int(span.start), int(span.end)
+            else:
+                s, e = 1, max(1, self.db.get_verse_count(book, ch))
+        if to_mode == self.MODE_SINGLE:
+            max_v = max(1, self.db.get_verse_count(book, ch))
+            self._set_single_range(ch, s, min(e, max_v))
+        elif to_mode == self.MODE_CROSS:
+            self._set_cross_range(book, ch, s, ch, e)
+        else:
+            max_v = max(1, self.db.get_verse_count(book, ch))
+            self._set_skip_range(ch, s, min(e, max_v))
+
+    def _carry_over_all(self, from_mode):
+        """把当前模式内容广播到另外两个模式（历史/搜索定位后保持联动）。"""
+        for m in (self.MODE_SINGLE, self.MODE_CROSS, self.MODE_SKIP):
+            if m != from_mode:
+                self._carry_over(from_mode, m)
 
     def _on_segment_clicked(self, checked):
         self._update_segment_button(bool(checked))
@@ -443,10 +537,12 @@ class NavigationPanel(QWidget):
         self.book_selected.emit(book, self.chapter_spin.value())
 
     def _update_book_info(self):
-        """刷新「书卷 · 本卷共X章 · 本章共Y节」信息行（纯显示）。"""
+        """刷新底部信息行：书卷名一行 + 章节数据一行（纯显示）。"""
         if not self.selected_book:
-            self.book_info.setText("本卷共 — 章 · 本章共 — 节")
-            self.book_info.setToolTip("")
+            self.book_info_name.setText("")
+            self.book_info_data.setText("本卷共 — 章 · 本章共 — 节")
+            self.book_info_name.setToolTip("")
+            self.book_info_data.setToolTip("")
             return
         book = self.selected_book
         short = self.db._short_name(book)
@@ -456,17 +552,18 @@ class NavigationPanel(QWidget):
         if mode == self.MODE_CROSS:
             start_v = max(1, self.db.get_verse_count(book, int(self.cross_start_ch.value())))
             end_v = max(1, self.db.get_verse_count(book, int(self.cross_end_ch.value())))
-            self.book_info.setText(
-                f"{name} · 本卷共 {total_ch} 章 · 起章 {start_v} 节 · 止章 {end_v} 节"
-            )
+            data = f"本卷共 {total_ch} 章 · 起章 {start_v} 节 · 止章 {end_v} 节"
         else:
             if mode == self.MODE_SKIP:
                 chapter = int(self.skip_chapter_spin.value())
             else:
                 chapter = int(self.chapter_spin.value())
             total_v = max(1, self.db.get_verse_count(book, chapter))
-            self.book_info.setText(f"{name} · 本卷共 {total_ch} 章 · 本章共 {total_v} 节")
-        self.book_info.setToolTip(book)
+            data = f"本卷共 {total_ch} 章 · 本章共 {total_v} 节"
+        self.book_info_name.setText(name)
+        self.book_info_data.setText(data)
+        self.book_info_name.setToolTip(book)
+        self.book_info_data.setToolTip(book)
 
     def _set_selected_book(self, book, whole_chapter=False):
         self.selected_book = book
@@ -614,6 +711,7 @@ class NavigationPanel(QWidget):
             self.start_spin.blockSignals(False)
             self.end_spin.blockSignals(False)
             self._sync_mode_limits()
+            self._carry_over_all(self.MODE_SINGLE)
         finally:
             self._history_updating = False
 
@@ -677,6 +775,7 @@ class NavigationPanel(QWidget):
                 span = selection.spans[0]
                 self.sync_selection(selection.book, span.chapter, span.start, span.end)
             self._sync_mode_limits()
+            self._carry_over_all(self._active_mode)
             if focus_book and self.selected_book:
                 idx = self._book_tab_index(self.selected_book)
                 self.tab_widget.setCurrentIndex(idx)
