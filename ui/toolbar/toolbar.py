@@ -8,10 +8,14 @@ from PyQt6.QtWidgets import (
     QFileDialog, QLineEdit, QDialogButtonBox, QWidget, QSizePolicy,
     QTabWidget, QGroupBox, QFrame, QGridLayout, QComboBox, QCompleter,
     QToolButton, QMenu, QStyledItemDelegate, QStyle, QCheckBox,
+    QAbstractButton, QButtonGroup,
 )
-from PyQt6.QtCore import Qt, QSize, QStringListModel, QTimer, QPointF, QEvent, pyqtSignal
+from PyQt6.QtCore import (
+    Qt, QSize, QStringListModel, QTimer, QPointF, QEvent, QRectF, pyqtSignal,
+)
 from PyQt6.QtGui import (
     QFont, QFontDatabase, QColor, QPainter, QPen, QFontMetrics, QFontMetricsF,
+    QPainterPath,
 )
 
 from app.version import APP_VERSION
@@ -638,6 +642,87 @@ class SettingsFontComboBox(QComboBox):
         self._set_color_bars_suppressed(False)
 
 
+class ThemePreviewCard(QAbstractButton):
+    """设置对话框的主题预览卡片：用真实主题令牌色自绘迷你界面缩略图。"""
+
+    THUMB_H = 104  # 缩略图高度，余下是底部标签行
+
+    def __init__(self, mode, label, parent=None):
+        super().__init__(parent)
+        self._mode = str(mode)
+        self._label = str(label)
+        self._tokens = theme_tokens(self._mode)
+        self.setCheckable(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedSize(176, 134)
+        self.setText(label)
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        t = self._tokens
+        checked = self.isChecked()
+        w, h = self.width(), self.height()
+        thumb_h = float(self.THUMB_H)
+
+        def round_bar(x, y, bw, bh, color, alpha=255):
+            sub = QPainterPath()
+            sub.addRoundedRect(QRectF(x, y, bw, bh), bh / 2, bh / 2)
+            c = QColor(color)
+            c.setAlpha(alpha)
+            p.fillPath(sub, c)
+
+        # 缩略图：canvas 底 + 状态边框（选中 accent / 悬停加深 / 平常浅灰）
+        rect = QRectF(1.0, 1.0, w - 2, thumb_h - 2)
+        path = QPainterPath()
+        path.addRoundedRect(rect, 10, 10)
+        p.fillPath(path, QColor(t["canvas"]))
+        if checked:
+            border, pen_w = QColor(t["accent"]), 2.0
+        elif self.underMouse():
+            border, pen_w = QColor(t["border_strong"]), 1.5
+        else:
+            border, pen_w = QColor(t["border"]), 1.0
+        p.setPen(QPen(border, pen_w))
+        p.drawPath(path)
+
+        # 迷你工具栏：surface 条 + 左侧胶囊（accent）+ 右侧两个小按钮
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(t["surface"]))
+        p.drawRoundedRect(QRectF(10, 8, w - 20, 18), 6, 6)
+        round_bar(16, 13, 28, 8, t["accent"])
+        round_bar(w - 40, 13, 12, 8, t["border_strong"])
+        round_bar(w - 24, 13, 12, 8, t["border_strong"])
+
+        # 迷你经文内容：标题行 + 三行正文
+        round_bar(16, 38, 74, 8, t["text"], 100)
+        round_bar(16, 54, w - 32, 7, t["text"], 60)
+        round_bar(16, 66, w - 32, 7, t["text"], 60)
+        round_bar(16, 78, 96, 7, t["text"], 60)
+
+        # 选中标记：右上角圆点对勾
+        if checked:
+            cx, cy = w - 14.0, 14.0
+            p.setBrush(QColor(t["accent"]))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawEllipse(QPointF(cx, cy), 8, 8)
+            p.setPen(QPen(QColor("#FFFFFF"), 2.0))
+            p.drawLine(QPointF(cx - 3.5, cy + 0.5), QPointF(cx - 1.0, cy + 3.0))
+            p.drawLine(QPointF(cx - 1.0, cy + 3.0), QPointF(cx + 3.5, cy - 2.5))
+
+        # 底部标签：选中 accent 加粗，平常灰
+        f = QFont(self.font())
+        f.setBold(checked)
+        f.setPixelSize(13)
+        p.setFont(f)
+        p.setPen(QColor(t["accent"] if checked else t["text_muted"]))
+        p.drawText(
+            QRectF(0, thumb_h, w, h - thumb_h),
+            Qt.AlignmentFlag.AlignCenter,
+            self._label,
+        )
+
+
 class DisplaySettingsDialog(QDialog):
     def __init__(self, settings, parent=None):
         super().__init__(parent)
@@ -721,28 +806,6 @@ class DisplaySettingsDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 12)
         root.setSpacing(12)
-
-        # 主题卡片行：界面亮 / 暗两块可点选卡片（复用译本卡片样式）
-        theme_row = QWidget()
-        theme_layout = QHBoxLayout(theme_row)
-        theme_layout.setContentsMargins(4, 0, 4, 0)
-        theme_layout.setSpacing(8)
-        theme_label = QLabel("主题")
-        theme_label.setObjectName("fieldLabel")
-        theme_layout.addWidget(theme_label)
-        self.theme_light_btn = QPushButton("亮色")
-        self.theme_dark_btn = QPushButton("暗色")
-        for btn in (self.theme_light_btn, self.theme_dark_btn):
-            btn.setObjectName("versionCard")
-            btn.setCheckable(True)
-            btn.setAutoExclusive(True)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setFixedSize(120, 40)
-            theme_layout.addWidget(btn)
-        self.theme_light_btn.clicked.connect(lambda: self._pick_theme("light"))
-        self.theme_dark_btn.clicked.connect(lambda: self._pick_theme("dark"))
-        theme_layout.addStretch(1)
-        root.addWidget(theme_row)
 
         tabs = QTabWidget()
         tabs.setObjectName("settingsTabs")
@@ -919,6 +982,28 @@ class DisplaySettingsDialog(QDialog):
         self._selected_bible_file = ""
         tabs.addTab(bible_page, "圣经版本")
 
+        theme_page = QWidget()
+        theme_root = QVBoxLayout(theme_page)
+        theme_root.setContentsMargins(20, 20, 20, 20)
+        theme_root.setSpacing(12)
+        cards_row = QHBoxLayout()
+        cards_row.setContentsMargins(0, 0, 0, 0)
+        cards_row.setSpacing(12)
+        self.theme_light_card = ThemePreviewCard("light", "亮色")
+        self.theme_dark_card = ThemePreviewCard("dark", "暗色")
+        self._theme_group = QButtonGroup(self)  # 两卡互斥
+        for card in (self.theme_light_card, self.theme_dark_card):
+            self._theme_group.addButton(card)
+            cards_row.addWidget(card)
+        self.theme_light_card.clicked.connect(lambda: self._pick_theme("light"))
+        self.theme_dark_card.clicked.connect(lambda: self._pick_theme("dark"))
+        cards_row.addStretch(1)
+        theme_root.addLayout(cards_row)
+        theme_hint = QLabel("界面与控制台的亮色 / 暗色外观，投影画面的颜色不受影响")
+        theme_root.addWidget(theme_hint)
+        theme_root.addStretch(1)
+        tabs.addTab(theme_page, "主题")
+
         root.addWidget(tabs, 1)
         bg_choose.clicked.connect(self._choose_bg)
         bg_clear.clicked.connect(self._clear_bg)
@@ -1066,8 +1151,8 @@ class DisplaySettingsDialog(QDialog):
     def _select_theme(self, theme):
         target = "light" if str(theme or "").lower() == "light" else "dark"
         self._selected_theme = target
-        self.theme_light_btn.setChecked(target == "light")
-        self.theme_dark_btn.setChecked(target == "dark")
+        self.theme_light_card.setChecked(target == "light")
+        self.theme_dark_card.setChecked(target == "dark")
 
     def _load_settings(self):
         s = self.settings
