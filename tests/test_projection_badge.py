@@ -3,7 +3,7 @@
 import sys
 from types import SimpleNamespace
 
-from PyQt6.QtWidgets import QApplication, QLineEdit
+from PyQt6.QtWidgets import QApplication, QLineEdit, QPushButton, QWidget
 
 _APP = QApplication.instance() or QApplication(sys.argv)
 
@@ -76,13 +76,41 @@ def test_badge_scripture_green_when_hotkey_live(monkeypatch):
     mw = _make_main_window_stub()
     mw.extension_window = SimpleNamespace(isVisible=lambda: True)
     # pytest 环境无激活窗口（activeWindow 为 None 会走红色失活态），
-    # patch 成「本软件已激活」以覆盖绿态分支
-    monkeypatch.setattr(
-        "ui.main_window.QApplication.activeWindow", lambda *a: mw.toolbar
-    )
+    # patch 成主窗口本体（绿态要求激活窗口就是主窗口）以覆盖绿态分支
+    monkeypatch.setattr("ui.main_window.QApplication.activeWindow", lambda *a: mw)
     mw._update_mode_badge()
     # 无输入焦点 → 速度档按键生效 → 绿
     assert mw.toolbar.mode_badge._mode == "scripture_focus"
+
+
+def test_badge_yellow_when_active_window_is_other_window(monkeypatch):
+    """激活窗口在本应用的其他顶层窗口（扩展窗/对话框）：主窗口快捷键不触发 → 黄。"""
+    mw = _make_main_window_stub()
+    mw.extension_window = SimpleNamespace(isVisible=lambda: True)
+    other = QLineEdit()
+    other.show()
+    monkeypatch.setattr("ui.main_window.QApplication.activeWindow", lambda *a: other)
+    try:
+        mw._update_mode_badge()
+        assert mw.toolbar.mode_badge._mode == "scripture"
+    finally:
+        other.close()
+
+
+def test_nav_keys_dead_when_focus_in_other_window(monkeypatch):
+    """激活窗口是主窗口、焦点控件却挂在其他顶层窗口（如下拉弹层）→ 按键无效。"""
+    mw = _make_main_window_stub()
+    other = QWidget()
+    btn = QPushButton(other)
+    other.show()
+    btn.setFocus()
+    _APP.processEvents()
+    monkeypatch.setattr("ui.main_window.QApplication.activeWindow", lambda *a: mw)
+    monkeypatch.setattr("ui.main_window.QApplication.focusWidget", lambda *a: btn)
+    try:
+        assert mw._nav_keys_effective() is False
+    finally:
+        other.close()
 
 
 def test_badge_red_when_app_deactivated(monkeypatch):
@@ -110,9 +138,7 @@ def test_badge_yellow_when_focus_blocks_hotkeys():
 
 def test_badge_sermon_green_and_ignores_focus(monkeypatch):
     mw = _make_main_window_stub()
-    monkeypatch.setattr(
-        "ui.main_window.QApplication.activeWindow", lambda *a: mw.toolbar
-    )
+    monkeypatch.setattr("ui.main_window.QApplication.activeWindow", lambda *a: mw)
     mw.sermon_controller.active = True
     mw._projection_channel = "sermon"
     mw._update_mode_badge()

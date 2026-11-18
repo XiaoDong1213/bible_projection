@@ -302,7 +302,8 @@ class MainWindow(QMainWindow):
 
     def _update_mode_badge(self):
         """顶栏投影状态胶囊（颜色即信息）：未投影=灰；投影中·经文=黄/绿
-        （黄=焦点在输入框等，速度档按键被拦截；绿=按键生效）；
+        （黄=按键暂不生效：焦点在输入框/列表，或焦点在扩展窗、对话框等
+        其他本软件窗口——主窗口快捷键此时不触发；绿=按键生效）；
         投影中·讲篇=绿；本软件窗口未激活（切到别的软件）=红，按键必然无效。"""
         tb = getattr(self, "toolbar", None)
         if tb is None or not hasattr(tb, "set_mode_badge"):
@@ -325,13 +326,13 @@ class MainWindow(QMainWindow):
             if ch == "讲篇":
                 tb.set_mode_badge("投影中 · 讲篇", tip=tip, mode="sermon")
             else:
-                mode = "scripture_focus" if not self._focus_blocks_nav_shortcuts() else "scripture"
+                mode = "scripture_focus" if self._nav_keys_effective() else "scripture"
                 tb.set_mode_badge("投影中 · 经文", tip=tip, mode=mode)
         elif ext_visible:
             if app_lost:
                 tb.set_mode_badge("投影中 · 未激活", tip="点击本软件窗口后才能用键盘控制投影", mode="app_lost")
-            elif self._focus_blocks_nav_shortcuts():
-                tb.set_mode_badge("投影中 · 经文", tip="焦点在输入框，速度档按键暂不生效", mode="scripture")
+            elif not self._nav_keys_effective():
+                tb.set_mode_badge("投影中 · 经文", tip="焦点在输入框或其他窗口，速度档按键暂不生效", mode="scripture")
             else:
                 tb.set_mode_badge("投影中 · 经文", tip="速度档按键生效", mode="scripture_focus")
         else:
@@ -436,6 +437,18 @@ class MainWindow(QMainWindow):
             editor._present_prev()
             return
         self.sermon_controller.prev()
+
+    def _nav_keys_effective(self) -> bool:
+        """速度档等经文导航按键此刻是否真的生效（与 QShortcut WindowShortcut 触发条件对齐）：
+        激活窗口或焦点控件在本应用的其他顶层窗口（扩展窗、对话框、下拉弹层）时，
+        主窗口快捷键不触发——只按焦点控件类型判定会误报绿。"""
+        active = QApplication.activeWindow()
+        if active is not None and active is not self:
+            return False
+        fw = QApplication.focusWidget()
+        if fw is not None and fw.window() is not self:
+            return False
+        return not self._focus_blocks_nav_shortcuts()
 
     def _focus_blocks_nav_shortcuts(self):
         w = QApplication.focusWidget()
