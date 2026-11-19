@@ -44,7 +44,7 @@ def _ensure_panel(window):
     splitter = getattr(window, "main_splitter", None)
     parent = splitter if splitter is not None else window.centralWidget()
     widget = ScriptureSearchWidget(window.db, window.config, parent, theme=window.theme)
-    widget.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+    widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
     widget.result_activated.connect(lambda result: _activate(window, result))
     widget.result_project_requested.connect(lambda result: _project(window, result))
     widget.close_requested.connect(lambda: _hide_panel(window))
@@ -53,7 +53,8 @@ def _ensure_panel(window):
     if splitter is not None:
         splitter.addWidget(widget)
         idx = splitter.count() - 1
-        splitter.setStretchFactor(idx, 0)
+        # 中央:面板 = 3:1——窗口缩放时面板跟着伸缩，中央预览拿大头
+        splitter.setStretchFactor(idx, 1)
         handle = splitter.handle(idx)
         if handle is not None:
             handle.setEnabled(True)
@@ -86,6 +87,9 @@ def _hide_panel(window):
 
 
 def _toggle(window):
+    # 单屏「全屏显示」是纯经文投影画面，不弹搜索面板
+    if getattr(window, "_main_fullscreen", False):
+        return
     editor = getattr(window, "_sermon_editor", None)
     if editor is not None and editor.isVisible():
         if hasattr(editor, "stash_and_hide"):
@@ -100,8 +104,9 @@ def _toggle(window):
     splitter = getattr(window, "main_splitter", None)
     if splitter is not None and splitter.count() >= 3:
         sizes = splitter.sizes()
-        width = int(getattr(widget, "PANEL_WIDTH", 520))
-        if len(sizes) >= 3 and sizes[2] < width // 2:
+        # 宽度与左侧导航面板对齐（拖过导航条则跟随），导航折叠时兜底默认宽
+        width = sizes[0] if len(sizes) >= 3 and sizes[0] > 0 else int(getattr(widget, "PANEL_WIDTH", 520))
+        if sizes[2] < width // 2:
             take = min(width, max(0, sizes[1] - 200))
             sizes[1] = sizes[1] - take
             sizes[2] = take

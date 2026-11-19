@@ -838,9 +838,17 @@ class NavigationPanel(QWidget):
         for entry in history_list or []:
             selection = ScriptureSelection.from_history_entry(entry)
             if selection is not None:
+                # 旧版本存的条目没有译本标记：补上当前译本，避免标注忽有忽无
+                if not getattr(selection, "bible_file", ""):
+                    try:
+                        object.__setattr__(selection, "bible_file", Path(self.db.db_path).name)
+                    except Exception:
+                        pass
                 self.history.append(normalize_selection(self.db, selection))
         self.history = self.history[:30]
         self._update_history_list()
+        # 补标结果随广播固化到 config，下次启动不再依赖补标
+        self.history_changed.emit([item.to_history_entry() for item in self.history])
 
 
     def add_selection_to_history(self, selection: ScriptureSelection):
@@ -852,17 +860,41 @@ class NavigationPanel(QWidget):
             object.__setattr__(selection, "bible_file", Path(self.db.db_path).name)
         except Exception:
             pass
-        self.history = [
-            item for item in self.history
-            if not (
-                item.book == selection.book
-                and item.spans == selection.spans
-                and item.bible_file == selection.bible_file
-            )
-        ]
+        old_idx = next(
+            (
+                i
+                for i, item in enumerate(self.history)
+                if (
+                    item.book == selection.book
+                    and item.spans == selection.spans
+                    and item.bible_file == selection.bible_file
+                )
+            ),
+            -1,
+        )
+        if old_idx >= 0:
+            self.history = [
+                item for i, item in enumerate(self.history) if i != old_idx
+            ]
         self.history.insert(0, selection)
         self.history = self.history[:30]
-        self._update_history_list(selected_index=0)
+        # UI 增量：新条目插顶、重访把原行挪顶（复用 widget），不整列重建
+        rows = self.history_list._rows
+        if old_idx == -1 and len(rows) >= 30:
+            self.history_list.remove_entry(len(rows) - 1)
+        if old_idx == -1:
+            self.history_list.insert_entry(0, "", "")
+        else:
+            self.history_list.move_entry(old_idx, 0)
+        # 逐行同步文字：新行填内容，旧行在标注条件变化时跟随（同文本自动跳过重绘）
+        name_map = self._history_version_names()
+        for i, item in enumerate(self.history):
+            self.history_list.update_entry_text(
+                i,
+                self._history_label(item, name_map),
+                self._history_short_label(item, self.db._short_name(item.book)),
+            )
+        self.history_list.set_selected_index(0)
         self.history_changed.emit([item.to_history_entry() for item in self.history])
 
     def _history_version_names(self):
@@ -886,10 +918,24 @@ class NavigationPanel(QWidget):
 
     def _update_history_list(self, selected_index=-1):
         name_map = self._history_version_names()
-        texts = [self._history_label(entry, name_map) for entry in self.history]
-        self.history_list.set_entries(texts, selected_index=selected_index)
+        texts, shorts = [], []
+        for entry in self.history:
+            texts.append(self._history_label(entry, name_map))
+            shorts.append(self._history_short_label(entry, self.db._short_name(entry.book)))
+        self.history_list.set_entries(texts, selected_index=selected_index, shorts=shorts)
 
-    def _on_history_clicked(self, index):
+    def update_history_entry(self, index, selection):
+        """方向键微调后只更新一条历史行的文字，避免整列重建闪烁。"""
+        if not 0 <= index < len(self.history):
+            return
+        name_map = self._history_version_names()
+        short = self._history_short_label(selection, self.db._short_name(selection.book))
+        self.history_list.update_entry_text(
+            index, self._history_label(selection, name_map), short
+        )
+
+    def _on_history_clicked(self, row):
+        index = self.history_list.index_of(row)
         if not 0 <= index < len(self.history):
             return
         selection = self.history[index]
@@ -897,8 +943,9 @@ class NavigationPanel(QWidget):
         self.history_list.set_selected_index(index)
         self.history_opened.emit(selection)
 
-    def _copy_history(self, index):
+    def _copy_history(self, row):
         """复制历史记录的简称引用，内容可直接粘贴到搜索框。"""
+        index = self.history_list.index_of(row)
         if not 0 <= index < len(self.history):
             return
         selection = self.history[index]
@@ -915,16 +962,21 @@ class NavigationPanel(QWidget):
             return selection.label()
         return f"{short} {selection.primary_chapter}:{selection.space_verse_text()}"
 
-    def _delete_history(self, index):
-        if 0 <= index < len(self.history):
-            del self.history[index]
-            selected = self.history_list.selected_index()
-            if selected == index:
-                selected = -1
-            elif selected > index:
-                selected -= 1
-            self._update_history_list(selected_index=selected)
-            self.history_changed.emit([item.to_history_entry() for item in self.history])
+    def _delete_history(self, row):
+        index = self.history_list.index_of(row)
+        if not 0 <= index < len(self.history):
+            return
+        del self.history[index]
+        self.history_list.remove_entry(index)
+        # 删到只剩一个译本时去掉标注：逐行改文字，不整列重建
+        name_map = self._history_version_names()
+        for i, entry in enumerate(self.history):
+            self.history_list.update_entry_text(
+                i,
+                self._history_label(entry, name_map),
+                self._history_short_label(entry, self.db._short_name(entry.book)),
+            )
+        self.history_changed.emit([item.to_history_entry() for item in self.history])
 
     def _clear_history(self):
         self.history.clear()

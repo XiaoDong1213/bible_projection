@@ -21,8 +21,15 @@ from PyQt6.QtWidgets import (
     QTextEdit,
     QMessageBox,
 )
-from PyQt6.QtCore import QEvent, Qt, QPoint, QTimer
-from PyQt6.QtGui import QKeySequence, QShortcut, QActionGroup
+from PyQt6.QtCore import QEvent, QObject, QRectF, Qt, QPoint, QTimer
+from PyQt6.QtGui import (
+    QColor,
+    QFontMetrics,
+    QKeySequence,
+    QPainter,
+    QPainterPath,
+    QShortcut,
+)
 
 from core.config import AppConfig
 from core.database import BibleDatabase
@@ -38,7 +45,7 @@ from ui.display.screens import (
     resolve_saved_output,
     screen_choice_label,
 )
-from ui.themes import build_stylesheet, theme_tokens
+from ui.themes import build_stylesheet, strip_dwm_chrome, theme_tokens
 from ui.sermon.player import PresentationController
 from ui.sermon.player.session_bar import SessionBar
 
@@ -85,11 +92,101 @@ def _win32_monitor_rect(device_name: str, *, work_area: bool):
     return found.get("rect")
 
 
+class _TipOverlay(QWidget):
+    """自绘 tooltip：透明背景上的圆角卡片。
+
+    原生 QTipLabel 窗口是不透明矩形，Win11 的 DWM 还会叠系统圆角与描边，
+    样式层怎么调都会留一圈白/黑框；自绘从机制上没有这个问题。"""
+
+    def __init__(self):
+        super().__init__(
+            None,
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.Tool
+            | Qt.WindowType.WindowStaysOnTopHint,
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        # 压掉 Win11 DWM 给窗口叠的系统圆角与描边（同款黑框来源）
+        self._dwm_stripped = False
+        self._text = ""
+        self._theme = "dark"
+        self._hide_timer = QTimer(self)
+        self._hide_timer.setSingleShot(True)
+        self._hide_timer.setInterval(9000)
+        self._hide_timer.timeout.connect(self.hide)
+
+    def show_tip(self, text, theme, global_pos):
+        self._text = str(text or "")
+        self._theme = theme
+        fm = QFontMetrics(self.font())
+        lines = self._text.split("\n")
+        w = max(fm.horizontalAdvance(line) for line in lines) + 24
+        h = fm.height() * len(lines) + 16
+        self.resize(max(w, 40), h)
+        self.move(global_pos)
+        self.show()
+        self.raise_()
+        # show 后窗口已 native 化，DWM 属性此时设置才有效
+        if not self._dwm_stripped:
+            strip_dwm_chrome(self)
+            self._dwm_stripped = True
+        self._hide_timer.start()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        t = theme_tokens(self._theme)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(0, 0, self.width(), self.height()), 6, 6)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(t["surface_raised"]))
+        p.drawPath(path)
+        p.setPen(QColor(t["text"]))
+        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._text)
+
+
+class _TipController(QObject):
+    """接管全局 tooltip：QEvent.ToolTip 时显示自绘圆角卡片，
+    鼠标离开控件/按下/滚轮时隐藏。原生 QTipLabel 从此不再创建。"""
+
+    def __init__(self):
+        super().__init__()
+        self.theme = "dark"
+        self._overlay = None
+
+    def _ensure_overlay(self):
+        if self._overlay is None:
+            self._overlay = _TipOverlay()
+        return self._overlay
+
+    def eventFilter(self, obj, event):
+        et = event.type()
+        if et == QEvent.Type.ToolTip:
+            text = obj.toolTip()
+            if text:
+                overlay = self._ensure_overlay()
+                overlay.show_tip(text, self.theme, event.globalPos())
+                return True
+        elif et in (
+            QEvent.Type.Leave,
+            QEvent.Type.MouseButtonPress,
+            QEvent.Type.Wheel,
+        ):
+            if self._overlay is not None and self._overlay.isVisible():
+                self._overlay.hide()
+        return False
+
+
 class MainWindow(QMainWindow):
     def __init__(self, db: BibleDatabase, config: AppConfig):
         super().__init__()
         self.db = db
         self.config = config
+        # 监听全局 tooltip 事件：自绘圆角卡片替代原生 QTipLabel
+        self._tip_rounder = _TipController()
+        QApplication.instance().installEventFilter(self._tip_rounder)
         self.extension_window = None
         self._syncing_scroll = False
         self.current_book = None
@@ -155,8 +252,9 @@ class MainWindow(QMainWindow):
     def _deferred_startup(self):
         # 切到上次使用的圣经版本（需在 UI 就绪后；历史随后按新库回填）
         self._apply_saved_bible_file()
-        self.nav_panel.load_history(self.config.load_history())
+        # 先接线再加载：load_history 对旧条目补译本标记后的广播要写入 config
         self.nav_panel.history_changed.connect(self._save_history)
+        self.nav_panel.load_history(self.config.load_history())
         # 启动默认停在「历史」tab，便于直接恢复上次位置
         self.nav_panel.show_history_tab()
         # 屏幕插拔即时重估单屏/多屏形态
@@ -185,6 +283,8 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(sheet)
+            # 自绘 tooltip 跟随主题
+            self._tip_rounder.theme = self.theme
         tokens = theme_tokens(self.theme)
         if hasattr(self, "preview_host"):
             self.preview_host.apply_theme(tokens)
@@ -242,7 +342,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(right)
         splitter.setSizes([320, 880])
         splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(1, 3)
         splitter.setHandleWidth(1)
         self.main_splitter = splitter
         outer.addWidget(splitter, 1)
@@ -543,32 +643,19 @@ class MainWindow(QMainWindow):
         if getattr(self, "_fullscreen_transitioning", False):
             return
         if self._main_fullscreen:
-            # 盖板先上屏并等 DWM 真正合成，再在盖板底下完成窗口切换
-            from PyQt6.QtWidgets import QLabel
-
-            cover = QWidget(
-                None,
-                Qt.WindowType.FramelessWindowHint
-                | Qt.WindowType.Tool
-                | Qt.WindowType.WindowStaysOnTopHint
-                | Qt.WindowType.WindowTransparentForInput,
-            )
-            cover.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-            pic = QLabel(cover)
-            pic.setPixmap(self.grab())
-            pic.setScaledContents(True)
-            pic.resize(self.geometry().size())
-            cover.setGeometry(self.geometry())
-            cover.show()
-            cover.raise_()
             self._main_fullscreen = False
             self._fullscreen_transitioning = True
-            # 80ms ≈ 5 个合成周期：确保盖板已被 DWM 画上屏幕
-            QTimer.singleShot(80, lambda: self._finish_exit_fullscreen(cover))
+            self._finish_exit_fullscreen()
             return
         editor = getattr(self, "_sermon_editor", None)
         if editor is not None and editor.isVisible() and hasattr(editor, "request_close"):
             editor.request_close()
+        # 全屏是纯经文画面：导航与搜索面板一并隐藏；退出按快照恢复原布局
+        self._pre_fullscreen_sizes = self.main_splitter.sizes()[:]
+        panel = getattr(self, "_scripture_search_widget", None)
+        self._pre_fullscreen_panel_visible = bool(panel is not None and panel.isVisible())
+        if panel is not None:
+            panel.hide()
         self.toolbar.hide()
         self.nav_panel.hide()
         self.statusBar().hide()
@@ -583,25 +670,60 @@ class MainWindow(QMainWindow):
         # 显示面尺寸突变：重估 fill 缩放（否则字号仍冻结在全屏前的小窗口刻度）
         QTimer.singleShot(120, self.scripture_display.recalibrate_fill_scale)
 
-    def _finish_exit_fullscreen(self, cover):
-        """盖板已上屏：在盖板底下清除全屏态，然后揭盖板。"""
-        # 窗口必须保持可见：Windows 上隐藏状态下恢复原生边框会失效，
-        # 导致之后再最大化丢标题栏。盖板在最上层，中间态用户看不到。
-        self.setWindowState(Qt.WindowState.WindowNoState)
+    def _finish_exit_fullscreen(self):
+        """退出全屏：Win32 层一步「恢复边框 + 最大化」，杜绝普通窗口中间态。
+
+        Qt 的 state 切换（直切或 NoState 中转）在 Windows 上都会先落到普通
+        窗口几何再最大化，中间帧就是反复出现的闪烁。原生 API 在同一帧内
+        恢复边框样式并最大化，普通几何从不落屏；Qt 收到 WM_SIZE 后会
+        自动把窗口态同步成 Maximized。"""
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        GWL_STYLE = -16
+        WS_CAPTION = 0x00C00000
+        WS_THICKFRAME = 0x00040000
+        WS_SYSMENU = 0x00080000
+        WS_MINIMIZEBOX = 0x00020000
+        WS_MAXIMIZEBOX = 0x00010000
+        SWP_NOSIZE, SWP_NOMOVE, SWP_NOZORDER, SWP_FRAMECHANGED = 0x1, 0x2, 0x4, 0x20
+        SW_SHOWMAXIMIZED, SW_SHOWNORMAL = 3, 1
+
+        hwnd = int(self.winId())
+        get_long = getattr(user32, "GetWindowLongPtrW", user32.GetWindowLongW)
+        set_long = getattr(user32, "SetWindowLongPtrW", user32.SetWindowLongW)
+        try:
+            style = get_long(hwnd, GWL_STYLE)
+            style |= WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX
+            set_long(hwnd, GWL_STYLE, style)
+            user32.SetWindowPos(
+                hwnd, None, 0, 0, 0, 0,
+                SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED,
+            )
+            maximize = bool(
+                self._pre_fullscreen_state & Qt.WindowState.WindowMaximized
+            )
+            user32.ShowWindow(hwnd, SW_SHOWMAXIMIZED if maximize else SW_SHOWNORMAL)
+        except Exception:
+            # 原生调用失败兜底：退回 Qt 直切（至少能退出全屏）
+            self.setWindowState(self._pre_fullscreen_state)
         self.toolbar.show()
         self.nav_panel.show()
         self.statusBar().show()
+        panel = getattr(self, "_scripture_search_widget", None)
+        if panel is not None and getattr(self, "_pre_fullscreen_panel_visible", False):
+            panel.show()
         self.toolbar.set_extend_active(False)
         self.preview_host.set_fullscreen_hint(False)
         self._fullscreen_transitioning = False
         self.status_label.setText("已退出全屏")
-        # 边框重建完成后再回到进入全屏前的状态（通常是最大化）
-        if self._pre_fullscreen_state & Qt.WindowState.WindowMaximized:
-            QTimer.singleShot(
-                60, lambda: self.setWindowState(Qt.WindowState.WindowMaximized)
-            )
-        # 真窗口完成首帧绘制后揭盖板
-        QTimer.singleShot(200, cover.deleteLater)
+        # 窗口几何落定后按快照恢复分割条：全屏期间归零的导航面板
+        # 不会被 splitter 当成折叠态丢掉
+        def _restore_splitter():
+            sizes = getattr(self, "_pre_fullscreen_sizes", None)
+            if sizes:
+                self.main_splitter.setSizes(sizes)
+        QTimer.singleShot(60, _restore_splitter)
         # 显示面恢复：重估 fill 缩放（全屏时字号被放大过，退出后回到窗口刻度）
         QTimer.singleShot(220, self.scripture_display.recalibrate_fill_scale)
 
@@ -783,11 +905,11 @@ class MainWindow(QMainWindow):
         self.nav_panel.refresh_books()
         if new_selection is not None:
             self.nav_panel.sync_from_selection(new_selection)
-        # 全文搜索的旧结果已过时，直接清空
+        # 全文搜索：旧结果与范围过时，清空并按新译本重建书卷列表
         panel = getattr(self, "_scripture_search_widget", None)
-        if panel is not None and hasattr(panel, "_clear_results"):
+        if panel is not None and hasattr(panel, "on_bible_changed"):
             try:
-                panel._clear_results()
+                panel.on_bible_changed()
             except Exception:
                 pass
         version_name = next(
@@ -991,28 +1113,21 @@ class MainWindow(QMainWindow):
         geom = screen.geometry()
         return screen_choice_label(index, geom.width(), geom.height())
 
-    def _fill_extend_screen_menu(self, menu):
-        menu.clear()
+    def _fill_extend_screen_menu(self, popup):
+        """填充「扩展显示」屏幕选择自绘浮层（toolbar.ExtendScreenPopup）。"""
+        popup.clear_items()
         extras = self._output_screens()
         if not extras:
-            act = menu.addAction("未检测到第二块屏幕")
-            act.setEnabled(False)
+            popup.add_item("未检测到第二块屏幕", enabled=False)
             return
         current = self._extension_screen_name or extras[0].name()
-        default = None
-        group = QActionGroup(menu)
-        group.setExclusive(True)
         for i, screen in enumerate(extras, start=1):
-            act = menu.addAction(self._screen_choice_label(screen, i))
-            act.setCheckable(True)
-            act.setData(screen.name())
-            act.setToolTip(screen.name())
-            act.setChecked(screen.name() == current)
-            group.addAction(act)
-            if screen.name() == current:
-                default = act
-        if default is not None:
-            menu.setDefaultAction(default)
+            popup.add_item(
+                self._screen_choice_label(screen, i),
+                data=screen.name(),
+                checked=screen.name() == current,
+                tooltip=screen.name(),
+            )
 
     def _on_extend_screen_picked(self, name: str):
         self._remember_extension_screen(name)
@@ -1722,7 +1837,7 @@ class MainWindow(QMainWindow):
         for index, item in enumerate(history):
             if item == old_selection:
                 history[index] = new_selection
-                self.nav_panel._update_history_list(selected_index=index)
+                self.nav_panel.update_history_entry(index, new_selection)
                 self.nav_panel.history_changed.emit(
                     [entry.to_history_entry() for entry in history]
                 )

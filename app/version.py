@@ -2,7 +2,7 @@
 
 APP_NAME = "Bible Pro"
 APP_VERSION = "3.3.0"
-APP_BUILD = "B20261119"
+APP_BUILD = "B20261120"
 
 # 自动更新：版本信息读 GitHub；安装包经 gh-proxy 加速下载
 GITHUB_OWNER = "XiaoDong1213"

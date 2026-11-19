@@ -193,6 +193,11 @@ def build_stylesheet(name: str = "dark", styles_dir: str | Path | None = None) -
     """生成完整应用 QSS。"""
     t = theme_tokens(name)
     r = RADIUS
+    # 顶层浮层（菜单/tooltip）的边框用低透明度淡色：深色主题边框色在
+    # 白底菜单上像一圈黑边
+    menu_border = (
+        "rgba(51, 65, 85, 0.20)" if name == "light" else "rgba(203, 213, 225, 0.18)"
+    )
     styles_dir = Path(styles_dir) if styles_dir else default_styles_dir()
     suffix = "dark" if name == "dark" else "light"
     # 使用正斜杠，避免 QSS url 在 Windows 上转义问题
@@ -253,7 +258,8 @@ QMenuBar::item:pressed {{
 QMenu {{
     background: {t['surface_raised']};
     color: {t['text']};
-    border: 1px solid {t['border']};
+    border: 1px solid {menu_border};
+    border-radius: {r['md']}px;
     padding: 4px;
 }}
 QMenu::item {{
@@ -274,6 +280,29 @@ QMenu::separator {{
     height: 1px;
     background: {t['border']};
     margin: 4px 8px;
+}}
+/* 自绘下拉浮层里的菜单项（工具栏「扩展显示」屏幕选择），
+   容器底色由 DwmBorderlessCard 自绘，这里只管条目 */
+#menuPopupItem {{
+    background: transparent;
+    color: {t['text']};
+    border: none;
+    border-radius: {r['sm']}px;
+    padding: 7px 14px;
+    min-height: 28px;
+    text-align: left;
+    font-size: 13px;
+}}
+#menuPopupItem:hover:enabled {{
+    background: {t['accent_soft']};
+    color: {t['accent_text']};
+}}
+#menuPopupItem:checked {{
+    color: {t['accent']};
+    font-weight: 600;
+}}
+#menuPopupItem:disabled {{
+    color: {t['text_faint']};
 }}
 
 /* ---------- Toolbar ---------- */
@@ -472,25 +501,20 @@ QDialog#aboutDialog QPushButton#helpCloseBtn:pressed {{
 }}
 
 /* ---------- Scripture search scope dialog ---------- */
-QDialog#scriptureScopeDialog {{
+QWidget#scriptureScopePanel {{
     background: {t['surface_raised']};
     color: {t['text']};
 }}
-QDialog#scriptureScopeDialog QLabel#scopeDialogTitle {{
-    color: {t['text']};
-    font-size: 18px;
-    font-weight: 600;
-}}
-QDialog#scriptureScopeDialog QLabel#scopeDialogHint {{
+QWidget#scriptureScopePanel QLabel#scopeDialogHint {{
     color: {t['text_muted']};
     font-size: 12px;
 }}
-QDialog#scriptureScopeDialog QLabel#scopeTitle {{
+QWidget#scriptureScopePanel QLabel#scopeTitle {{
     color: {t['text']};
     font-size: 14px;
     font-weight: 600;
 }}
-QDialog#scriptureScopeDialog QLineEdit#scopeFilter {{
+QWidget#scriptureScopePanel QLineEdit#scopeFilter {{
     background: {t['control']};
     color: {t['text']};
     border: 1px solid {t['border']};
@@ -498,10 +522,10 @@ QDialog#scriptureScopeDialog QLineEdit#scopeFilter {{
     padding: 0 14px;
     min-height: 40px;
 }}
-QDialog#scriptureScopeDialog QLineEdit#scopeFilter:focus {{
+QWidget#scriptureScopePanel QLineEdit#scopeFilter:focus {{
     border: 1px solid {t['focus_ring']};
 }}
-QDialog#scriptureScopeDialog QPushButton#scopeAction {{
+QWidget#scriptureScopePanel QPushButton#scopeAction {{
     background: {t['control']};
     color: {t['text_muted']};
     border: 1px solid {t['border']};
@@ -509,53 +533,46 @@ QDialog#scriptureScopeDialog QPushButton#scopeAction {{
     padding: 0 14px;
     min-height: 28px;
 }}
-QDialog#scriptureScopeDialog QPushButton#scopeAction:hover {{
+QWidget#scriptureScopePanel QPushButton#scopeAction:hover {{
     background: {t['control_hover']};
     color: {t['text']};
     border-color: {t['border_strong']};
 }}
-QDialog#scriptureScopeDialog QFrame#scopeChipPanel {{
+QWidget#scriptureScopePanel QFrame#scopeChipPanel {{
     background: {t['surface_sunken']};
     border: 1px solid {t['border']};
     border-radius: 16px;
 }}
-QDialog#scriptureScopeDialog QScrollArea#scopeChipScroll {{
+QWidget#scriptureScopePanel QScrollArea#scopeChipScroll {{
     background: transparent;
     border: none;
 }}
-QDialog#scriptureScopeDialog QWidget#scopeChipContainer {{
+QWidget#scriptureScopePanel QWidget#scopeChipContainer {{
     background: transparent;
 }}
-QDialog#scriptureScopeDialog QPushButton#scopeBookChip {{
+QWidget#scriptureScopePanel QPushButton#scopeBookChip {{
     background: {t['control']};
     color: {t['text']};
     border: 1px solid {t['border']};
-    border-radius: 18px;
-    padding: 0 14px;
+    border-radius: 16px;
+    padding: 0 10px;
     font-size: 13px;
-    min-height: 36px;
-    max-height: 36px;
-    min-width: 140px;
+    min-height: 32px;
+    max-height: 32px;
     outline: none;
 }}
-QDialog#scriptureScopeDialog QPushButton#scopeBookChip:hover {{
+QWidget#scriptureScopePanel QPushButton#scopeBookChip:hover {{
     background: {t['control_hover']};
     border-color: {t['border_strong']};
 }}
-QDialog#scriptureScopeDialog QPushButton#scopeBookChip:checked {{
+QWidget#scriptureScopePanel QPushButton#scopeBookChip:checked {{
     background: {t['accent']};
     color: #FFFFFF;
     border: 1px solid {t['accent']};
     font-weight: 600;
 }}
-QDialog#scriptureScopeDialog QPushButton#scopeBookChip:checked:hover {{
+QWidget#scriptureScopePanel QPushButton#scopeBookChip:checked:hover {{
     background: {t['accent_hover']};
-}}
-QDialog#scriptureScopeDialog QDialogButtonBox QPushButton {{
-    min-width: 88px;
-    min-height: 36px;
-    border-radius: 12px;
-    padding: 0 16px;
 }}
 
 #mainToolBar QPushButton:hover {{
@@ -1223,13 +1240,6 @@ QScrollBar::sub-page:horizontal {{
     background: none;
 }}
 
-QToolTip {{
-    background: {t['surface_raised']};
-    color: {t['text']};
-    border: 1px solid {t['border']};
-    padding: 6px 8px;
-    border-radius: {r['sm']}px;
-}}
 """
     # 讲篇模块：会话底栏 / 演讲者视图 / 主栏入口（编辑器另叠完整主题）
     try:

@@ -1,6 +1,7 @@
 """单章/跨章/跳节内容联动：模式切换迁移、历史/搜索定位广播、信息行两行结构。"""
 
 import sys
+from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
 
@@ -11,6 +12,56 @@ from core.selection import ScriptureSelection
 from ui.navigation.panel import NavigationPanel
 
 _DB = BibleDatabase()
+
+
+def test_load_history_backfills_bible_file():
+    """旧条目缺译本标记：加载时补当前译本并广播固化。"""
+    p = _panel()
+    got = []
+    p.history_changed.connect(lambda entries: got.append(entries))
+    p.load_history([
+        {"book": "创世记", "spans": [{"c": 1, "s": 1, "e": 3}]},
+    ])
+    assert len(p.history) == 1
+    assert getattr(p.history[0], "bible_file", "") == Path(_DB.db_path).name
+    # 广播出去的条目已带标记（连接在 load 之后建立也应收到本轮固化）
+    assert len(got) == 1
+    assert got[0][0].get("bible_file")
+
+
+def test_delete_to_single_version_drops_tag():
+    """删到只剩一个译本时，剩余行的译本标注去掉（增量改文字不重建）。"""
+    p = _panel()
+    p.load_history([
+        {"book": "创世记", "spans": [{"c": 1, "s": 1, "e": 3}], "bible_file": "思高本.db"},
+        {"book": "创世记", "spans": [{"c": 2, "s": 1, "e": 3}], "bible_file": "和合本.db"},
+    ])
+    # 两个译本：行文字带标注
+    assert "（思高本）" in p.history_list._rows[0].label.text()
+    p._delete_history(p.history_list._rows[0])
+    # 只剩和合本：标注消失、行数减一
+    assert len(p.history_list._rows) == 1
+    assert "（和合本）" not in p.history_list._rows[0].label.text()
+    assert "创世记 2:1-3" in p.history_list._rows[0].label.text()
+
+
+def test_add_history_incremental_reuses_row():
+    """打开经文入历史：新条目插顶、重访复用同一行 widget（不整列重建）。"""
+    p = _panel()
+    sel1 = ScriptureSelection.single_chapter("创世记", 1, 1, 3)
+    sel2 = ScriptureSelection.single_chapter("出埃及记", 2, 1, 5)
+    p.add_selection_to_history(sel1)
+    p.add_selection_to_history(sel2)
+    assert [r.label.text() for r in p.history_list._rows] == [
+        "出埃及记 2:1-5",
+        "创世记 1:1-3",
+    ]
+    # 重访创世记：原行 widget 被挪到顶部（同一对象，未销毁重建）
+    old_row = p.history_list._rows[1]
+    p.add_selection_to_history(sel1)
+    assert p.history_list._rows[0] is old_row
+    assert p.history_list._rows[0].label.text() == "创世记 1:1-3"
+    assert len(p.history_list._rows) == 2
 
 
 def _panel():

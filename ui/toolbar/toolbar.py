@@ -7,11 +7,11 @@ from PyQt6.QtWidgets import (
     QHBoxLayout, QVBoxLayout, QSpinBox, QColorDialog,
     QFileDialog, QLineEdit, QDialogButtonBox, QWidget, QSizePolicy,
     QTabWidget, QGroupBox, QFrame, QGridLayout, QComboBox, QCompleter,
-    QToolButton, QMenu, QStyledItemDelegate, QStyle, QCheckBox,
+    QToolButton, QStyledItemDelegate, QStyle, QCheckBox,
     QAbstractButton, QButtonGroup,
 )
 from PyQt6.QtCore import (
-    Qt, QSize, QStringListModel, QTimer, QPointF, QEvent, QRectF, pyqtSignal,
+    Qt, QSize, QStringListModel, QTimer, QPointF, QPoint, QEvent, QRectF, pyqtSignal,
 )
 from PyQt6.QtGui import (
     QFont, QFontDatabase, QColor, QPainter, QPen, QFontMetrics, QFontMetricsF,
@@ -20,7 +20,7 @@ from PyQt6.QtGui import (
 
 from app.version import APP_VERSION
 from core.bible_versions import available_bible_versions
-from ui.themes import theme_tokens
+from ui.themes import theme_tokens, DwmBorderlessCard
 
 
 # 全进程共用一份字体列表，避免打开设置时扫 5 遍
@@ -250,6 +250,44 @@ class ProjectionBadge(QWidget):
         painter.drawEllipse(QPointF(start_x + 4, center_y), 4.0, 4.0)
         painter.setPen(fg)
         painter.drawText(QPointF(start_x + 8 + 8, baseline), self._text)
+
+
+class ExtendScreenPopup(DwmBorderlessCard):
+    """「扩展显示」屏幕选择浮层：自绘列表替代 QMenu。
+    Qt6 会给 QMenu/Popup 窗口套一层带直角边框的投影层，圆角外就是那圈框；
+    DwmBorderlessCard 无此问题，点击外部关闭由它自带的 popup 语义处理。"""
+
+    item_picked = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent, radius=10)
+        self._list = QVBoxLayout(self)
+        self._list.setContentsMargins(6, 6, 6, 6)
+        self._list.setSpacing(2)
+        self.setMinimumWidth(180)
+
+    def clear_items(self):
+        while self._list.count():
+            it = self._list.takeAt(0)
+            w = it.widget()
+            if w is not None:
+                w.deleteLater()
+
+    def add_item(self, text, *, data=None, checked=False, enabled=True, tooltip=""):
+        """加一项；data 非空即为可选屏幕（可勾选，点击发 item_picked）。"""
+        btn = QPushButton(str(text))
+        btn.setObjectName("menuPopupItem")
+        btn.setCheckable(data is not None)
+        btn.setChecked(checked)
+        btn.setEnabled(enabled)
+        if enabled:
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setToolTip(str(tooltip))
+        if data is not None:
+            btn.clicked.connect(
+                lambda _checked=False, name=str(data): self.item_picked.emit(name)
+            )
+        self._list.addWidget(btn)
 
 
 class ToolbarButton(QPushButton):
@@ -1317,14 +1355,11 @@ class ToolBarWidget(QWidget):
         self.extend_arrow.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self.extend_arrow.setArrowType(Qt.ArrowType.NoArrow)
         self.extend_arrow.setText("▾")
-        self.extend_arrow.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.extend_arrow.setToolTip("选择投影屏幕")
-        self.extend_menu = QMenu(self.extend_arrow)
-        self.extend_arrow.setMenu(self.extend_menu)
-        self.extend_menu.aboutToShow.connect(
-            lambda: self.prepare_extend_menu.emit(self.extend_menu)
-        )
-        self.extend_menu.triggered.connect(self._emit_extend_screen)
+        # 自绘下拉浮层：不用 QMenu——Qt6 给 QMenu/Popup 套直角投影层（黑框来源）
+        self.extend_popup = ExtendScreenPopup(self.extend_arrow)
+        self.extend_popup.item_picked.connect(self.extend_screen_picked.emit)
+        self.extend_arrow.clicked.connect(self.popup_extend_screen_menu)
         extend_row.addWidget(self.extend_btn)
         extend_row.addWidget(self.extend_arrow)
         self.extend_wrap = extend_wrap
@@ -1420,10 +1455,11 @@ class ToolBarWidget(QWidget):
             self.mode_badge.setToolTip(tip)
 
     def set_theme(self, theme):
-        """主题切换时同步胶囊配色（全局 QSS 重载不会通知自绘控件）。"""
+        """主题切换时同步胶囊/浮层配色（全局 QSS 重载不会通知自绘控件）。"""
         self.theme = str(theme or "dark")
         if self.mode_badge is not None:
             self.mode_badge.set_theme(self.theme)
+        self.extend_popup.set_theme(self.theme)
 
     def load_settings(self, settings):
         self.settings = dict(settings)
@@ -1585,16 +1621,23 @@ class ToolBarWidget(QWidget):
         return self._speed
 
     def popup_extend_screen_menu(self):
-        self.prepare_extend_menu.emit(self.extend_menu)
+        """弹出屏幕选择浮层（非阻塞）：左对齐「扩展显示」按钮下缘，屏幕防溢出。"""
+        popup = self.extend_popup
+        popup.clear_items()
+        self.prepare_extend_menu.emit(popup)
+        popup.adjustSize()
         origin = self.extend_wrap.mapToGlobal(self.extend_wrap.rect().bottomLeft())
-        self.extend_menu.exec(origin)
-
-    def _emit_extend_screen(self, action):
-        if action is None or not action.isEnabled():
-            return
-        name = action.data()
-        if name:
-            self.extend_screen_picked.emit(str(name))
+        pos = QPoint(origin)
+        screen = self.window().screen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            if pos.x() + popup.width() > avail.right():
+                pos.setX(avail.right() - popup.width())
+            if pos.y() + popup.height() > avail.bottom():
+                # 下方放不下就翻到按钮上方
+                pos.setY(origin.y() - popup.height() - 6)
+        popup.move(pos)
+        popup.show()
 
     def set_extend_active(self, active):
         self._extend_active = bool(active)

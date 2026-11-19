@@ -1,9 +1,7 @@
 import re
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QDialog,
-    QDialogButtonBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -126,38 +124,44 @@ def search_scripture(db, query, books=None, limit=10, offset=0, mode=MODE_GAP, *
     return total, result
 
 
-class BookScopeDialog(QDialog):
-    """选择经文搜索范围（chip 点选，无复选框）。"""
+class BookScopePanel(QWidget):
+    """内嵌书卷范围选择：嵌在搜索面板里，点「全部书卷」展开/收起，勾选实时生效。"""
 
-    CHIP_COLS = 2
+    scope_changed = pyqtSignal(set)
+    close_requested = pyqtSignal()
 
-    def __init__(self, db, selected=None, parent=None, theme="dark"):
+    CHIP_COLS = 1  # 内嵌面板窄：每列单排，竖向滚动
+    CHIP_VISIBLE_ROWS = 6  # 一屏固定显示 6 行，多余靠滚轮滚（不显示滚动条）
+
+    def __init__(self, db, selected=None, theme="dark", parent=None):
         super().__init__(parent)
         self.db = db
         self.selected = set(selected or [])
         self.theme = theme if theme in ("dark", "light") else "dark"
         self._chips = {}
         self._chip_meta = {}
-        self.setObjectName("scriptureScopeDialog")
-        self.setWindowTitle("选择搜索范围")
-        self.setMinimumSize(820, 600)
-        self.resize(880, 640)
+        self.setObjectName("scriptureScopePanel")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._build_ui()
-        self._apply_style()
         self._update_count()
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 20, 20, 18)
-        root.setSpacing(12)
+        root.setContentsMargins(4, 4, 4, 4)
+        root.setSpacing(8)
 
-        heading = QLabel("选择搜索范围")
-        heading.setObjectName("scopeDialogTitle")
-        root.addWidget(heading)
-
+        top = QHBoxLayout()
+        top.setSpacing(8)
         self.count_label = QLabel("")
         self.count_label.setObjectName("scopeDialogHint")
-        root.addWidget(self.count_label)
+        top.addWidget(self.count_label, 1)
+        close_btn = QPushButton("收起")
+        close_btn.setObjectName("scopeAction")
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setFixedHeight(28)
+        close_btn.clicked.connect(self.close_requested.emit)
+        top.addWidget(close_btn)
+        root.addLayout(top)
 
         presets = QHBoxLayout()
         presets.setSpacing(8)
@@ -170,7 +174,7 @@ class BookScopeDialog(QDialog):
             btn = QPushButton(text)
             btn.setObjectName("scopeAction")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setFixedHeight(32)
+            btn.setFixedHeight(28)
             btn.clicked.connect(handler)
             presets.addWidget(btn)
         presets.addStretch(1)
@@ -182,58 +186,70 @@ class BookScopeDialog(QDialog):
         self.filter_input.textChanged.connect(self._filter_books)
         root.addWidget(self.filter_input)
 
-        columns = QHBoxLayout()
-        columns.setSpacing(16)
-        for title, category in (("旧约", "old"), ("新约", "new")):
-            columns.addWidget(self._build_category_column(title, category), 1)
-        root.addLayout(columns, 1)
+        self.columns_layout = QHBoxLayout()
+        self.columns_layout.setSpacing(10)
+        self._build_columns()
+        root.addLayout(self.columns_layout, 1)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Cancel
-            | QDialogButtonBox.StandardButton.Ok
-        )
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("确定")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        root.addWidget(buttons)
+        # 整个范围面板按「6 行书卷」的内容高定上限：面板空间富余时也不多露行
+        self.setMaximumHeight(self.sizeHint().height())
+
+    def _build_columns(self):
+        """（重新）构建旧约/新约两列；换译本后卷数与名称会不同。"""
+        while self.columns_layout.count():
+            item = self.columns_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        self._chips = {}
+        self._chip_meta = {}
+        for title, category in (("旧约", "old"), ("新约", "new")):
+            self.columns_layout.addWidget(self._build_category_column(title, category), 1)
+
+    def rebuild(self, db, selected=None):
+        """译本切换后重建书卷列表；未指定则清空已选范围。"""
+        self.db = db
+        self.selected = set(selected or [])
+        self._build_columns()
+        self._emit_change()
 
     def _build_category_column(self, title, category):
         box = QWidget()
         layout = QVBoxLayout(box)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(6)
 
-        header = QHBoxLayout()
+        # 列头只留标题：全选/清空与顶部预设行功能重复，挤在标题旁也不整齐
         label = QLabel(title)
         label.setObjectName("scopeTitle")
-        header.addWidget(label, 1)
-        select_all = QPushButton("全选")
-        clear = QPushButton("清空")
-        select_all.setObjectName("scopeAction")
-        clear.setObjectName("scopeAction")
-        select_all.setFixedHeight(28)
-        clear.setFixedHeight(28)
-        select_all.setCursor(Qt.CursorShape.PointingHandCursor)
-        clear.setCursor(Qt.CursorShape.PointingHandCursor)
-        select_all.clicked.connect(lambda: self._set_category(category, True))
-        clear.clicked.connect(lambda: self._set_category(category, False))
-        header.addWidget(select_all)
-        header.addWidget(clear)
-        layout.addLayout(header)
+        layout.addWidget(label)
 
         scroll = QScrollArea()
         scroll.setObjectName("scopeChipScroll")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # 固定可视 6 行：让展开面积矮下来，多余书卷靠滚轮滚（不显示滚动条）
+        scroll.setFixedHeight(
+            12 + self.CHIP_VISIBLE_ROWS * 32 + (self.CHIP_VISIBLE_ROWS - 1) * 6
+        )
 
         container = QWidget()
         container.setObjectName("scopeChipContainer")
+        # 容器必须跟随列宽拉伸：否则容器停在内容宽，chip 超出/视差滚动时边缘被裁
+        container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         grid = QGridLayout(container)
-        grid.setContentsMargins(10, 10, 10, 10)
-        grid.setSpacing(10)
-        grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        grid.setContentsMargins(6, 6, 6, 6)
+        grid.setSpacing(6)
+        grid.setAlignment(Qt.AlignmentFlag.AlignTop)
+        rows = len(self.db.get_books(category))
+        # 显式锁内容高：DPI 舍入下 widgetResizable 若把容器算矮一点，
+        # 滚动终点就吃掉最后一卷（玛拉基书/启示录）
+        container.setMinimumHeight(12 + rows * 32 + (rows - 1) * 6)
+        grid.setContentsMargins(6, 6, 6, 6)
+        grid.setSpacing(6)
+        grid.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         for i, (book, short) in enumerate(self.db.get_books(category)):
             chip = QPushButton(book)
@@ -242,8 +258,9 @@ class BookScopeDialog(QDialog):
             chip.setChecked(book in self.selected)
             chip.setCursor(Qt.CursorShape.PointingHandCursor)
             chip.setToolTip(f"{book}（{short}）" if short else book)
-            chip.setFixedHeight(36)
-            chip.setMinimumWidth(140)
+            # 单行书卷：按钮天然单行不折行，高度固定、宽度随列自适应（极窄时保底不裁字）
+            chip.setFixedHeight(32)
+            chip.setMinimumWidth(110)
             chip.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
             chip.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             chip.toggled.connect(lambda _checked, b=book: self._on_chip_toggled(b))
@@ -271,21 +288,7 @@ class BookScopeDialog(QDialog):
             self.selected.add(book)
         else:
             self.selected.discard(book)
-        self._update_count()
-
-    def _set_category(self, category, checked):
-        for book, chip in self._chips.items():
-            meta = self._chip_meta.get(book)
-            if not meta or meta[0] != category:
-                continue
-            chip.blockSignals(True)
-            chip.setChecked(checked)
-            chip.blockSignals(False)
-            if checked:
-                self.selected.add(book)
-            else:
-                self.selected.discard(book)
-        self._update_count()
+        self._emit_change()
 
     def _select_all(self):
         for book, chip in self._chips.items():
@@ -293,7 +296,7 @@ class BookScopeDialog(QDialog):
             chip.setChecked(True)
             chip.blockSignals(False)
             self.selected.add(book)
-        self._update_count()
+        self._emit_change()
 
     def _clear_all(self):
         for book, chip in self._chips.items():
@@ -301,7 +304,7 @@ class BookScopeDialog(QDialog):
             chip.setChecked(False)
             chip.blockSignals(False)
         self.selected.clear()
-        self._update_count()
+        self._emit_change()
 
     def _select_category(self, category):
         for book, chip in self._chips.items():
@@ -314,7 +317,7 @@ class BookScopeDialog(QDialog):
                 self.selected.add(book)
             else:
                 self.selected.discard(book)
-        self._update_count()
+        self._emit_change()
 
     def _filter_books(self, text):
         q = text.strip().lower()
@@ -327,14 +330,14 @@ class BookScopeDialog(QDialog):
         n = len(self.selected)
         total = len(self._chips)
         if n == 0 or n == total:
-            self.count_label.setText(f"当前：全部书卷（共 {total} 卷）· 点选 chip 切换")
+            self.count_label.setText(f"当前：全部书卷（共 {total} 卷）")
         else:
-            self.count_label.setText(f"已选 {n} / {total} 卷 · 点选 chip 切换")
+            self.count_label.setText(f"已选 {n} / {total} 卷")
 
     def selected_books(self):
         return {book for book, chip in self._chips.items() if chip.isChecked()}
 
-    def _apply_style(self):
-        # 圆角写在全局 stylesheet（QDialog#scriptureScopeDialog …），
-        # 这里不再 setStyleSheet，避免冲掉 app 样式。
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+    def _emit_change(self):
+        """勾选/预设变化：刷新计数并广播当前范围（实时生效）。"""
+        self._update_count()
+        self.scope_changed.emit(set(self.selected))
