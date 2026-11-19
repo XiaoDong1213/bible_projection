@@ -525,6 +525,9 @@ class ScriptureSearchWidget(QWidget):
             self._update_pager()
             return
         if pages:
+            if value - 1 == self.page:
+                self._update_pager()  # 同页：只把输入框文字恢复规范，不重复加载
+                return
             self.load_page(value - 1)
         self._update_pager()
 
@@ -555,7 +558,7 @@ class ScriptureSearchWidget(QWidget):
         avail = max(60, self.history_chips.width() - 8)
         self._pack_history_chips(self.history, avail)
 
-    def _pack_history_chips(self, words, avail, reserve=0):
+    def _pack_history_chips(self, words, avail):
         """按可用宽度把历史词装箱成单行胶囊，返回放下的个数；放不下的丢弃。"""
         used = 0
         count = 0
@@ -565,7 +568,7 @@ class ScriptureSearchWidget(QWidget):
             chip.delete_requested.connect(self._delete_history)
             w = chip.sizeHint().width()
             gap = 6 if count else 0
-            if used + gap + w > avail - reserve:
+            if used + gap + w > avail:
                 chip.deleteLater()
                 continue
             self.history_layout.addWidget(chip)
@@ -585,6 +588,10 @@ class ScriptureSearchWidget(QWidget):
         圆角外就是那圈黑框。Popup 语义下点击外部自动关闭。"""
         from ui.themes import DwmBorderlessCard
 
+        # 每次新建浮层：先把上一个删掉，避免多次打开在面板上堆积隐藏控件
+        old = getattr(self, "_history_overlay", None)
+        if old is not None:
+            old.deleteLater()
         overlay = DwmBorderlessCard(self, radius=10)
         overlay.set_theme(self.theme)
         v = QVBoxLayout(overlay)
@@ -620,7 +627,8 @@ class ScriptureSearchWidget(QWidget):
             if pos.x() + overlay.width() > avail.right():
                 pos.setX(avail.right() - overlay.width())
             if pos.y() + overlay.height() > avail.bottom():
-                pos.setY(btn.mapToGlobal(QPoint(0, 0)).y() - overlay.height() - 6)
+                # 下方放不下翻到按钮上方；按钮贴顶时也别翻出屏幕
+                pos.setY(max(avail.top(), btn.mapToGlobal(QPoint(0, 0)).y() - overlay.height() - 6))
         overlay.move(pos)
         overlay.show()
 
@@ -709,9 +717,6 @@ class ScriptureSearchWidget(QWidget):
             font-size:16px; font-weight:600;
         }}
         QPushButton#historyMoreButton:hover {{ color:{t['accent']}; }}
-        QWidget#historyMenuCard {{
-            background:{t['surface_raised']}; border:none; border-radius:10px;
-        }}
         QPushButton#historyMenuItem {{
             background:transparent; color:{t['text']}; border:none;
             border-radius:6px; padding:8px 24px 8px 14px;

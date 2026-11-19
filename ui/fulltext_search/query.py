@@ -247,9 +247,6 @@ class BookScopePanel(QWidget):
         # 显式锁内容高：DPI 舍入下 widgetResizable 若把容器算矮一点，
         # 滚动终点就吃掉最后一卷（玛拉基书/启示录）
         container.setMinimumHeight(12 + rows * 32 + (rows - 1) * 6)
-        grid.setContentsMargins(6, 6, 6, 6)
-        grid.setSpacing(6)
-        grid.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         for i, (book, short) in enumerate(self.db.get_books(category)):
             chip = QPushButton(book)

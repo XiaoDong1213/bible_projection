@@ -1623,6 +1623,9 @@ class ToolBarWidget(QWidget):
     def popup_extend_screen_menu(self):
         """弹出屏幕选择浮层（非阻塞）：左对齐「扩展显示」按钮下缘，屏幕防溢出。"""
         popup = self.extend_popup
+        if popup.isVisible():
+            popup.close()  # 点箭头 toggle：开着就收
+            return
         popup.clear_items()
         self.prepare_extend_menu.emit(popup)
         popup.adjustSize()
@@ -1634,8 +1637,8 @@ class ToolBarWidget(QWidget):
             if pos.x() + popup.width() > avail.right():
                 pos.setX(avail.right() - popup.width())
             if pos.y() + popup.height() > avail.bottom():
-                # 下方放不下就翻到按钮上方
-                pos.setY(origin.y() - popup.height() - 6)
+                # 下方放不下翻到按钮上方；工具栏贴顶时也别翻出屏幕
+                pos.setY(max(avail.top(), origin.y() - popup.height() - 6))
         popup.move(pos)
         popup.show()
 
