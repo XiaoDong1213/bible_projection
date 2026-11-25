@@ -32,12 +32,14 @@ CONTACT_TEXT = (
 )
 
 DATA_SUPPORT_URL = "https://biblepro.vip"
+SIGAO_SOURCE_URL = "https://www.wanyouzhenyuan.cn"
 
 CONTRIBUTORS_TEXT = (
     "感谢以下贡献者（排名不分先后）：\n"
     "Xiao Dong、JiangRTTTR\n"
     "也感谢每一位反馈意见与建议的弟兄姊妹。\n"
-    "感谢主内云实验室提供数据支持。"
+    "感谢主内云实验室提供数据支持。\n"
+    "经文数据来源：主内圣经；思高本另采万有真原。"
 )
 
 COPYRIGHT_TEXT = f"Copyright © 2026 Bible Pro · Version {APP_VERSION}"
@@ -115,13 +117,26 @@ class AboutDialog(QDialog):
 
         root.addWidget(self._make_section("📖 关于我们", ABOUT_TEXT))
         root.addWidget(self._make_section("📮 联系我们", CONTACT_TEXT))
-        # 致谢：主内云实验室带链接（biblepro.vip）
+        # 致谢：主内云实验室 + 数据来源（主内圣经 / 万有真原）带链接
         accent = theme_tokens(self._theme)["accent"]
-        link = (
+        link_lab = (
             f'<a style="color: {accent}; text-decoration: none;" '
             f'href="{DATA_SUPPORT_URL}">主内云实验室</a>'
         )
-        thanks_rich = CONTRIBUTORS_TEXT.replace("主内云实验室", link).replace(chr(10), "<br>")
+        link_zhunei = (
+            f'<a style="color: {accent}; text-decoration: none;" '
+            f'href="{DATA_SUPPORT_URL}">主内圣经</a>'
+        )
+        link_sigao = (
+            f'<a style="color: {accent}; text-decoration: none;" '
+            f'href="{SIGAO_SOURCE_URL}">万有真原</a>'
+        )
+        thanks_rich = (
+            CONTRIBUTORS_TEXT.replace("主内云实验室", link_lab)
+            .replace("主内圣经", link_zhunei)
+            .replace("万有真原", link_sigao)
+            .replace(chr(10), "<br>")
+        )
         root.addWidget(self._make_section("💛 致谢", thanks_rich, rich=True))
 
         doxology_label = QLabel("愿荣耀归于我们在天上的父！")

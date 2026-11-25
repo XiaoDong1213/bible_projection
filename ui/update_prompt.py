@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
+from PyQt6.QtCore import QObject, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -106,23 +106,39 @@ def _stop_thread(thread: QThread | None, timeout_ms: int = 8000) -> None:
 
 
 class UpdateOfferDialog(QDialog):
-    """仅询问是否后台下载，不含进度条。"""
+    """询问是否后台下载；force 时不可关闭，只能立即更新。"""
 
     def __init__(self, info: UpdateInfo, parent=None):
         super().__init__(parent)
         self._info = info
-        self.setWindowTitle("发现新版本")
+        self._force = bool(info.force)
+        self.setWindowTitle("重要更新" if self._force else "发现新版本")
         self.setMinimumWidth(440)
+        if self._force:
+            # 无标题栏关闭钮；Esc / Alt+F4 也拦下
+            self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
+            self.setWindowModality(Qt.WindowModality.ApplicationModal)
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 14)
         root.setSpacing(10)
-        title = QLabel(f"{APP_NAME} 有新版本可用")
+        title = QLabel(
+            f"{APP_NAME} 有重要更新，须升级后继续使用"
+            if self._force
+            else f"{APP_NAME} 有新版本可用"
+        )
         title.setStyleSheet("font-size: 15px; font-weight: 600;")
         root.addWidget(title)
-        meta = QLabel(
-            f"当前版本 {APP_VERSION}  →  最新 {info.version}\n"
-            "可后台下载，不影响继续使用；下载完成后会询问是否安装。"
-        )
+        if self._force:
+            meta_text = (
+                f"当前版本 {APP_VERSION}  →  最新 {info.version}\n"
+                "此版本含关键修复。请立即更新；下载与安装完成前不能关闭本程序。"
+            )
+        else:
+            meta_text = (
+                f"当前版本 {APP_VERSION}  →  最新 {info.version}\n"
+                "可后台下载，不影响继续使用；下载完成后会询问是否安装。"
+            )
+        meta = QLabel(meta_text)
         meta.setWordWrap(True)
         root.addWidget(meta)
         notes = str(getattr(info, "notes", "") or "").strip()
@@ -140,14 +156,88 @@ class UpdateOfferDialog(QDialog):
             self._notes_view = notes_view
         row = QHBoxLayout()
         row.addStretch(1)
-        later = QPushButton("稍后")
-        later.clicked.connect(self.reject)
-        download = QPushButton("后台下载")
+        if not self._force:
+            later = QPushButton("稍后")
+            later.clicked.connect(self.reject)
+            row.addWidget(later)
+        download = QPushButton("立即更新" if self._force else "后台下载")
         download.setDefault(True)
         download.clicked.connect(self.accept)
-        row.addWidget(later)
         row.addWidget(download)
         root.addLayout(row)
+
+    def reject(self) -> None:
+        if self._force:
+            return
+        super().reject()
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        if self._force:
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if self._force and event.key() in (
+            Qt.Key.Key_Escape,
+            Qt.Key.Key_Cancel,
+        ):
+            event.ignore()
+            return
+        super().keyPressEvent(event)
+
+
+class _ForceDownloadDialog(QDialog):
+    """强制更新下载中：应用模态、不可关，进度与底栏同步。"""
+
+    def __init__(self, version: str, parent=None):
+        super().__init__(parent)
+        self._allow_close = False
+        self.setWindowTitle("正在下载重要更新")
+        self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setMinimumWidth(360)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 14)
+        root.setSpacing(10)
+        self._label = QLabel(f"正在下载 {version}…\n请勿关闭程序。")
+        self._label.setWordWrap(True)
+        root.addWidget(self._label)
+        self._progress = QProgressBar()
+        self._progress.setRange(0, 100)
+        self._progress.setValue(0)
+        root.addWidget(self._progress)
+
+    def set_progress(self, done: int, total: int) -> None:
+        if total > 0:
+            pct = max(0, min(100, int(done * 100 / total)))
+            self._progress.setValue(pct)
+            self._label.setText(
+                f"正在下载… {done / (1024 * 1024):.1f}/{total / (1024 * 1024):.1f} MB\n"
+                "请勿关闭程序。"
+            )
+        else:
+            self._progress.setValue(min(95, self._progress.value() + 1))
+
+    def reject(self) -> None:
+        return
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        if self._allow_close:
+            event.accept()
+            return
+        event.ignore()
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if event.key() in (Qt.Key.Key_Escape, Qt.Key.Key_Cancel):
+            event.ignore()
+            return
+        super().keyPressEvent(event)
+
+    def force_close(self) -> None:
+        """下载结束由控制器关闭。"""
+        self._allow_close = True
+        self.close()
 
 
 class UpdateController(QObject):
@@ -161,6 +251,9 @@ class UpdateController(QObject):
         self._worker: _DownloadWorker | None = None
         self._cancel = threading.Event()
         self._busy = False
+        self._force = False
+        self._offering = False
+        self._force_dlg: _ForceDownloadDialog | None = None
         self._pending_setup: Path | None = None
         self._action = "cancel"  # cancel | install
 
@@ -202,13 +295,32 @@ class UpdateController(QObject):
     def has_pending_install(self) -> bool:
         return self._pending_setup is not None and self._pending_setup.is_file()
 
+    def blocks_app_close(self) -> bool:
+        """强制更新进行中（弹窗 / 下载 / 待装）时禁止关主窗口。"""
+        return self._force and (
+            self._offering or self._busy or self.has_pending_install()
+        )
+
     def shutdown(self) -> None:
         """窗口关闭前停下载线程，避免 QThread Destroyed while running。"""
         self._cancel.set()
+        self._close_force_dlg()
         _stop_thread(self._thread, timeout_ms=3000)
         self._thread = None
         self._worker = None
         self._busy = False
+
+    def _schedule_force_reoffer(self, info: UpdateInfo | None) -> None:
+        """失败后再弹：下一拍事件循环，避免同步递归堆栈。"""
+        if info is None or not info.force:
+            return
+        QTimer.singleShot(0, lambda: self.offer_and_maybe_download(info))
+
+    def _close_force_dlg(self) -> None:
+        dlg = self._force_dlg
+        self._force_dlg = None
+        if dlg is not None:
+            dlg.force_close()
 
     def offer_and_maybe_download(self, info: UpdateInfo) -> None:
         if self._busy:
@@ -217,8 +329,19 @@ class UpdateController(QObject):
         if self.has_pending_install():
             self.prompt_install()
             return
-        dlg = UpdateOfferDialog(info, self._window)
-        if dlg.exec() != QDialog.DialogCode.Accepted:
+        if self._offering:
+            return
+        self._force = bool(info.force)
+        self._info = info
+        self._offering = True
+        try:
+            dlg = UpdateOfferDialog(info, self._window)
+            accepted = dlg.exec() == QDialog.DialogCode.Accepted
+        finally:
+            self._offering = False
+        if not accepted:
+            if info.force:
+                self._schedule_force_reoffer(info)
             return
         self.start_download(info)
 
@@ -227,6 +350,7 @@ class UpdateController(QObject):
             return
         self._pending_setup = None
         self._info = info
+        self._force = bool(info.force)
         self._cancel.clear()
         self._busy = True
         self._action = "cancel"
@@ -234,10 +358,18 @@ class UpdateController(QObject):
         self._label.setVisible(True)
         self._progress.setValue(0)
         self._progress.setVisible(True)
-        self._action_btn.setText("取消")
-        self._action_btn.setStyleSheet(_CANCEL_QSS)
-        self._action_btn.setVisible(True)
-        self._action_btn.setEnabled(True)
+        if self._force:
+            # 强制更新：不提供取消；模态进度窗锁住主界面
+            self._action_btn.setVisible(False)
+            self._action_btn.setEnabled(False)
+            self._close_force_dlg()
+            self._force_dlg = _ForceDownloadDialog(info.version, self._window)
+            self._force_dlg.show()
+        else:
+            self._action_btn.setText("取消")
+            self._action_btn.setStyleSheet(_CANCEL_QSS)
+            self._action_btn.setVisible(True)
+            self._action_btn.setEnabled(True)
         if self._host_bar is not None:
             self._host_bar.clearMessage()
         label = getattr(self._window, "status_label", None)
@@ -274,6 +406,8 @@ class UpdateController(QObject):
         self._label.setText("正在取消…")
 
     def _on_progress(self, done: int, total: int) -> None:
+        if self._force_dlg is not None:
+            self._force_dlg.set_progress(done, total)
         if total > 0:
             pct = max(0, min(100, int(done * 100 / total)))
             self._progress.setValue(pct)
@@ -331,32 +465,54 @@ class UpdateController(QObject):
                 "安装更新",
                 "本地安装包已不存在，请重新检查更新并下载。",
             )
+            if self._force:
+                self._schedule_force_reoffer(self._info)
             return
         ver = self._info.version if self._info is not None else ""
-        reply = QMessageBox.question(
-            self._window,
-            "安装更新",
-            f"新版本 {ver} 已下载完成。\n是否现在安装？\n（安装时程序会退出；装完会自动删临时安装包）",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            # 保留底栏「安装」，别让人找不到入口
-            self._show_ready_chrome(setup, ver)
-            return
+        if self._force:
+            # 强制：下完必须装，不问「是否现在安装」
+            box = QMessageBox(self._window)
+            box.setIcon(QMessageBox.Icon.Information)
+            box.setWindowTitle("安装重要更新")
+            box.setText(
+                f"新版本 {ver} 已下载完成。\n"
+                "即将安装并退出当前程序；装完会自动清理临时安装包。"
+            )
+            box.setStandardButtons(QMessageBox.StandardButton.Ok)
+            box.button(QMessageBox.StandardButton.Ok).setText("立即安装")
+            box.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
+            box.exec()
+        else:
+            reply = QMessageBox.question(
+                self._window,
+                "安装更新",
+                f"新版本 {ver} 已下载完成。\n是否现在安装？\n（安装时程序会退出；装完会自动删临时安装包）",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                # 保留底栏「安装」，别让人找不到入口
+                self._show_ready_chrome(setup, ver)
+                return
         try:
             launch_installer_and_exit(setup)
         except Exception as exc:  # noqa: BLE001
             self._show_ready_chrome(setup, ver)
             QMessageBox.warning(self._window, "更新失败", f"无法启动安装程序：{exc}")
+            if self._force:
+                self._schedule_force_reoffer(self._info)
 
     def _on_finished(self, path, err) -> None:
         info = self._info
+        force = self._force
+        self._close_force_dlg()
         self._hide_download_chrome()
         if err == "__cancelled__":
             self._clear_ready_chrome()
             if self._host_bar is not None:
                 self._host_bar.showMessage("已取消更新下载", 4000)
+            if force:
+                self._schedule_force_reoffer(info)
             return
         if err or path is None:
             self._clear_ready_chrome()
@@ -364,6 +520,8 @@ class UpdateController(QObject):
             if "10060" in tip or "超时" in tip or "timed out" in tip.lower():
                 tip += "\n\n网络不稳定时可稍后重试，或打开 Release 页手动下载。"
             QMessageBox.warning(self._window, "更新失败", tip)
+            if force:
+                self._schedule_force_reoffer(info)
             return
 
         setup = Path(path)

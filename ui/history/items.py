@@ -8,6 +8,29 @@ from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal
 from core.paths import styles_dir
 
 
+_ACTION_STYLE = """
+QPushButton {
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 26px;
+    max-height: 26px;
+    padding: 0;
+    margin: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+}
+"""
+_ACTION_HOVER_BLUE = (
+    "QPushButton:hover { background: rgba(59,130,246,0.16); }"
+    "QPushButton:pressed { background: rgba(59,130,246,0.28); }"
+)
+_ACTION_HOVER_RED = (
+    "QPushButton:hover { background: rgba(239,68,68,0.16); }"
+    "QPushButton:pressed { background: rgba(239,68,68,0.3); }"
+)
+
+
 class ElidedLabel(QLabel):
     """单行降级标签：全名放得下显示全名，放不下显示简称，简称也放不下才截断。"""
 
@@ -48,10 +71,12 @@ class HistoryItemWidget(QWidget):
     deleted = pyqtSignal(object)
     clicked = pyqtSignal(object)
     copy_requested = pyqtSignal(object)
+    pin_toggled = pyqtSignal(object)
 
-    def __init__(self, text, short="", parent=None):
+    def __init__(self, text, short="", pinned=False, parent=None):
         super().__init__(parent)
         self._full_text = str(text or "")
+        self._pinned = bool(pinned)
         self.setObjectName("historyItem")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setMinimumHeight(44)
@@ -61,13 +86,33 @@ class HistoryItemWidget(QWidget):
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 8, 10, 8)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
 
         self.label = ElidedLabel(self._full_text, short)
         self.label.setObjectName("historyText")
         self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         layout.addWidget(self.label, 1)
+
+        # 置顶 / 复制 / 删除并排，间距一致
+        actions = QWidget(self)
+        actions.setObjectName("historyActions")
+        actions.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        actions_layout = QHBoxLayout(actions)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        actions_layout.setSpacing(2)
+
+        self.pin_btn = QPushButton()
+        self.pin_btn.setObjectName("historyPinButton")
+        self.pin_btn.setFixedSize(28, 26)
+        self.pin_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.pin_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.pin_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.pin_btn.setIconSize(QSize(18, 18))
+        self.pin_btn.clicked.connect(self._on_pin)
+        self.pin_btn.setStyleSheet(_ACTION_STYLE + _ACTION_HOVER_BLUE)
+        actions_layout.addWidget(self.pin_btn)
+        self._apply_pin_icon()
 
         self.copy_btn = QPushButton()
         self.copy_btn.setObjectName("historyCopyButton")
@@ -76,13 +121,12 @@ class HistoryItemWidget(QWidget):
         self.copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.copy_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.copy_btn.setToolTip("复制这条历史记录的简称引用")
-        self.copy_btn.setIcon(
-            QIcon(str(styles_dir() / "history-copy.svg"))
-        )
+        self.copy_btn.setIcon(QIcon(str(styles_dir() / "history-copy.svg")))
         self.copy_btn.setIconSize(QSize(18, 18))
         self.copy_btn.clicked.connect(self._on_copy)
-        layout.addWidget(self.copy_btn, 0, Qt.AlignmentFlag.AlignVCenter)
-        # 长引用被省略时，完整内容放到行级 tooltip
+        self.copy_btn.setStyleSheet(_ACTION_STYLE + _ACTION_HOVER_BLUE)
+        actions_layout.addWidget(self.copy_btn)
+
         self.setToolTip(self._full_text)
 
         self.delete_btn = QPushButton()
@@ -92,37 +136,28 @@ class HistoryItemWidget(QWidget):
         self.delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.delete_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.delete_btn.setToolTip("删除这条历史记录")
-        self.delete_btn.setIcon(
-            QIcon(str(styles_dir() / "history-delete.svg"))
-        )
+        self.delete_btn.setIcon(QIcon(str(styles_dir() / "history-delete.svg")))
         self.delete_btn.setIconSize(QSize(18, 18))
         self.delete_btn.clicked.connect(self._on_delete)
-        layout.addWidget(self.delete_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.delete_btn.setStyleSheet(_ACTION_STYLE + _ACTION_HOVER_RED)
+        actions_layout.addWidget(self.delete_btn)
 
-        # 两个操作按钮无边框、纯图标；hover 反馈各自接。
-        action_style = """
-        QPushButton {
-            min-width: 28px;
-            max-width: 28px;
-            min-height: 26px;
-            max-height: 26px;
-            padding: 0;
-            margin: 0;
-            border: none;
-            border-radius: 6px;
-            background: transparent;
-        }
-        """
-        self.copy_btn.setStyleSheet(
-            action_style
-            + "QPushButton:hover { background: rgba(59,130,246,0.16); }"
-            + "QPushButton:pressed { background: rgba(59,130,246,0.28); }"
-        )
-        self.delete_btn.setStyleSheet(
-            action_style
-            + "QPushButton:hover { background: rgba(239,68,68,0.16); }"
-            + "QPushButton:pressed { background: rgba(239,68,68,0.3); }"
-        )
+        layout.addWidget(actions, 0, Qt.AlignmentFlag.AlignVCenter)
+
+    def _apply_pin_icon(self):
+        name = "history-pin-on.svg" if self._pinned else "history-pin.svg"
+        self.pin_btn.setIcon(QIcon(str(styles_dir() / name)))
+        self.pin_btn.setToolTip("取消置顶" if self._pinned else "置顶")
+
+    def set_pinned(self, pinned):
+        pinned = bool(pinned)
+        if self._pinned == pinned:
+            return
+        self._pinned = pinned
+        self._apply_pin_icon()
+
+    def is_pinned(self):
+        return self._pinned
 
     def set_text(self, text, short=""):
         """更新这一行的全名与简称（增量刷新用），显示形态由标签按真实宽度选。"""
@@ -141,16 +176,16 @@ class HistoryItemWidget(QWidget):
         style.polish(self)
         self.update()
 
+    def _on_pin(self):
+        self.pin_toggled.emit(self)
+
     def _on_copy(self):
-        """发出复制当前记录的信号。"""
         self.copy_requested.emit(self)
 
     def _on_delete(self):
-        """发出删除当前记录的信号。"""
         self.deleted.emit(self)
 
     def mousePressEvent(self, event):
-        """处理历史记录点击事件。"""
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(self)
         super().mousePressEvent(event)
@@ -162,6 +197,7 @@ class HistoryListWidget(QScrollArea):
     item_clicked = pyqtSignal(object)
     item_deleted = pyqtSignal(object)
     item_copy_requested = pyqtSignal(object)
+    item_pin_toggled = pyqtSignal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -183,7 +219,13 @@ class HistoryListWidget(QScrollArea):
         self._selected = -1
         self._pending_scroll = 0
 
-    def set_entries(self, texts, selected_index=-1, shorts=None):
+    def _wire_row(self, row):
+        row.clicked.connect(self.item_clicked.emit)
+        row.deleted.connect(self.item_deleted.emit)
+        row.copy_requested.connect(self.item_copy_requested.emit)
+        row.pin_toggled.connect(self.item_pin_toggled.emit)
+
+    def set_entries(self, texts, selected_index=-1, shorts=None, pinned=None):
         """刷新历史记录列表并恢复滚动位置。"""
         bar = self.verticalScrollBar()
         old_value = bar.value()
@@ -194,18 +236,20 @@ class HistoryListWidget(QScrollArea):
         self._selected = -1
 
         shorts = shorts or []
+        pinned = pinned or []
         for index, text in enumerate(texts):
-            row = HistoryItemWidget(text, shorts[index] if index < len(shorts) else "")
-            row.clicked.connect(self.item_clicked.emit)
-            row.deleted.connect(self.item_deleted.emit)
-            row.copy_requested.connect(self.item_copy_requested.emit)
+            row = HistoryItemWidget(
+                text,
+                shorts[index] if index < len(shorts) else "",
+                pinned=bool(pinned[index]) if index < len(pinned) else False,
+            )
+            self._wire_row(row)
             self._layout.insertWidget(index, row)
             self._rows.append(row)
 
         if 0 <= selected_index < len(self._rows):
             self.set_selected_index(selected_index)
 
-        # 布局激活后 maximum 才是新列表的；立即 setValue 会被旧值 clamp 造成跳动
         self._pending_scroll = old_value
         QTimer.singleShot(0, self._restore_scroll_value)
 
@@ -213,34 +257,34 @@ class HistoryListWidget(QScrollArea):
         bar = self.verticalScrollBar()
         try:
             bar.setValue(min(self._pending_scroll, bar.maximum()))
-        except RuntimeError:  # 列表已销毁（测试/关窗场景的延迟触发）
+        except RuntimeError:
             pass
 
     def set_selected_index(self, index):
-        """设置当前选中的历史记录。"""
         self._selected = index if 0 <= index < len(self._rows) else -1
         for i, row in enumerate(self._rows):
             row.set_selected(i == self._selected)
 
     def selected_index(self):
-        """返回当前选中历史记录的索引。"""
         return self._selected
 
     def index_of(self, row):
-        """返回行 widget 对应的数据位置；行已不在列表时返回 -1。"""
         try:
             return self._rows.index(row)
         except ValueError:
             return -1
 
     def update_entry_text(self, index, text, short=""):
-        """只改一行的文字（方向键微调历史条目时避免整列重建闪烁）。"""
         if not 0 <= index < len(self._rows):
             return
         self._rows[index].set_text(text, short)
 
+    def set_entry_pinned(self, index, pinned):
+        if not 0 <= index < len(self._rows):
+            return
+        self._rows[index].set_pinned(pinned)
+
     def remove_entry(self, index):
-        """只摘除一行，其余行不动；选中位随删除平移。"""
         if not 0 <= index < len(self._rows):
             return
         row = self._rows.pop(index)
@@ -253,18 +297,14 @@ class HistoryListWidget(QScrollArea):
         if self._selected >= 0:
             self.set_selected_index(self._selected)
 
-    def insert_entry(self, index, text, short=""):
-        """在 index 处插入一行新 widget（不销毁既有行）。"""
-        row = HistoryItemWidget(text, short)
-        row.clicked.connect(self.item_clicked.emit)
-        row.deleted.connect(self.item_deleted.emit)
-        row.copy_requested.connect(self.item_copy_requested.emit)
+    def insert_entry(self, index, text, short="", pinned=False):
+        row = HistoryItemWidget(text, short, pinned=pinned)
+        self._wire_row(row)
         self._layout.insertWidget(index, row)
         self._rows.insert(index, row)
         return row
 
     def move_entry(self, from_idx, to_idx):
-        """把一行从 from_idx 挪到 to_idx（复用同一 widget，不销毁不重建）。"""
         if from_idx == to_idx or not 0 <= from_idx < len(self._rows):
             return
         to_idx = max(0, min(to_idx, len(self._rows) - 1))
@@ -275,5 +315,4 @@ class HistoryListWidget(QScrollArea):
             self._layout.insertWidget(to_idx, item.widget())
 
     def clear(self):
-        """清空全部历史记录。"""
         self.set_entries([])

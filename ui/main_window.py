@@ -1831,13 +1831,22 @@ class MainWindow(QMainWindow):
             return 0.0
 
     def _replace_history_selection(self, old_selection, new_selection):
+        from dataclasses import replace
+
         history = getattr(self.nav_panel, "history", None)
-        if not history:
+        if not history or old_selection is None:
             return
         for index, item in enumerate(history):
-            if item == old_selection:
-                history[index] = new_selection
-                self.nav_panel.update_history_entry(index, new_selection)
+            # 不比 pinned：列表里置顶后 current_selection 可能仍是未置顶副本
+            if (
+                item.book == old_selection.book
+                and item.spans == old_selection.spans
+                and item.bible_file == old_selection.bible_file
+            ):
+                history[index] = replace(
+                    new_selection, pinned=bool(getattr(item, "pinned", False))
+                )
+                self.nav_panel.update_history_entry(index, history[index])
                 self.nav_panel.history_changed.emit(
                     [entry.to_history_entry() for entry in history]
                 )
@@ -1968,6 +1977,23 @@ class MainWindow(QMainWindow):
             self._syncing_scroll = False
 
     def closeEvent(self, event):
+        # 强制更新进行中：禁止关主窗口逃升级
+        try:
+            from ui.update_prompt import UpdateController
+
+            ctrl = getattr(self, "_update_controller", None)
+            if isinstance(ctrl, UpdateController) and ctrl.blocks_app_close():
+                from PyQt6.QtWidgets import QMessageBox
+
+                QMessageBox.information(
+                    self,
+                    "请先完成更新",
+                    "正在进行重要更新，请先下载并安装后再关闭。",
+                )
+                event.ignore()
+                return
+        except Exception:
+            pass
         editor = getattr(self, "_sermon_editor", None)
         if editor is not None:
             # 彻底关程序才问保存；叠层本身回经文不弹窗

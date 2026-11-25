@@ -1,6 +1,7 @@
-"""微读圣经格式 bible_*.db → 经文投影应用格式 转换工具。
+"""主内圣经格式 bible_*.db → 经文投影应用格式 转换工具。
 
-源格式（微读）:
+数据来源：主内圣经（思高本除外；思高本见万有真原 / tools/fetch_sigao_psalm_titles.py）。
+源格式（主内圣经）:
     bible              bid/bn/bnm/cid/vid/txt/content（content 为富文本块 JSON）
     bible_catalog      id/name/name_min/chapter_count/chapters
     bible_summary      title（版本名）
@@ -31,6 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from core.bible_versions import _probe_bible_name  # noqa: E402
+from core.database import sanitize_verse_text  # noqa: E402
 
 # 和合本.db 的书卷拼音码，按 Books.id 对照（转换时中文直接抄，英文追加缩写）
 DEFAULT_BIBLE = REPO_ROOT / "resources" / "和合本.db"
@@ -42,7 +44,7 @@ KNOWN_FILES = {
     "bible_cuhwv_simple.db": ("文理和合译本.db", "文理和合译本", "CUHWV1", "简体中文", "zh-CN", "zh", True),
     "bible_cuhwv_traditional.db": ("文理和合译本繁体.db", "文理和合譯本", "CUHWVT1", "繁体中文", "zh-TW", "zh", True),
     "bible_english_standard_version.db": ("ESV.db", "ESV", "ESV1", "English", "en", "en", True),
-    "bible_new_international_version.db": ("NIV微读.db", "NIV", "NIV2", "English", "en", "en", False),
+    "bible_new_international_version.db": ("NIV主内.db", "NIV", "NIV2", "English", "en", "en", False),
 }
 
 NIV_COPYRIGHT = (
@@ -100,13 +102,14 @@ def clean_body(text: str, lang: str, keep_m: bool) -> str:
         text = FOOTNOTE_RE.sub("", text)
         text = re.sub(r"</?m>", "", text)  # 残留散标签（如 <m><m>… 无闭合）
     text = TAG_RE.sub("", text)
+    text = sanitize_verse_text(text)  # 主内圣经串珠 {{[…]} } 及紧随缩写引用
     if lang == "en":
         text = re.sub(r"\s{2,}", " ", text)
     return text.strip()
 
 
 def join_blocks(parts: list[str], lang: str) -> str:
-    """块拼接：中文直接相连（微读 txt 同款），英文按词补空格；
+    """块拼接：中文直接相连（与源 txt 同款），英文按词补空格；
     含 \\n 的段（内联标签）两侧不加分隔符。"""
     out = ""
     for p in parts:
@@ -302,7 +305,7 @@ def convert(source: Path, dest: Path, name: str, ver_id: str, lang_name: str,
         ("name", name),
         ("shortname", name),
         ("copyright", copyright),
-        ("source", f"微读圣经格式文件 {source.name}"),
+        ("source", f"主内圣经格式文件 {source.name}"),
     ]
     out.executemany("INSERT INTO metadata(name, value) VALUES (?,?)", meta)
     out.commit()

@@ -2,7 +2,7 @@
 ; Copyright © 2026 XiaoDong and JiangRTTTR
 
 #define MyAppName "Bible Pro"
-#define MyAppVersion "3.3.1"
+#define MyAppVersion "3.4.0"
 #define MyAppPublisher "XiaoDong & JiangRTTTR"
 #define MyAppExeName "Bible Pro.exe"
 ; Paths are relative to this .iss file (project root), so the script works on any machine.

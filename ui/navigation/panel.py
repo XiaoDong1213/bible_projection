@@ -178,6 +178,7 @@ class NavigationPanel(QWidget):
         self.history_list.item_clicked.connect(self._on_history_clicked)
         self.history_list.item_deleted.connect(self._delete_history)
         self.history_list.item_copy_requested.connect(self._copy_history)
+        self.history_list.item_pin_toggled.connect(self._toggle_history_pin)
         hl.addWidget(self.history_list, 1)
         clear_btn = QPushButton("清空历史")
         clear_btn.setObjectName("clearHistoryBtn")
@@ -845,15 +846,26 @@ class NavigationPanel(QWidget):
                     except Exception:
                         pass
                 self.history.append(normalize_selection(self.db, selection))
+        self._sort_history_pins()
         self.history = self.history[:30]
         self._update_history_list()
         # 补标结果随广播固化到 config，下次启动不再依赖补标
         self.history_changed.emit([item.to_history_entry() for item in self.history])
 
+    def _sort_history_pins(self):
+        """置顶条目固定在列表最前，组内保持相对顺序。"""
+        pinned = [h for h in self.history if getattr(h, "pinned", False)]
+        rest = [h for h in self.history if not getattr(h, "pinned", False)]
+        self.history = pinned + rest
+
+    def _pinned_count(self):
+        return sum(1 for h in self.history if getattr(h, "pinned", False))
 
     def add_selection_to_history(self, selection: ScriptureSelection):
         if selection is None:
             return
+        from dataclasses import replace
+
         selection = normalize_selection(self.db, selection)
         try:
             # frozen dataclass：沿类内惯例用 object.__setattr__ 打上版本标记
@@ -872,21 +884,25 @@ class NavigationPanel(QWidget):
             ),
             -1,
         )
+        pinned_flag = bool(getattr(self.history[old_idx], "pinned", False)) if old_idx >= 0 else False
+        selection = replace(selection, pinned=pinned_flag)
         if old_idx >= 0:
-            self.history = [
-                item for i, item in enumerate(self.history) if i != old_idx
-            ]
-        self.history.insert(0, selection)
+            del self.history[old_idx]
+        # 置顶区不动：普通新记录插在置顶区下；已置顶重访回到置顶区顶
+        insert_at = 0 if pinned_flag else self._pinned_count()
+        self.history.insert(insert_at, selection)
         self.history = self.history[:30]
-        # UI 增量：新条目插顶、重访把原行挪顶（复用 widget），不整列重建
+
         rows = self.history_list._rows
-        if old_idx == -1 and len(rows) >= 30:
-            self.history_list.remove_entry(len(rows) - 1)
         if old_idx == -1:
-            self.history_list.insert_entry(0, "", "")
+            if len(rows) >= 30:
+                self.history_list.remove_entry(len(rows) - 1)
+            self.history_list.insert_entry(insert_at, "", "", pinned=pinned_flag)
         else:
-            self.history_list.move_entry(old_idx, 0)
-        # 逐行同步文字：新行填内容，旧行在标注条件变化时跟随（同文本自动跳过重绘）
+            to = insert_at if old_idx >= insert_at else max(0, insert_at - 1)
+            self.history_list.move_entry(old_idx, to)
+            self.history_list.set_entry_pinned(to, pinned_flag)
+
         name_map = self._history_version_names()
         for i, item in enumerate(self.history):
             self.history_list.update_entry_text(
@@ -894,7 +910,8 @@ class NavigationPanel(QWidget):
                 self._history_label(item, name_map),
                 self._history_short_label(item, self.db._short_name(item.book)),
             )
-        self.history_list.set_selected_index(0)
+            self.history_list.set_entry_pinned(i, bool(getattr(item, "pinned", False)))
+        self.history_list.set_selected_index(insert_at)
         self.history_changed.emit([item.to_history_entry() for item in self.history])
 
     def _history_version_names(self):
@@ -918,11 +935,14 @@ class NavigationPanel(QWidget):
 
     def _update_history_list(self, selected_index=-1):
         name_map = self._history_version_names()
-        texts, shorts = [], []
+        texts, shorts, pins = [], [], []
         for entry in self.history:
             texts.append(self._history_label(entry, name_map))
             shorts.append(self._history_short_label(entry, self.db._short_name(entry.book)))
-        self.history_list.set_entries(texts, selected_index=selected_index, shorts=shorts)
+            pins.append(bool(getattr(entry, "pinned", False)))
+        self.history_list.set_entries(
+            texts, selected_index=selected_index, shorts=shorts, pinned=pins
+        )
 
     def update_history_entry(self, index, selection):
         """方向键微调后只更新一条历史行的文字，避免整列重建闪烁。"""
@@ -976,7 +996,27 @@ class NavigationPanel(QWidget):
                 self._history_label(entry, name_map),
                 self._history_short_label(entry, self.db._short_name(entry.book)),
             )
+            self.history_list.set_entry_pinned(i, bool(getattr(entry, "pinned", False)))
         self.history_changed.emit([item.to_history_entry() for item in self.history])
+
+    def _toggle_history_pin(self, row):
+        """点图钉：置顶 ↔ 取消；置顶区固定在列表最前。"""
+        from dataclasses import replace
+
+        index = self.history_list.index_of(row)
+        if not 0 <= index < len(self.history):
+            return
+        item = self.history[index]
+        updated = replace(item, pinned=not bool(getattr(item, "pinned", False)))
+        self.history[index] = updated
+        self._sort_history_pins()
+        # 用替换后的对象身份定位，避免两条相同经文时选错行
+        try:
+            selected = self.history.index(updated)
+        except ValueError:
+            selected = -1
+        self._update_history_list(selected_index=selected)
+        self.history_changed.emit([h.to_history_entry() for h in self.history])
 
     def _clear_history(self):
         self.history.clear()

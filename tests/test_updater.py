@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
+import sys
 import unittest
 
-from core.updater import _candidate_download_urls, is_newer, parse_version
+from core.updater import (
+    UpdateInfo,
+    _candidate_download_urls,
+    _parse_release_payload,
+    is_newer,
+    notes_request_force_update,
+    parse_version,
+    strip_force_update_marker,
+)
 
 
 class UpdaterVersionTests(unittest.TestCase):
@@ -18,6 +27,77 @@ class UpdaterVersionTests(unittest.TestCase):
         self.assertFalse(is_newer("2.1.0", "2.1.0"))
         self.assertFalse(is_newer("2.0.0", "2.1.0"))
         self.assertTrue(is_newer("v2.1.1", "2.1.0"))
+
+    def test_force_update_marker(self):
+        self.assertTrue(notes_request_force_update("<!-- force_update -->\n## 修复"))
+        self.assertTrue(notes_request_force_update("前言\n<!-- Force_Update -->\n后"))
+        self.assertFalse(notes_request_force_update("## 普通更新\n无强制"))
+        cleaned = strip_force_update_marker("<!-- force_update -->\n## 串珠修复")
+        self.assertEqual(cleaned, "## 串珠修复")
+        self.assertNotIn("force_update", cleaned)
+
+    def test_parse_release_force_flag(self):
+        payload = {
+            "tag_name": "v3.4.0",
+            "body": "<!-- force_update -->\n### 重要\n串珠修复",
+            "assets": [
+                {
+                    "name": "Bible_Pro_Setup.exe",
+                    "browser_download_url": (
+                        "https://github.com/XiaoDong1213/bible_projection"
+                        "/releases/download/v3.4.0/Bible_Pro_Setup.exe"
+                    ),
+                    "size": 12,
+                }
+            ],
+        }
+        info = _parse_release_payload(payload)
+        self.assertIsNotNone(info)
+        assert info is not None
+        self.assertTrue(info.force)
+        self.assertEqual(info.version, "3.4.0")
+        self.assertIn("串珠修复", info.notes)
+        self.assertNotIn("force_update", info.notes)
+
+        payload["body"] = "### 小改\n无标记"
+        info2 = _parse_release_payload(payload)
+        self.assertIsNotNone(info2)
+        assert info2 is not None
+        self.assertFalse(info2.force)
+
+    def test_force_offer_dialog_rejects_stays_open(self):
+        from PyQt6.QtWidgets import QApplication, QMainWindow
+
+        from ui.update_prompt import UpdateController, UpdateOfferDialog
+
+        app = QApplication.instance() or QApplication(sys.argv)
+        info = UpdateInfo(
+            version="3.4.0",
+            download_url="https://example.com/x.exe",
+            notes="重要",
+            asset_name="Bible_Pro_Setup.exe",
+            force=True,
+        )
+        dlg = UpdateOfferDialog(info)
+        dlg.show()
+        app.processEvents()
+        dlg.reject()
+        self.assertTrue(dlg.isVisible())
+        dlg._force = False
+        dlg.close()
+        app.processEvents()
+
+        host = QMainWindow()
+        ctrl = UpdateController(host)
+        ctrl._force = True
+        ctrl._busy = True
+        self.assertTrue(ctrl.blocks_app_close())
+        ctrl._busy = False
+        ctrl._offering = True
+        self.assertTrue(ctrl.blocks_app_close())
+        ctrl._force = False
+        self.assertFalse(ctrl.blocks_app_close())
+        host.close()
 
     def test_download_via_gh_proxy(self):
         official = "https://github.com/XiaoDong1213/bible_projection/releases/download/v2.1.0/Bible_Pro_Setup.exe"

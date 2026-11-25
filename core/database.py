@@ -7,6 +7,28 @@ from .paths import database_path
 
 logger = logging.getLogger(__name__)
 
+# 主内圣经正文串珠：剥 {{[…]} } 与紧随缩写串珠（创15:6）；
+# 「士师记9章1节」「历代志上3章1节作…」「…节同」等人类可读引用一律保留。
+_INLINE_XREF_RE = re.compile(
+    r"\{\{+.*?\}{2,}"
+    r"(?:"
+    # 创15:6 / 出20:13;申5:17 / 诗91:11,12 / 申24:1-3
+    r"(?:[\u4e00-\u9fff]{1,4})?\d{1,3}\s*[:：·.]\s*\d{1,3}"
+    r"(?:\s*[,，]\s*\d{1,3})*"
+    r"(?:\s*[-–—]\s*\d{1,3})?"
+    r"(?:\s*;\s*(?:[\u4e00-\u9fff]{1,4})?\d{1,3}\s*[:：·.]\s*\d{1,3}"
+    r"(?:\s*[,，]\s*\d{1,3})*(?:\s*[-–—]\s*\d{1,3})?)*"
+    r")?",
+    re.DOTALL,
+)
+
+
+def sanitize_verse_text(text: str) -> str:
+    """剥机器串珠块与缩写引用；书名+章节、校勘注、节同等人类可读文字保留。"""
+    if not text or "{{" not in text:
+        return text
+    return _INLINE_XREF_RE.sub("", text)
+
 
 class BibleDatabase:
     """负责数据库连接、书卷索引和经文查询（带章级缓存）。"""
@@ -331,7 +353,10 @@ class BibleDatabase:
             f"ORDER BY {self._quote(self.verse_col)}"
         )
         raw_rows = self.conn.execute(sql, (book_value, chapter)).fetchall()
-        rows = [(int(r["verse"]), str(r["text"] or "")) for r in raw_rows]
+        rows = [
+            (int(r["verse"]), sanitize_verse_text(str(r["text"] or "")))
+            for r in raw_rows
+        ]
         result = []
         current = None
         for verse, text in rows:

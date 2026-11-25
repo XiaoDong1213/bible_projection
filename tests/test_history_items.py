@@ -50,16 +50,32 @@ class HistoryItemsTests(unittest.TestCase):
         self.assertEqual(self.listw.index_of(orphan), -1)
 
     def test_buttons_compact_icons_always_visible(self):
-        """按钮为 28px 彩色 SVG 图标、常驻显示。"""
+        """按钮为 28px 彩色 SVG 图标、常驻显示（置顶在复制左侧）。"""
         row = HistoryItemWidget("创 1:1-5")
+        self.assertTrue(row.pin_btn.isVisibleTo(row))
         self.assertTrue(row.copy_btn.isVisibleTo(row))
         self.assertTrue(row.delete_btn.isVisibleTo(row))
+        self.assertEqual(row.pin_btn.width(), 28)
         self.assertEqual(row.copy_btn.width(), 28)
         self.assertEqual(row.delete_btn.width(), 28)
+        self.assertFalse(row.pin_btn.icon().isNull())
         self.assertFalse(row.copy_btn.icon().isNull())
         self.assertFalse(row.delete_btn.icon().isNull())
+        self.assertFalse(row.pin_btn.text())
         self.assertFalse(row.copy_btn.text())
         self.assertFalse(row.delete_btn.text())
+        self.assertFalse(row.is_pinned())
+        row.set_pinned(True)
+        self.assertTrue(row.is_pinned())
+
+    def test_pin_signal_emits_row(self):
+        self.listw.set_entries(["a", "b"], pinned=[False, True])
+        got = []
+        self.listw.item_pin_toggled.connect(got.append)
+        row = self.listw._rows[1]
+        self.assertTrue(row.is_pinned())
+        row._on_pin()
+        self.assertEqual(got, [row])
 
     def test_narrow_row_shows_short_not_ellipsis(self):
         """按标签真实宽度降级：全名放得下显示全名，放不下显示简称，极窄才截断。

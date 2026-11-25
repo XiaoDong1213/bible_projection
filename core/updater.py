@@ -38,6 +38,13 @@ _RANGE_TIMEOUT = 25  # 单段读超时（秒），卡住就重试该段
 _CHECK_RETRIES = 3  # 检查更新轮数：镜像的 TLS 重置是阵发的，多轮显著提高成功率
 
 
+# Release 正文一次性标记：有则强制升级；下次发版不加即自动恢复可选更新
+_FORCE_UPDATE_MARKER = re.compile(
+    r"<!--\s*force_update\s*-->",
+    re.IGNORECASE,
+)
+
+
 @dataclass(frozen=True)
 class UpdateInfo:
     version: str
@@ -45,6 +52,7 @@ class UpdateInfo:
     notes: str
     asset_name: str
     size: int | None = None
+    force: bool = False
 
 
 class DownloadCancelled(Exception):
@@ -64,6 +72,17 @@ def parse_version(raw: str) -> tuple[int, ...]:
 
 def is_newer(remote: str, local: str = APP_VERSION) -> bool:
     return parse_version(remote) > parse_version(local)
+
+
+def notes_request_force_update(notes: str) -> bool:
+    """Release body 含 <!-- force_update --> 则为强制更新。"""
+    return bool(_FORCE_UPDATE_MARKER.search(str(notes or "")))
+
+
+def strip_force_update_marker(notes: str) -> str:
+    """展示给用户的更新说明去掉强制标记，避免露出 HTML 注释。"""
+    text = _FORCE_UPDATE_MARKER.sub("", str(notes or ""))
+    return text.strip()
 
 
 def _http_get(url: str, *, timeout: float = 20.0, accept: str | None = None) -> bytes:
@@ -122,7 +141,9 @@ def _parse_release_payload(data: dict) -> UpdateInfo | None:
     if not tag:
         return None
     version = tag.lstrip("vV")
-    notes = str(data.get("body") or "").strip()
+    raw_notes = str(data.get("body") or "").strip()
+    force = notes_request_force_update(raw_notes)
+    notes = strip_force_update_marker(raw_notes)
     assets = list(data.get("assets") or [])
     chosen = None
     for asset in assets:
@@ -152,6 +173,7 @@ def _parse_release_payload(data: dict) -> UpdateInfo | None:
         notes=notes,
         asset_name=name or _SETUP_FIXED,
         size=size,
+        force=force,
     )
 
 
@@ -183,6 +205,7 @@ def fetch_latest_release() -> UpdateInfo | None:
                             notes=info.notes,
                             asset_name=info.asset_name or _SETUP_FIXED,
                             size=info.size,
+                            force=info.force,
                         )
                     return info
                 errors = [f"{api}: no setup asset"]

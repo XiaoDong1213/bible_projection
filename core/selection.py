@@ -46,6 +46,7 @@ class ScriptureSelection:
     book: str
     spans: tuple[VerseSpan, ...]
     bible_file: str = ""  # 产生该记录的圣经版本文件名（历史记录标注用）
+    pinned: bool = False  # 历史列表置顶
 
     def __post_init__(self):
         if not self.book:
@@ -53,6 +54,7 @@ class ScriptureSelection:
         if not self.spans:
             raise ValueError("spans must not be empty")
         object.__setattr__(self, "spans", tuple(self.spans))
+        object.__setattr__(self, "pinned", bool(self.pinned))
 
     @classmethod
     def single_chapter(
@@ -155,6 +157,8 @@ class ScriptureSelection:
         }
         if self.bible_file:
             entry["bible_file"] = self.bible_file
+        if self.pinned:
+            entry["pinned"] = True
         return entry
 
     @classmethod
@@ -172,6 +176,7 @@ class ScriptureSelection:
                     book=book,
                     spans=spans,
                     bible_file=str(entry.get("bible_file", "") or ""),
+                    pinned=bool(entry.get("pinned", False)),
                 )
             if isinstance(entry, (list, tuple)) and len(entry) == 4:
                 return cls.from_legacy(entry[0], entry[1], entry[2], entry[3])
