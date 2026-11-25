@@ -39,7 +39,7 @@ CONTRIBUTORS_TEXT = (
     "Xiao Dong、JiangRTTTR\n"
     "也感谢每一位反馈意见与建议的弟兄姊妹。\n"
     "感谢主内云实验室提供数据支持。\n"
-    "经文数据来源：主内圣经；思高本另采万有真原。"
+    "经文数据来源：主内圣经；思高本：万有真原。"
 )
 
 COPYRIGHT_TEXT = f"Copyright © 2026 Bible Pro · Version {APP_VERSION}"

@@ -1,6 +1,6 @@
 """主内圣经格式 bible_*.db → 经文投影应用格式 转换工具。
 
-数据来源：主内圣经（思高本除外；思高本见万有真原 / tools/fetch_sigao_psalm_titles.py）。
+数据来源：主内圣经；思高本：万有真原（见 tools/fetch_sigao_psalm_titles.py）。
 源格式（主内圣经）:
     bible              bid/bn/bnm/cid/vid/txt/content（content 为富文本块 JSON）
     bible_catalog      id/name/name_min/chapter_count/chapters

@@ -265,7 +265,7 @@ dist/Bible Pro/Bible Pro.exe
 
 感谢 [主内云实验室](https://biblepro.vip) 提供数据支持。
 
-经文数据来源：[主内圣经](https://biblepro.vip)；思高本另采 [万有真原](https://www.wanyouzhenyuan.cn)。
+经文数据来源：[主内圣经](https://biblepro.vip)；思高本：[万有真原](https://www.wanyouzhenyuan.cn)。
 
 ```text
 Copyright © 2026 XiaoDong and JiangRTTTR
