@@ -29,12 +29,15 @@ class UpdaterVersionTests(unittest.TestCase):
         self.assertTrue(is_newer("v2.1.1", "2.1.0"))
 
     def test_force_update_marker(self):
-        self.assertTrue(notes_request_force_update("<!-- force_update -->\n## 修复"))
-        self.assertTrue(notes_request_force_update("前言\n<!-- Force_Update -->\n后"))
-        self.assertFalse(notes_request_force_update("## 普通更新\n无强制"))
+        from core import updater as updater_mod
+
         cleaned = strip_force_update_marker("<!-- force_update -->\n## 串珠修复")
         self.assertEqual(cleaned, "## 串珠修复")
         self.assertNotIn("force_update", cleaned)
+        # 3.4.0 后总开关关闭：有标记也不强制
+        self.assertFalse(updater_mod._FORCE_UPDATE_ENABLED)
+        self.assertFalse(notes_request_force_update("<!-- force_update -->\n## 修复"))
+        self.assertFalse(notes_request_force_update("## 普通更新\n无强制"))
 
     def test_parse_release_force_flag(self):
         payload = {
@@ -54,7 +57,7 @@ class UpdaterVersionTests(unittest.TestCase):
         info = _parse_release_payload(payload)
         self.assertIsNotNone(info)
         assert info is not None
-        self.assertTrue(info.force)
+        self.assertFalse(info.force)  # 总开关关闭
         self.assertEqual(info.version, "3.4.0")
         self.assertIn("串珠修复", info.notes)
         self.assertNotIn("force_update", info.notes)

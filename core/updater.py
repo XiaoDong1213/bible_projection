@@ -38,11 +38,13 @@ _RANGE_TIMEOUT = 25  # 单段读超时（秒），卡住就重试该段
 _CHECK_RETRIES = 3  # 检查更新轮数：镜像的 TLS 重置是阵发的，多轮显著提高成功率
 
 
-# Release 正文一次性标记：有则强制升级；下次发版不加即自动恢复可选更新
+# Release 正文一次性标记（3.4.0 已用过）。解析仍去掉展示用标记；强制开关已关闭。
 _FORCE_UPDATE_MARKER = re.compile(
     r"<!--\s*force_update\s*-->",
     re.IGNORECASE,
 )
+# 3.4.0 一次性强制已结束。需要再强制时改 True，并在该版 Release 正文加 <!-- force_update -->。
+_FORCE_UPDATE_ENABLED = False
 
 
 @dataclass(frozen=True)
@@ -75,7 +77,9 @@ def is_newer(remote: str, local: str = APP_VERSION) -> bool:
 
 
 def notes_request_force_update(notes: str) -> bool:
-    """Release body 含 <!-- force_update --> 则为强制更新。"""
+    """Release body 含 <!-- force_update --> 且总开关打开时强制更新。"""
+    if not _FORCE_UPDATE_ENABLED:
+        return False
     return bool(_FORCE_UPDATE_MARKER.search(str(notes or "")))
 
 
